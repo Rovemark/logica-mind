@@ -59,6 +59,11 @@ export default function App() {
   const colorsRef = useRef<Record<string, string>>({});
   const t = useMemo(() => makeT(lang), [lang]);
   const setLang = (l: Lang) => { saveLang(l); setLangState(l); };
+  // right-to-left for Arabic; also set <html lang> for a11y
+  useEffect(() => {
+    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   const loadNs = () => api.namespaces().then((d) => {
     d.namespaces.forEach((n, i) => { if (!(n.namespace in colorsRef.current)) colorsRef.current[n.namespace] = PALETTE[i % PALETTE.length]; });
