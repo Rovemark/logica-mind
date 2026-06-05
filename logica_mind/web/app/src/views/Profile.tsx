@@ -1,8 +1,38 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Layers as LayersIcon, UserRound, FolderGit2, Building2, DollarSign } from "lucide-react";
-import { api, type DimensionsData, type DimensionEntry } from "../api";
+import { Send, Layers as LayersIcon, UserRound, FolderGit2, Building2, DollarSign, LayoutGrid, Network } from "lucide-react";
+import { api, type DimensionsData, type DimensionEntry, type GraphData } from "../api";
+import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
 import { useI18n } from "../i18n";
 import { useNav, type MemFilter } from "../navctx";
+
+const GROUP_COLOR: Record<string, string> = {
+  personal: "#a78bfa", project: "#7c9cff", organization: "#22d3ee", business: "#4ade80",
+};
+const GROUP_LABEL2: Record<string, string> = {
+  personal: "Person", project: "Projects", organization: "Organization", business: "Business",
+};
+
+// build a navigable group → dimension → category graph from the dimension profile
+function buildCatGraph(dims: DimensionEntry[]): { data: GraphData; meta: Record<string, MemFilter | { group: string }> } {
+  const nodes: GraphData["nodes"] = [];
+  const links: GraphData["links"] = [];
+  const meta: Record<string, any> = {};
+  const groups = new Set<string>();
+  for (const d of dims) {
+    if (!d.count) continue;
+    groups.add(d.group);
+    const dimId = d.label;
+    nodes.push({ id: dimId, namespaces: [d.group] });
+    meta[dimId] = { dimension: d.id, label: d.label };
+    links.push({ source: GROUP_LABEL2[d.group], target: dimId, label: "" });
+    for (const c of d.categories) {
+      if (!meta[c.name]) { nodes.push({ id: c.name, namespaces: [d.group] }); meta[c.name] = { category: c.name, label: c.name }; }
+      links.push({ source: dimId, target: c.name, label: "" });
+    }
+  }
+  for (const g of groups) { const gl = GROUP_LABEL2[g]; nodes.unshift({ id: gl, namespaces: [g], shared: true }); meta[gl] = { group: g }; }
+  return { data: { nodes, links }, meta };
+}
 
 // the unified profile: the dialectic user model + the dimension/category map,
 // organized by the four life/work groups.
@@ -23,6 +53,8 @@ export default function Profile({ ns }: { ns: string }) {
   const [data, setData] = useState<DimensionsData | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("personal");
+  const [mode, setMode] = useState<"cards" | "map">("cards");
+  const graphRef = useRef<GraphHandle>(null);
   // user model (Person tab)
   const [profile, setProfile] = useState("");
   const [q, setQ] = useState("");
@@ -55,9 +87,30 @@ export default function Profile({ ns }: { ns: string }) {
       <div className="flex items-baseline gap-3 mb-1">
         <h2 className="m-0 text-[18px] font-bold tracking-tight">{t("profile")} · {ns === "__all__" ? t("all_word") : ns}</h2>
         <span className="text-[var(--dim2)] text-[12.5px] max-[680px]:hidden">{t("profile_sub")}</span>
+        <div className="ml-auto flex gap-1">
+          <button onClick={() => setMode("cards")} title={t("profile_cards")}
+            className={`p-1.5 rounded-lg border ${mode === "cards" ? "bg-[var(--panel2)] text-[var(--txt)] border-[var(--line)]" : "border-[var(--line)] text-[var(--dim)]"}`}><LayoutGrid size={15} /></button>
+          <button onClick={() => setMode("map")} title={t("profile_map")}
+            className={`p-1.5 rounded-lg border ${mode === "map" ? "bg-[var(--panel2)] text-[var(--txt)] border-[var(--line)]" : "border-[var(--line)] text-[var(--dim)]"}`}><Network size={15} /></button>
+        </div>
       </div>
 
-      {/* group tabs */}
+      {/* map mode: the group → dimension → category graph */}
+      {mode === "map" && (() => {
+        const { data: gd, meta } = buildCatGraph(dims);
+        return gd.nodes.length ? (
+          <div className="h-[600px] mt-4">
+            <GraphCanvas ref={graphRef} data={gd} communities={false}
+              colorFor={(g) => GROUP_COLOR[g] || "#7c9cff"}
+              onPick={(id) => { const m = meta[id]; if (!m) return; if ("group" in m) setTab((m as any).group); else openFilter(m as MemFilter); }} />
+          </div>
+        ) : (
+          <div className="card-surface text-center py-12 mt-4 text-[var(--dim)]">{t("profile_empty")}</div>
+        );
+      })()}
+
+      {/* group tabs (cards mode) */}
+      {mode === "cards" && <>
       <div className="flex gap-1.5 my-4 flex-wrap">
         {TABS.map(({ id, label, color, Icon }) => {
           const on = tab === id;
@@ -108,6 +161,7 @@ export default function Profile({ ns }: { ns: string }) {
           {tabDims.map((d) => <DimCard key={d.id} d={d} color={active.color} onOpen={openFilter} t={t} />)}
         </div>
       )}
+      </>}
     </div>
   );
 }
