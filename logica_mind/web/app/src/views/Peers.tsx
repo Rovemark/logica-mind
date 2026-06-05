@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowRight, Users } from "lucide-react";
 import { api, type PeerPair } from "../api";
 import Pager, { paginate } from "../components/Pager";
+import Markdown from "../components/Markdown";
 import { useI18n } from "../i18n";
 
 // Multi-perspective: what one peer believes about another (directional).
@@ -55,7 +56,7 @@ export default function Peers({ ns }: { ns: string }) {
               {lines.map((l, i) => (
                 <div key={i} className="flex items-start gap-2.5 px-2 py-2 rounded-lg hover:bg-white/[0.03]">
                   <span className="text-[var(--accent2)] mt-1.5 text-[8px]">●</span>
-                  <span className="text-[14px] leading-relaxed">{l}</span>
+                  <Markdown text={l} className="text-[14px] leading-relaxed min-w-0" />
                 </div>
               ))}
             </div>

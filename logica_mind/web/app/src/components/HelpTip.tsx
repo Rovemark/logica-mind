@@ -13,7 +13,7 @@ export default function HelpTip({ k }: { k: string }) {
 
   return (
     <div className="relative flex-none">
-      <button onClick={() => setOpen((o) => !o)} aria-label="help" title={t("help_word")}
+      <button onClick={() => setOpen((o) => !o)} aria-label={t("help_word")} title={t("help_word")}
         className={`w-[22px] h-[22px] grid place-items-center rounded-full border text-[12px] font-semibold transition
           ${open ? "border-[var(--accent)] text-[var(--accent)] bg-[var(--panel2)]"
                  : "border-[var(--line)] text-[var(--dim2)] hover:text-[var(--txt)] hover:border-[var(--accent)]"}`}>?</button>

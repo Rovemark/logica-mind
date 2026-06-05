@@ -155,6 +155,7 @@ export default function ContextBlock({ ns }: { ns: string }) {
 }
 
 function Candidate({ c, rank }: { c: ContextCandidate; rank: number }) {
+  const { t } = useI18n();
   const open = useOpenMemory();
   const layer = (c.memory.layer as Layer) || "episodic";
   const col = LAYER_COLOR[layer] || "#7c9cff";
@@ -169,7 +170,7 @@ function Candidate({ c, rank }: { c: ContextCandidate; rank: number }) {
         <span className="text-[11px] tabular-nums text-[var(--dim2)]">{(c.score * 100).toFixed(0)}%</span>
         <span className="ml-auto flex items-center gap-1 text-[10.5px] font-medium"
           style={{ color: c.included ? "var(--good)" : "var(--dim2)" }}>
-          {c.included ? <><Check size={11} /> in</> : "—"}
+          {c.included ? <><Check size={11} /> {t("context_included_short")}</> : "—"}
         </span>
       </div>
       <div className="text-[12.5px] text-[var(--txt)] leading-snug">{c.memory.content}</div>
