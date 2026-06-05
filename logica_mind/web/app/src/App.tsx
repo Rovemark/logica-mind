@@ -29,14 +29,19 @@ import Workspace from "./views/Workspace";
 import Dreams from "./views/Dreams";
 
 const VIEW_SET = new Set([...VIEWS.map((v) => v.key as string), "settings"]);
+// clean, real URLs (history routing) — '/graph/org:acme', no '#'. The Python
+// server already serves the app shell for any unknown non-API path, so deep
+// links and refresh work. (Was hash routing; the '#' is gone.)
 function parseHash(): { view: ViewKey; ns: string } {
-  const h = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
-  const [v, ...rest] = h.split("/");
+  const p = decodeURIComponent(location.pathname.replace(/^\/+/, "").replace(/\/+$/, ""));
+  const [v, ...rest] = p.split("/");
   return { view: (VIEW_SET.has(v) ? v : "overview") as ViewKey, ns: rest.length ? rest.join("/") : ALL };
 }
 function writeHash(view: ViewKey, ns: string) {
-  const h = `#/${view}${ns && ns !== ALL ? "/" + encodeURIComponent(ns) : ""}`;
-  if (location.hash !== h) location.hash = h;
+  // keep ':' readable in the path (it's safe there): '/graph/org:acme'
+  const enc = ns && ns !== ALL ? "/" + encodeURIComponent(ns).replace(/%3A/gi, ":") : "";
+  const p = view === "overview" && (!ns || ns === ALL) ? "/" : `/${view}${enc}`;
+  if (location.pathname !== p) history.pushState(null, "", p);
 }
 
 export default function App() {
@@ -67,17 +72,17 @@ export default function App() {
   useEffect(() => {
     loadNs();
     const t = setInterval(loadNs, 8000);
-    // URL routing: each view (and namespace) has its own hash, so back/forward and
-    // deep-links work — #/graph, #/sessions/research …
+    // URL routing: each view (and namespace) has its own real path, so back/
+    // forward and deep-links work — /graph, /sessions/research …
     const onHash = () => { const p = parseHash(); setView(p.view); setNs(p.ns); };
-    window.addEventListener("hashchange", onHash);
+    window.addEventListener("popstate", onHash);
     // ⌘K / Ctrl-K opens the global Spotlight from anywhere
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); setPalette((p) => !p); }
     };
     window.addEventListener("keydown", onKey);
     writeHash(view, ns);
-    return () => { clearInterval(t); window.removeEventListener("hashchange", onHash); window.removeEventListener("keydown", onKey); };
+    return () => { clearInterval(t); window.removeEventListener("popstate", onHash); window.removeEventListener("keydown", onKey); };
     // eslint-disable-next-line
   }, []);
 
