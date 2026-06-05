@@ -34,15 +34,31 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const [colorMenu, setColorMenu] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
+  const [focusNode, setFocusNode] = useState<string | null>(null);   // local/ego graph
+  const [depth, setDepth] = useState(2);
+  const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [hoverInfo, setHoverInfo] = useState<{ name: string; type: string; mems: any[] } | null>(null);
+  const hoverCache = useRef<Record<string, { name: string; type: string; mems: any[] }>>({});
+  const wrapRef = useRef<HTMLDivElement>(null);
   const gref = useRef<GraphHandle>(null);
 
   useEffect(() => {
     const layers = coMention ? ["relation", "co_mention"] : ["relation"];
-    api.graph(ns, history, at, { layers }).then(setData).catch(() => setData({ nodes: [], links: [] }));
-  }, [ns, history, at, coMention]);
+    api.graph(ns, history, at, { layers, focus: focusNode || undefined, depth }).then(setData).catch(() => setData({ nodes: [], links: [] }));
+  }, [ns, history, at, coMention, focusNode, depth]);
 
   // reset transient view state when switching namespace
-  useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); setQuery(""); setPredOff(new Set()); setMinConf(0); }, [ns]);
+  useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); }, [ns]);
+
+  // hover preview: fetch (and cache) the hovered entity's top facts
+  useEffect(() => {
+    if (!hover) { setHoverInfo(null); return; }
+    const id = hover.id, cached = hoverCache.current[id];
+    if (cached) { setHoverInfo(cached); return; }
+    let alive = true;
+    api.node(ns, id).then((d) => { if (!alive) return; const info = { name: id, type: d.type || "", mems: (d.memories || []).slice(0, 3) }; hoverCache.current[id] = info; setHoverInfo(info); }).catch(() => {});
+    return () => { alive = false; };
+  }, [hover?.id, ns]);
 
   // open an entity's detail when navigated here from a backlink (Connected panel)
   useEffect(() => { if (focusEntity?.name) { setPicked(focusEntity.name); gref.current?.center(focusEntity.name); } }, [focusEntity?.n, focusEntity?.name]);
@@ -125,11 +141,24 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   return (
     <div className="fadein">
       <h2 className="m-0 mb-4 text-[18px] font-bold tracking-tight">{t("graph")}</h2>
-      <div className="relative" style={{ height: "calc(100vh - 200px)", minHeight: 420 }}>
+      <div ref={wrapRef} className="relative" style={{ height: "calc(100vh - 200px)", minHeight: 420 }}>
         <div className="absolute top-3 left-3.5 text-[var(--dim2)] text-[11.5px] z-[3]">
           {shown.nodes.length} {t("graph_entities")} · {shown.links.length} {t("relations")}
           {at && <span className="text-[var(--gold)]"> · {t("graph_as_of")} {tShort(at)}</span>}
         </div>
+
+        {/* local/ego-graph banner — appears when focused on one entity */}
+        {focusNode && (
+          <div className="absolute top-[34px] left-3.5 z-[4] glass border border-[var(--accent)]/50 rounded-[10px] px-3 py-1.5 flex items-center gap-2.5 text-[12px]">
+            <span className="text-[var(--accent)] font-semibold">{t("graph_local")}:</span>
+            <span className="text-[var(--txt)] max-w-[150px] truncate">{focusNode}</span>
+            <span className="text-[var(--dim2)]">·</span>
+            <span className="text-[var(--dim)]">{t("graph_depth")}</span>
+            <input type="range" min={1} max={3} step={1} value={depth} onChange={(e) => setDepth(+e.target.value)} className="w-[70px] accent-[var(--accent)]" />
+            <span className="tabular-nums text-[var(--txt)] w-2">{depth}</span>
+            <button onClick={() => setFocusNode(null)} title={t("graph_exit_local")} className="text-[var(--dim)] hover:text-[var(--warn)]"><X size={13} /></button>
+          </div>
+        )}
 
         {/* ── top filter bar ── */}
         <div className="absolute top-3 right-3 flex gap-1.5 z-[4] flex-wrap justify-end max-w-[78%]">
@@ -217,12 +246,30 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
         {shown.nodes.length === 0 ? (
           <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("graph_empty")}</div>
         ) : (
-          <GraphCanvas ref={gref} data={shown} communities={communities} colorFor={colorFor} onPick={setPicked} nodeTint={tint} />
+          <GraphCanvas ref={gref} data={shown} communities={communities} colorFor={colorFor} onPick={setPicked} nodeTint={tint}
+            onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} />
         )}
+
+        {/* hover preview — the entity's top facts without a click (Obsidian-style) */}
+        {hover && hoverInfo && (() => {
+          const cw = wrapRef.current?.clientWidth ?? 800;
+          const left = hover.x > cw - 290 ? Math.max(8, hover.x - 274) : hover.x + 16;
+          return (
+            <div className="absolute z-[5] pointer-events-none glass border border-[var(--line)] rounded-[11px] p-3 w-[260px] shadow-[var(--shadow)] fadein"
+              style={{ left, top: Math.min(hover.y + 14, (wrapRef.current?.clientHeight ?? 600) - 140) }}>
+              <div className="font-semibold text-[13px] text-[var(--txt)] truncate">{hoverInfo.name}</div>
+              {hoverInfo.type && <div className="text-[10px] text-[var(--dim2)] uppercase tracking-wide mb-1">{hoverInfo.type}</div>}
+              {hoverInfo.mems.length ? hoverInfo.mems.map((m: any) => (
+                <div key={m.id} className="text-[12px] text-[var(--dim)] leading-snug mt-1 line-clamp-2">• {m.content}</div>
+              )) : <div className="text-[11.5px] text-[var(--dim2)] mt-1">{t("nothing_here")}</div>}
+            </div>
+          );
+        })()}
 
         {picked && (
           <NodeDetail ns={ns} name={picked} onClose={() => setPicked(null)}
-            onOpenMemory={(m) => onOpenMemory?.(m)} onPickEntity={(n) => setPicked(n)} />
+            onOpenMemory={(m) => onOpenMemory?.(m)} onPickEntity={(n) => setPicked(n)}
+            onFocus={(n) => { setFocusNode(n); setDepth(2); setPicked(null); }} />
         )}
 
         {/* legend — adapts to the active colour mode */}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, GitCommitHorizontal, Trash2 } from "lucide-react";
+import { X, GitCommitHorizontal, Trash2, Locate } from "lucide-react";
 import { api, tShort, type Memory } from "../api";
 import MemoryCard from "./MemoryCard";
 import { useI18n } from "../i18n";
@@ -8,10 +8,11 @@ import { useI18n } from "../i18n";
 // (click one to walk the graph) + every memory that mentions it (graph facts +
 // notes), each clickable to open it in the Memories view.
 export default function NodeDetail({
-  ns, name, onClose, onOpenMemory, onPickEntity,
+  ns, name, onClose, onOpenMemory, onPickEntity, onFocus,
 }: {
   ns: string; name: string; onClose: () => void;
   onOpenMemory: (m: Memory) => void; onPickEntity: (n: string) => void;
+  onFocus?: (n: string) => void;
 }) {
   const { t } = useI18n();
   const [connected, setConnected] = useState<string[]>([]);
@@ -42,6 +43,13 @@ export default function NodeDetail({
       </h3>
       {info.aliases.length > 0 && (
         <div className="text-[var(--dim2)] text-[11.5px] mt-0.5">{t("aliases")}: {info.aliases.join(", ")}</div>
+      )}
+
+      {onFocus && (
+        <button onClick={() => onFocus(name)} title={t("graph_focus_here")}
+          className="mt-2 flex items-center gap-1.5 text-[11.5px] text-[var(--accent)] hover:underline">
+          <Locate size={12} /> {t("graph_focus_here")}
+        </button>
       )}
 
       {/* GDPR erase button */}
