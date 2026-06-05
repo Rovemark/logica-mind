@@ -4,7 +4,7 @@ A self-hosted web dashboard for browsing, searching, and curating everything in 
 
 The dashboard is a single-page app served by Python's standard-library `http.server`, backed by a live `LogicaMind` instance and its store. There is nothing to deploy and no cloud account to create: it reads the same SQLite file your app writes to, so by default (SQLite store + hashing embedder) it runs fully offline and zero-key.
 
-![Overview](./dashboard-overview.png)
+![Overview](./img/dashboard-overview.png)
 
 ## Running it
 
@@ -87,19 +87,19 @@ The landing view. It pulls per-layer counts and a total from `/api/stats`, a one
 
 ### Analytics
 
-![Analytics](./dashboard-analytics.png)
+![Analytics](./img/dashboard-analytics.png)
 
 Usage, activity and reliability in one place, all from `/api/analytics`: a stat strip (memories, agents, entities, relations, sessions, contradictions, average request latency, error rate), distribution charts (added-over-time, by layer, by source, by agent), and the **Memory lake** — a typed catalog of every namespace (`user` / `org` / `agent`), each row carrying its entity / fact / relation counts, an activity sparkline, and a governance footer (provenance-tracked, source-attributed, versioned, erasable on request). Latency and error rate are measured by the server itself, not estimated.
 
 ### Context block
 
-![Context block](./dashboard-context.png)
+![Context block](./img/dashboard-context.png)
 
 Smart context assembly for a query. `/api/context` ranks candidate memories, then fits the most relevant into a token budget and returns both halves of the story: the ranked pool (with which candidates made the cut) and the assembled, prompt-ready block — split into sections (User, Relevant memory) each with its own token estimate, against a budget meter you control (600 / 1,200 / 2,000 / 4,000 tokens). This is the same assembly exposed by the `lm_context` MCP tool, made visible.
 
 ### Graph
 
-![Graph](./dashboard-graph.png)
+![Graph](./img/dashboard-graph.png)
 
 The interactive knowledge graph. Nodes are entities, links are relations. You can toggle history (to include superseded edges), colour by community, and open a time scrubber that re-fetches the graph as of a point in time (using the true min/max range from `/api/timerange`). Clicking a node opens an entity detail panel listing every memory that mentions it. See [Knowledge graph](./knowledge-graph.md).
 
@@ -125,7 +125,7 @@ Multi-perspective memory: pick a peer relationship and read the directional prof
 
 ### Observations
 
-![Observations](./dashboard-observations.png)
+![Observations](./img/dashboard-observations.png)
 
 Patterns that live across many facts, not inside any single one. `/api/observations` reads the temporal graph structurally and surfaces two kinds: **recurring pairs** (entities that keep landing in the same neighbourhood — co-occurrence) and **central entities** (the hubs everything else connects to, by degree). It recomputes as the graph grows, so the patterns track reality rather than being hand-authored.
 

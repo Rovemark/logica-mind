@@ -39,7 +39,7 @@ this page in five minutes. It then lights up Voyage, OpenAI, Supabase, Postgres
 or Redis whenever you want them.
 
 <div align="center">
-  <img src="docs/dashboard-graph.png" alt="Logica Mind dashboard — live temporal knowledge graph" width="100%">
+  <img src="docs/img/dashboard-graph.png" alt="Logica Mind dashboard — live temporal knowledge graph" width="100%">
   <br>
   <em>The built-in dashboard: a live, animated knowledge graph with point-in-time replay, shared-entity detection across agents, and a one-click demo you can clear.</em>
 </div>
@@ -85,7 +85,7 @@ it extracts the durable facts, reconciles them against what it already knows, an
 only then stores. The dashboard shows you exactly what it learned, live.
 
 <div align="center">
-  <img src="docs/dashboard-learn.png" alt="Logica Mind — watch it learn from a single message" width="100%">
+  <img src="docs/img/dashboard-learn.png" alt="Logica Mind — watch it learn from a single message" width="100%">
   <br>
   <em>Add a message; watch it become memory. Each extracted fact is revealed as it lands, tagged <b>new</b> or <b>updated</b> — and an update strikes through the belief it replaced.</em>
 </div>
@@ -237,27 +237,27 @@ element means; and a **Settings → Integrations** page shows the live stack and
 Português / Español.
 
 <div align="center">
-  <img src="docs/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
+  <img src="docs/img/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
   <br>
   <em>The Context block: smart assembly. Candidates are ranked, then the most relevant are fitted to a token budget — and you see exactly which made the cut, the per-section token cost, and the prompt-ready block to inject.</em>
 </div>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/dashboard-observations.png" alt="Observations — recurring patterns across memory"><br><sub><b>Observations</b> — structural patterns no single fact holds: entities that recur together and the hubs everything hangs off of.</sub></td>
-    <td width="50%"><img src="docs/dashboard-changes.png" alt="Changes — fact invalidation and a memory changelog"><br><sub><b>Changes</b> — when a fact's value changes, the old one is invalidated (not deleted): the current belief stands out, superseded ones stay queryable with their validity window.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-observations.png" alt="Observations — recurring patterns across memory"><br><sub><b>Observations</b> — structural patterns no single fact holds: entities that recur together and the hubs everything hangs off of.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-changes.png" alt="Changes — fact invalidation and a memory changelog"><br><sub><b>Changes</b> — when a fact's value changes, the old one is invalidated (not deleted): the current belief stands out, superseded ones stay queryable with their validity window.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/dashboard-lake.png" alt="Memory lake — a typed, governed catalog of namespaces"><br><sub><b>Memory lake</b> — a typed catalog of every namespace (user / org / agent), each row provenance-tracked, source-attributed, versioned and erasable on request.</sub></td>
-    <td width="50%"><img src="docs/dashboard-analytics.png" alt="Analytics — usage, activity and reliability"><br><sub><b>Analytics</b> — usage, activity and reliability: added-over-time, distribution by layer / source / agent, real request latency and error rate.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-lake.png" alt="Memory lake — a typed, governed catalog of namespaces"><br><sub><b>Memory lake</b> — a typed catalog of every namespace (user / org / agent), each row provenance-tracked, source-attributed, versioned and erasable on request.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-analytics.png" alt="Analytics — usage, activity and reliability"><br><sub><b>Analytics</b> — usage, activity and reliability: added-over-time, distribution by layer / source / agent, real request latency and error rate.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/dashboard-spotlight.png" alt="Spotlight — global ⌘K search"><br><sub><b>⌘K Spotlight</b> — one box over everything: jump to any view, agent, memory or graph entity, keyboard-first.</sub></td>
-    <td width="50%"><img src="docs/dashboard-integrations.png" alt="Integrations — the live stack with provider auto-detection"><br><sub><b>Integrations</b> — the live stack (store + redundancy, embedder, LLM, reranker) and every backend you can plug in, auto-detected from your environment.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-spotlight.png" alt="Spotlight — global ⌘K search"><br><sub><b>⌘K Spotlight</b> — one box over everything: jump to any view, agent, memory or graph entity, keyboard-first.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-integrations.png" alt="Integrations — the live stack with provider auto-detection"><br><sub><b>Integrations</b> — the live stack (store + redundancy, embedder, LLM, reranker) and every backend you can plug in, auto-detected from your environment.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
-    <td width="50%"><img src="docs/dashboard-overview.png" alt="Overview — layer counts and insights"><br><sub><b>Overview</b> — per-layer counts, recent activity and synthesized insights.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-overview.png" alt="Overview — layer counts and insights"><br><sub><b>Overview</b> — per-layer counts, recent activity and synthesized insights.</sub></td>
   </tr>
 </table>
 

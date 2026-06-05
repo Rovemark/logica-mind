@@ -84,7 +84,7 @@ never get two identical rows.
 Add a memory from the dashboard (the **+** in the top bar) and the modal animates
 exactly what the engine learned, instead of silently closing:
 
-![Watch it learn](dashboard-learn.png)
+![Watch it learn](img/dashboard-learn.png)
 
 - the message you sent, as a bubble;
 - each extracted fact revealed one at a time (a live "memory n/n" counter),
