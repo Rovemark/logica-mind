@@ -3,6 +3,7 @@ import type { Memory } from "../api";
 import { tShort } from "../api";
 import { useOpenMemory } from "../memctx";
 import { useI18n } from "../i18n";
+import Markdown from "./Markdown";
 
 // colour a fact's category chip by the group of its life/work dimension
 export function dimColor(dim?: string | null): string {
@@ -89,7 +90,7 @@ export default function MemoryCard({
           <span className="ml-auto tabular-nums text-[var(--good)] font-bold">{score}</span>
         )}
       </div>
-      <div className="text-[14.5px] leading-relaxed">{m.content}</div>
+      <Markdown text={m.content} className="text-[14.5px] leading-relaxed" />
       <div className="text-[var(--dim2)] text-xs mt-1.5 flex gap-3 flex-wrap">
         <span>{tShort(m.created_at)}</span>
         {comp && <span>{comp}</span>}
