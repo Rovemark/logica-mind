@@ -4,15 +4,9 @@ import { tShort } from "../api";
 import { useOpenMemory } from "../memctx";
 import { useI18n } from "../i18n";
 import Markdown from "./Markdown";
+import { dimColor } from "../lifearea";
 
-// colour a fact's category chip by the group of its life/work dimension
-export function dimColor(dim?: string | null): string {
-  if (!dim) return "var(--accent2)";
-  if (dim.startsWith("biz_")) return "#4ade80";
-  if (dim.startsWith("project_")) return "#7c9cff";
-  if (dim.startsWith("org_")) return "#22d3ee";
-  return "#a78bfa";
-}
+export { dimColor };
 
 export function LayerPill({ layer }: { layer: string }) {
   const { t } = useI18n();

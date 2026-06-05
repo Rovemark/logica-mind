@@ -15,7 +15,7 @@ export interface Memory {
 }
 export interface Stats { episodic: number; semantic: number; graph: number; user: number; total: number; }
 export interface NsItem { namespace: string; total: number; stats: Stats; }
-export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; }
+export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; dimension?: string; }
 export interface GraphLink { source: string; target: string; label: string; confidence?: number; valid?: boolean; }
 export interface GraphData { nodes: GraphNode[]; links: GraphLink[]; }
 export interface Relation { source: string; target: string; label: string; confidence?: number; valid?: boolean; valid_from?: string; valid_to?: string; }

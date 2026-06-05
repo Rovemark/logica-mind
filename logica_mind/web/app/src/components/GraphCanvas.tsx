@@ -8,6 +8,9 @@ interface Props {
   communities: boolean;
   colorFor: (ns: string) => string;
   onPick: (name: string) => void;
+  // optional per-node tint (e.g. colour by life-area). Returning null falls back
+  // to the default namespace/shared colouring.
+  nodeTint?: (n: any) => string | null;
 }
 
 // Live canvas force-simulation (Obsidian-style continuous physics):
@@ -15,16 +18,18 @@ interface Props {
 // interaction. Pan/zoom/drag with mouse AND touch (pinch-zoom). A click/tap on a
 // node calls onPick(name) so the parent can show its memories + relations.
 const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
-  { data, communities, colorFor, onPick }, ref,
+  { data, communities, colorFor, onPick, nodeTint }, ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const commRef = useRef(communities);
   const colorRef = useRef(colorFor);
   const pickRef = useRef(onPick);
+  const tintRef = useRef(nodeTint);
   commRef.current = communities;
   colorRef.current = colorFor;
   pickRef.current = onPick;
+  tintRef.current = nodeTint;
 
   const G = useRef<any>({ nodes: [], links: [], byId: {}, adj: {}, comp: {}, t: { x: 0, y: 0, k: 1 }, hover: null, drag: null, alpha: 0, raf: 0, W: 0, H: 0, dpr: 1, fitOnce: false });
 
@@ -51,6 +56,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   function nodeColor(n: any) {
     const g = G.current;
     if (commRef.current) return PALETTE[(g.comp[n.id] || 0) % PALETTE.length];
+    if (tintRef.current) { const t = tintRef.current(n); if (t) return t; }
     if (n.shared) return "#fbbf24";
     return colorRef.current((n.namespaces && n.namespaces[0]) || "");
   }

@@ -687,8 +687,11 @@ class LogicaMind:
         gives a point-in-time view."""
         if namespace and namespace not in ("__all__", "*", "all"):
             viz = TemporalGraph(self.store, namespace, self.embedder).to_viz(include_history, at=at)
+            edim = self._entity_dimensions([namespace])
             for n in viz["nodes"]:
                 n["namespaces"], n["shared"] = [namespace], False
+                if n["id"] in edim:
+                    n["dimension"] = edim[n["id"]]
             for l in viz["links"]:
                 l["namespace"] = namespace
             viz["namespaces"] = [namespace]
@@ -707,10 +710,13 @@ class LogicaMind:
                     "valid": e.is_valid, "valid_from": e.valid_from, "valid_to": e.valid_to,
                     "confidence": e.confidence, "namespace": ns,
                 })
-        node_list = [
-            {"id": name, "namespaces": sorted(nss), "shared": len(nss) > 1}
-            for name, nss in nodes.items()
-        ]
+        edim = self._entity_dimensions(all_ns)
+        node_list = []
+        for name, nss in nodes.items():
+            n = {"id": name, "namespaces": sorted(nss), "shared": len(nss) > 1}
+            if name in edim:
+                n["dimension"] = edim[name]
+            node_list.append(n)
         return {"nodes": node_list, "links": links, "namespaces": all_ns}
 
     def graph_communities(self, summarize: bool = False, include_history: bool = False):
@@ -863,6 +869,49 @@ class LogicaMind:
     def graph_nodes(self, include_history: bool = False) -> List[Dict[str, Any]]:
         """Every entity with its degree (how many edges touch it), busiest first."""
         return self.graph.nodes(include_history=include_history)
+
+    def _entity_dimensions(self, namespaces: List[str]) -> Dict[str, str]:
+        """Map each graph entity to its DOMINANT life/work dimension, so the
+        knowledge graph can be coloured/filtered the same way the Profile is.
+
+        Entities live in the graph; dimensions live on the categorized facts.
+        We bridge them by name: a fact whose content mentions an entity votes
+        its dimension for that entity; the most-voted dimension wins. Word-
+        boundary matching keeps short names from over-matching."""
+        import re as _re
+        from collections import Counter
+        # gather (content, dimension) for every categorized fact across the graphs
+        facts: List[tuple] = []
+        for ns in namespaces:
+            for m in self.store.all(ns):
+                if "edge" in (m.tags or []) or "alias" in (m.tags or []):
+                    continue
+                dim = (m.metadata or {}).get("dimension")
+                if dim and m.content:
+                    facts.append((m.content.lower(), dim))
+        if not facts:
+            return {}
+        # the canonical entity names in play (subjects + objects of valid edges)
+        ents: set = set()
+        for ns in namespaces:
+            for e in TemporalGraph(self.store, ns, self.embedder).edges():
+                if e.subject:
+                    ents.add(e.subject)
+                if e.object:
+                    ents.add(e.object)
+        out: Dict[str, str] = {}
+        for ent in ents:
+            name = ent.strip()
+            if len(name) < 2:
+                continue
+            pat = _re.compile(r"\b" + _re.escape(name.lower()) + r"\b")
+            votes: Counter = Counter()
+            for content, dim in facts:
+                if pat.search(content):
+                    votes[dim] += 1
+            if votes:
+                out[ent] = votes.most_common(1)[0][0]
+        return out
 
     # ---- observations ------------------------------------------------------
     def observations(self, limit: int = 12) -> List[Dict[str, Any]]:
