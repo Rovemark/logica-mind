@@ -169,6 +169,16 @@ TOOLS = [
             "required": ["a", "b"],
         },
     },
+    {
+        "name": "lm_bridges",
+        "description": "Load-bearing connectors: entities whose removal would fragment the graph (articulation points) — the brokers between otherwise-separate clusters.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "lm_suggested_links",
+        "description": "Predict the missing edge: entity pairs with no direct relation but a strong shared neighbourhood (Adamic-Adar). The links you probably should have but never authored.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
     # ---- coding-context devtools ----
     {
         "name": "lm_execute",
@@ -417,6 +427,10 @@ class MCPServer:
             return m.connections(args["id"])
         if name == "lm_how_related":
             return m.how_related(args["a"], args["b"])
+        if name == "lm_bridges":
+            return {"bridges": m.bridges()}
+        if name == "lm_suggested_links":
+            return {"suggested": m.suggested_links()}
         if name == "lm_context":
             return m.context(args["query"], token_budget=int(args.get("token_budget", 1500)))
         if name == "lm_ask_about_user":

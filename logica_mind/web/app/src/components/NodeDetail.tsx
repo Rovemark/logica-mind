@@ -16,6 +16,7 @@ export default function NodeDetail({
 }) {
   const { t } = useI18n();
   const [connected, setConnected] = useState<string[]>([]);
+  const [unlinked, setUnlinked] = useState<{ entity: string; count: number }[]>([]);
   const [mems, setMems] = useState<Memory[]>([]);
   const [info, setInfo] = useState<{ type: string; aliases: string[] }>({ type: "", aliases: [] });
   const [loading, setLoading] = useState(true);
@@ -28,7 +29,7 @@ export default function NodeDetail({
     setLoading(true);
     api.node(ns, name).then((d) => {
       if (!alive) return;
-      setConnected(d.connected || []); setMems(d.memories || []);
+      setConnected(d.connected || []); setUnlinked(d.unlinked || []); setMems(d.memories || []);
       setInfo({ type: d.type || "", aliases: d.aliases || [] }); setLoading(false);
     }).catch(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -90,6 +91,20 @@ export default function NodeDetail({
               <button key={c} onClick={() => onPickEntity(c)}
                 className="px-2.5 py-1 rounded-full text-[12px] border border-[var(--line)] text-[var(--dim)]
                   hover:text-[var(--txt)] hover:border-[var(--accent)]/60 hover:bg-[var(--panel2)]">{c}</button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* unlinked mentions — co-mentioned but with no explicit edge (Obsidian, but it knows the entities) */}
+      {unlinked.length > 0 && (
+        <>
+          <div className="text-[var(--dim2)] text-[10px] uppercase tracking-[.7px] mt-3.5 mb-2">{t("node_unlinked")}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {unlinked.map((u) => (
+              <button key={u.entity} onClick={() => onPickEntity(u.entity)} title={`${u.count}×`}
+                className="px-2.5 py-1 rounded-full text-[12px] border border-dashed border-[#f59e0b]/50 text-[#f59e0b]
+                  hover:bg-[#f59e0b]/10 inline-flex items-center gap-1.5">{u.entity}<span className="tabular-nums opacity-70">{u.count}</span></button>
             ))}
           </div>
         </>

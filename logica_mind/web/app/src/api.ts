@@ -15,9 +15,10 @@ export interface Memory {
 }
 export interface Stats { episodic: number; semantic: number; graph: number; user: number; total: number; }
 export interface NsItem { namespace: string; total: number; stats: Stats; }
-export type LinkKind = "relation" | "co_mention" | "semantic";
-export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; dimension?: string; degree?: number; centrality?: number; }
+export type LinkKind = "relation" | "co_mention" | "semantic" | "suggested";
+export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; dimension?: string; degree?: number; centrality?: number; bridge?: boolean; }
 export interface GraphLink { source: string; target: string; label: string; confidence?: number; valid?: boolean; kind?: LinkKind; weight?: number; directed?: boolean; pclass?: string; }
+export interface SuggestedLink { a: string; b: string; common_neighbors: number; score: number; via: string[]; }
 export interface GraphData { nodes: GraphNode[]; links: GraphLink[]; namespaces?: string[]; focus?: string | null; depth?: number; }
 export interface Relation { source: string; target: string; label: string; confidence?: number; valid?: boolean; valid_from?: string; valid_to?: string; }
 export interface RecallHit { score: number; components?: Record<string, any>; memory: Memory; }
@@ -90,7 +91,7 @@ export const api = {
   calendar: (ns: string): Promise<{ days: Record<string, Stats> }> => j(`/api/calendar?${nsq(ns)}`),
   day: (ns: string, date: string): Promise<{ date: string; memories: Memory[] }> =>
     j(`/api/day?${nsq(ns)}&date=${date}`),
-  node: (ns: string, name: string): Promise<{ name: string; type: string; aliases: string[]; connected: string[]; memories: Memory[] }> =>
+  node: (ns: string, name: string): Promise<{ name: string; type: string; aliases: string[]; connected: string[]; unlinked?: { entity: string; count: number }[]; memories: Memory[] }> =>
     j(`/api/node?${nsq(ns)}&name=${encodeURIComponent(name)}`),
   sessions: (ns: string): Promise<{ sessions: SessionItem[] }> => j(`/api/sessions?${nsq(ns)}`),
   sessionMemories: (ns: string, session: string): Promise<{ memories: Memory[] }> =>
@@ -102,6 +103,8 @@ export const api = {
     j(`/api/connected?${nsq(ns)}&id=${encodeURIComponent(id)}`),
   path: (ns: string, from: string, to: string): Promise<PathResult> =>
     j(`/api/path?${nsq(ns)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  suggested: (ns: string): Promise<{ suggested: SuggestedLink[] }> => j(`/api/suggested?${nsq(ns)}`),
+  bridges: (ns: string): Promise<{ bridges: { entity: string; degree: number }[] }> => j(`/api/bridges?${nsq(ns)}`),
   scan: (path?: string): Promise<any> => j(`/api/scan${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   bundle: (ns: string): Promise<any> => j(`/api/bundle?${nsq(ns)}`),
   peers: (ns: string): Promise<{ peers: PeerPair[] }> => j(`/api/peers?${nsq(ns)}`),

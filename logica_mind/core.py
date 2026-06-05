@@ -735,7 +735,7 @@ class LogicaMind:
         """Shared graph augmentation: tag relation links (kind/weight/direction/
         predicate-class), fold in the requested emergent layers, compute degree +
         PageRank centrality, and (optionally) clip to a focus node's local graph."""
-        from .graph.analytics import pagerank, predicate_class, build_adjacency, ego_nodes
+        from .graph.analytics import pagerank, predicate_class, build_adjacency, ego_nodes, articulation_points
         for l in links:
             l.setdefault("kind", "relation")
             l.setdefault("directed", True)
@@ -759,9 +759,12 @@ class LogicaMind:
                 deg[l["target"]] += 1
             weighted.append((l["source"], l["target"], l.get("weight", 1.0)))
         cen = pagerank(list(node_ids), weighted)
+        arts = articulation_points(build_adjacency(weighted)) if len(node_ids) <= 600 else set()
         for n in node_list:
             n["degree"] = deg.get(n["id"], 0)
             n["centrality"] = round(cen.get(n["id"], 0.0), 4)
+            if n["id"] in arts:
+                n["bridge"] = True
         # local graph: keep only the focus node's neighbourhood within `depth` hops
         if focus and focus in node_ids:
             keep = ego_nodes(build_adjacency(weighted), focus, max(1, int(depth or 1)))
@@ -848,6 +851,108 @@ class LogicaMind:
                 hops.append({"subject": (y if e else x), "predicate": (e.predicate if e else "related to"),
                              "object": (x if e else y), "confidence": (e.confidence if e else 0.5)})
         return {"from": ca, "to": cb, "found": True, "path": path, "hops": hops}
+
+    def _scope_edges(self, namespaces):
+        edges = []
+        for ns in (namespaces or [self.namespace]):
+            edges.extend(TemporalGraph(self.store, ns, self.embedder).edges())
+        return edges
+
+    def bridges(self, namespaces: Optional[List[str]] = None, limit: int = 20) -> List[Dict[str, Any]]:
+        """Load-bearing connectors: entities whose removal would FRAGMENT the
+        graph (articulation points). These broker between otherwise-separate
+        clusters — low-degree nodes can be critical bridges that degree/centrality
+        ranking misses. The connective tissue between worlds."""
+        from .graph.analytics import build_adjacency, articulation_points
+        edges = self._scope_edges(namespaces)
+        if not edges:
+            return []
+        adj = build_adjacency((e.subject, e.object, e.confidence) for e in edges)
+        deg: Dict[str, int] = {}
+        for e in edges:
+            deg[e.subject] = deg.get(e.subject, 0) + 1
+            deg[e.object] = deg.get(e.object, 0) + 1
+        arts = articulation_points(adj)
+        out = [{"entity": a, "degree": deg.get(a, 0)} for a in arts]
+        out.sort(key=lambda x: -x["degree"])
+        return out[:limit]
+
+    def suggested_links(self, namespaces: Optional[List[str]] = None,
+                        limit: int = 12, min_common: int = 2) -> List[Dict[str, Any]]:
+        """Predict the MISSING edge: entity pairs with no direct relation but a
+        strong shared neighbourhood (Adamic-Adar). 'These two probably relate —
+        you just never said so.' Note tools make you author every link; here the
+        graph proposes the ones you're likely missing. Structure-only, no LLM."""
+        import math
+        from collections import defaultdict
+        edges = self._scope_edges(namespaces)
+        if not edges:
+            return []
+        nbrs: Dict[str, set] = defaultdict(set)
+        existing: set = set()
+        for e in edges:
+            nbrs[e.subject].add(e.object)
+            nbrs[e.object].add(e.subject)
+            existing.add(frozenset((e.subject, e.object)))
+        nodes = sorted(nbrs, key=lambda n: -len(nbrs[n]))[:200]   # cap O(n^2) on big graphs
+        cands = []
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                a, b = nodes[i], nodes[j]
+                if a == b or frozenset((a, b)) in existing:
+                    continue
+                common = nbrs[a] & nbrs[b]
+                if len(common) < min_common:
+                    continue
+                score = sum(1.0 / math.log(len(nbrs[z]) + 1) for z in common if len(nbrs[z]) > 1)
+                cands.append({"a": a, "b": b, "common_neighbors": len(common),
+                              "score": round(score, 3), "via": sorted(common)[:4]})
+        cands.sort(key=lambda x: -x["score"])
+        return cands[:limit]
+
+    def entity_unlinked(self, name: str, namespaces: Optional[List[str]] = None, limit: int = 10) -> List[Dict[str, Any]]:
+        """Unlinked mentions: other graph entities that get TALKED ABOUT TOGETHER
+        with `name` in some memory, yet have NO explicit edge to it — the links
+        the graph suggests you might be missing (Obsidian's unlinked mentions,
+        but it knows the entities)."""
+        import re as _re
+        nss = namespaces or [self.namespace]
+        edges = self._scope_edges(nss)
+        ents: set = set()
+        linked: set = set()
+        for e in edges:
+            if e.subject:
+                ents.add(e.subject)
+            if e.object:
+                ents.add(e.object)
+            if e.subject.lower() == name.lower():
+                linked.add(e.object.lower())
+            if e.object.lower() == name.lower():
+                linked.add(e.subject.lower())
+        if name not in {x for x in ents}:
+            # accept case-insensitive
+            match = next((x for x in ents if x.lower() == name.lower()), None)
+            if not match:
+                return []
+        pat = _re.compile(r"\b" + _re.escape(name.lower()) + r"\b")
+        other = {e.lower(): e for e in ents if e.lower() != name.lower()}
+        opat = _re.compile(r"\b(" + "|".join(_re.escape(o) for o in sorted(other, key=len, reverse=True)) + r")\b") if other else None
+        counts: Dict[str, int] = {}
+        if opat:
+            for ns in nss:
+                for m in self.store.all(ns):
+                    if "edge" in (m.tags or []) or "alias" in (m.tags or []):
+                        continue
+                    low = (m.content or "").lower()
+                    if not pat.search(low):
+                        continue
+                    for mt in opat.finditer(low):
+                        o = mt.group(1)
+                        if o not in linked:
+                            counts[other[o]] = counts.get(other[o], 0) + 1
+        out = [{"entity": e, "count": c} for e, c in counts.items()]
+        out.sort(key=lambda x: -x["count"])
+        return out[:limit]
 
     def graph_communities(self, summarize: bool = False, include_history: bool = False):
         """Clusters of related entities in this namespace's graph. With
