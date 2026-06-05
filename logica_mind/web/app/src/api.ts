@@ -25,6 +25,8 @@ export interface ContextResult { namespace: string; query: string; budget: numbe
 export interface Observation { kind: "hub" | "co_occurrence"; entities: string[]; count: number; shared: string[]; text: string; namespace?: string; }
 export interface AddResultItem { content: string; layer: string; op: "new" | "updated"; superseded?: string | null; category?: string | null; }
 export interface AddResult { ok: boolean; namespace: string; kind: string; llm: boolean; created: AddResultItem[]; graph_edges: number; user_updated: boolean; deduped: boolean; }
+export interface SearchEntity { name: string; namespace: string; degree: number; type?: string; }
+export interface SearchResults { memories: { score: number; memory: Memory }[]; entities: SearchEntity[]; namespaces: string[]; }
 export interface IntegrationOption { id: string; label: string; model?: string; blurb?: string; env?: string | null; detected: boolean; installed: boolean; }
 export interface IntegrationsData {
   active: {
@@ -57,6 +59,7 @@ export const api = {
   stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),
   analytics: (ns: string): Promise<AnalyticsData> => j(`/api/analytics?${nsq(ns)}`),
   integrations: (): Promise<IntegrationsData> => j(`/api/integrations`),
+  search: (q: string, limit = 6): Promise<SearchResults> => j(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   context: (ns: string, q: string, budget = 1200): Promise<ContextResult> =>
     j(`/api/context?${nsq(ns)}&q=${encodeURIComponent(q)}&budget=${budget}`),
   observations: (ns: string): Promise<{ observations: Observation[] }> => j(`/api/observations?${nsq(ns)}`),

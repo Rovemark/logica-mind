@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ALL, PALETTE, type NsItem, type RecallHit, type Memory } from "./api";
+import { api, ALL, PALETTE, type NsItem, type Memory } from "./api";
 import { VIEWS, type ViewKey } from "./nav";
 import { LangCtx, makeT, getLang, saveLang, type Lang } from "./i18n";
 import { MemoryOpenCtx } from "./memctx";
@@ -8,7 +8,7 @@ import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
 import DemoBanner from "./components/DemoBanner";
 import TabBar from "./components/TabBar";
-import MemoryCard from "./components/MemoryCard";
+import CommandPalette from "./components/CommandPalette";
 import Composer from "./components/Composer";
 import Settings from "./components/Settings";
 import Overview from "./views/Overview";
@@ -42,8 +42,7 @@ export default function App() {
   const [namespaces, setNamespaces] = useState<NsItem[]>([]);
   const [ns, setNs] = useState<string>(init.ns);
   const [view, setView] = useState<ViewKey>(init.view);
-  const [q, setQ] = useState("");
-  const [hits, setHits] = useState<RecallHit[]>([]);
+  const [palette, setPalette] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [rev, setRev] = useState(0);
   const [lang, setLangState] = useState<Lang>(getLang());
@@ -68,17 +67,15 @@ export default function App() {
     // deep-links work — #/graph, #/sessions/research …
     const onHash = () => { const p = parseHash(); setView(p.view); setNs(p.ns); };
     window.addEventListener("hashchange", onHash);
+    // ⌘K / Ctrl-K opens the global Spotlight from anywhere
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); setPalette((p) => !p); }
+    };
+    window.addEventListener("keydown", onKey);
     writeHash(view, ns);
-    return () => { clearInterval(t); window.removeEventListener("hashchange", onHash); };
+    return () => { clearInterval(t); window.removeEventListener("hashchange", onHash); window.removeEventListener("keydown", onKey); };
     // eslint-disable-next-line
   }, []);
-
-  // debounced recall
-  useEffect(() => {
-    if (!q.trim()) { setHits([]); return; }
-    const t = setTimeout(() => { api.recall(ns, q, 15).then((d) => setHits(d.results)).catch(() => setHits([])); }, 250);
-    return () => clearTimeout(t);
-  }, [q, ns]);
 
   const total = useMemo(() => {
     if (ns === ALL) return namespaces.reduce((a, n) => a + n.total, 0);
@@ -87,7 +84,7 @@ export default function App() {
 
   const colorFor = (name: string) => colorsRef.current[name] || "#7c9cff";
   const closeDrawer = () => setDrawer(false);
-  const onView = (v: ViewKey) => { setView(v); setQ(""); closeDrawer(); writeHash(v, ns); };
+  const onView = (v: ViewKey) => { setView(v); closeDrawer(); writeHash(v, ns); };
   const onNs = (n: string) => { setNs(n); closeDrawer(); writeHash(view, n); };
 
   const View = { overview: Overview, analytics: Analytics, context: ContextBlock, graph: GraphView, memories: Memories, calendar: Calendar, sessions: Sessions, user: UserModel, peers: Peers, observations: Observations, changes: Changes, insights: Insights, workspace: Workspace, dreams: Dreams, settings: Settings }[view];
@@ -100,23 +97,17 @@ export default function App() {
         open={drawer} onView={onView} onNs={onNs} onClose={closeDrawer} onSettings={() => onView("settings")} />
 
       <main className="flex flex-col min-w-0 min-h-0">
-        <Topbar q={q} ns={ns} total={total} onSearch={setQ} action={<Composer ns={ns} onDone={bump} />} />
+        <Topbar ns={ns} total={total} onOpen={() => setPalette(true)} action={<Composer ns={ns} onDone={bump} />} />
         <DemoBanner onChange={bump} />
         <div className="flex-1 min-h-0 overflow-auto px-6 pt-[22px] pb-[30px] max-[820px]:px-3.5 max-[820px]:pb-[92px]">
-          {q.trim() ? (
-            <div className="fadein">
-              <h2 className="m-0 mb-4 text-[18px] font-bold tracking-tight">{t("recall")} · “{q}”</h2>
-              {hits.length ? hits.map((h, i) => <MemoryCard key={i} m={h.memory} score={h.score} components={h.components} />)
-                : <div className="text-[var(--dim)] text-center py-12">{t("no_match")}</div>}
-            </div>
-          ) : (
-            <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} />
-          )}
+          <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} />
         </div>
       </main>
 
       <TabBar view={view} onView={onView} onMenu={() => setDrawer(true)} />
       {drawer && <div className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px] hidden max-[820px]:block" onClick={closeDrawer} />}
+      {palette && <CommandPalette namespaces={namespaces} onClose={() => setPalette(false)}
+        onView={onView} onNs={onNs} onOpenMemory={openMemory} />}
       {openMem && <MemoryDetail memory={openMem} onClose={() => setOpenMem(null)} />}
     </div>
     </MemoryOpenCtx.Provider>

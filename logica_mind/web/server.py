@@ -487,6 +487,36 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         for r in results
                     ]})
 
+                elif path == "/api/search":
+                    # global Spotlight: memories (recall across all), entities
+                    # (graph node names) and namespaces — for the ⌘K palette.
+                    q = (first(qs, "q") or "").strip()
+                    limit = _int(qs, "limit", 6)
+                    if not q:
+                        self._json({"memories": [], "entities": [], "namespaces": []})
+                    else:
+                        ql = q.lower()
+                        mems = mind.recall_across(q, limit=limit)
+                        ents, seen = [], set()
+                        for nm in mind.store.namespaces():
+                            try:
+                                for node in mind.for_namespace(nm).graph_nodes():
+                                    name = node.get("name") or ""
+                                    k = name.lower()
+                                    if name and ql in k and k not in seen:
+                                        seen.add(k)
+                                        ents.append({"name": name, "namespace": nm,
+                                                     "degree": node.get("degree", 0), "type": node.get("type", "")})
+                            except Exception:
+                                continue
+                        ents.sort(key=lambda e: -e["degree"])
+                        nss = [n for n in mind.store.namespaces() if ql in n.lower()]
+                        self._json({
+                            "memories": [{"score": round(r.score, 3), "memory": _strip(r.memory.to_dict())} for r in mems],
+                            "entities": ents[:limit],
+                            "namespaces": nss[:limit],
+                        })
+
                 elif path == "/api/context":
                     # Smart context assembly: rank candidates for `q`, then fit the
                     # most relevant into a token budget and return BOTH — the ranked
