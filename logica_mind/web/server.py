@@ -494,7 +494,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     q = (first(qs, "q") or "").strip()
                     limit = max(1, _int(qs, "limit", 6))
                     if not q:
-                        self._json({"memories": [], "entities": [], "namespaces": []})
+                        self._json({"memories": [], "entities": [], "namespaces": [], "categories": []})
                     else:
                         ql = q.lower()
                         mems = mind.recall_across(q, limit=limit)
@@ -512,10 +512,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                 continue
                         ents.sort(key=lambda e: -e["degree"])
                         nss = [n for n in mind.store.namespaces() if ql in n.lower()]
+                        # categories: distinct fact categories matching the query
+                        catc = {}
+                        for nm in mind.store.namespaces():
+                            for m in mind.store.all(nm):
+                                c = (m.metadata or {}).get("category")
+                                if c and ql in c.lower():
+                                    catc[c] = catc.get(c, 0) + 1
+                        cats = sorted(catc.items(), key=lambda x: -x[1])[:limit]
                         self._json({
                             "memories": [{"score": round(r.score, 3), "memory": _strip(r.memory.to_dict())} for r in mems],
                             "entities": ents[:limit],
                             "namespaces": nss[:limit],
+                            "categories": [{"name": c, "count": n} for c, n in cats],
                         })
 
                 elif path == "/api/context":

@@ -4,6 +4,15 @@ import { tShort } from "../api";
 import { useOpenMemory } from "../memctx";
 import { useI18n } from "../i18n";
 
+// colour a fact's category chip by the group of its life/work dimension
+export function dimColor(dim?: string | null): string {
+  if (!dim) return "var(--accent2)";
+  if (dim.startsWith("biz_")) return "#4ade80";
+  if (dim.startsWith("project_")) return "#7c9cff";
+  if (dim.startsWith("org_")) return "#22d3ee";
+  return "#a78bfa";
+}
+
 export function LayerPill({ layer }: { layer: string }) {
   const { t } = useI18n();
   const label = t(`layer_${layer}` as any) || layer.toUpperCase();
@@ -67,6 +76,11 @@ export default function MemoryCard({
       )}
       <div className="flex items-center gap-[9px] mb-1.5 pr-5 flex-wrap">
         <LayerPill layer={m.layer} />
+        {m.metadata?.category && (() => { const dc = dimColor(m.metadata?.dimension); return (
+          <span className="text-[10.5px] font-semibold px-2 py-[1px] rounded-full" style={{ background: `${dc}1f`, color: dc }}>
+            {m.metadata.category}
+          </span>
+        ); })()}
         <span className="text-[11px] text-[var(--dim)] bg-[var(--panel2)] border border-[var(--line)] px-2 py-[1px] rounded-full">
           {m.namespace}
         </span>
