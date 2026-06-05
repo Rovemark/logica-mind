@@ -18,6 +18,7 @@ New here? Start with **[Installation](installation.md)** → **[Quickstart](quic
 - [Stores](stores.md) — the 7 storage backends and when to use each
 - [Embeddings & reranking](embeddings-and-reranking.md) — embedders and rerankers
 - [Knowledge graph](knowledge-graph.md) — the temporal graph, entities, point-in-time
+- [Graph intelligence](graph-intelligence.md) — path-finding, bridges, suggested links, layers, centrality
 - [Fact categorization](categorization.md) — categories + the 34-dimension life/work taxonomy
 - [Connections](connections.md) — derived backlinks, no manual links to maintain
 - [Dreaming & lifecycle](dreaming.md) — consolidation, the forgetting curve, contested beliefs

@@ -273,7 +273,7 @@ Full guides live in [`docs/`](docs/):
 | [Installation](docs/installation.md) | [Quickstart](docs/quickstart.md) | [Core concepts](docs/concepts.md) |
 | [Fact categorization](docs/categorization.md) | [Connections (derived backlinks)](docs/connections.md) | [LLM providers & auto-detection](docs/providers.md) |
 | [How memory is learned](docs/memory-extraction.md) | [Stores](docs/stores.md) | [Embeddings & reranking](docs/embeddings-and-reranking.md) |
-| [Knowledge graph](docs/knowledge-graph.md) | | |
+| [Knowledge graph](docs/knowledge-graph.md) | [Graph intelligence](docs/graph-intelligence.md) | |
 | [Dreaming & lifecycle](docs/dreaming.md) | [User model & peers](docs/user-model-and-peers.md) | [Sessions & run records](docs/sessions-and-records.md) |
 | [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
 | [Dashboard](docs/dashboard.md) | [Portability & privacy](docs/portability-and-privacy.md) | [CLI](docs/cli.md) |
