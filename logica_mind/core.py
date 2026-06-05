@@ -749,6 +749,12 @@ class LogicaMind:
                 if cm["source"] in node_ids and cm["target"] in node_ids \
                         and frozenset((cm["source"], cm["target"])) not in rel_pairs:
                     links.append(cm)
+        if "semantic" in want:
+            seen_pairs = rel_pairs | {frozenset((l["source"], l["target"])) for l in links if l.get("kind") == "co_mention"}
+            for sm in self._semantic_links(ns_scope):
+                if sm["source"] in node_ids and sm["target"] in node_ids \
+                        and frozenset((sm["source"], sm["target"])) not in seen_pairs:
+                    links.append(sm)
         # degree + centrality over everything shown
         deg = {nid: 0 for nid in node_ids}
         weighted = []
@@ -813,6 +819,47 @@ class LogicaMind:
         return [{"source": a, "target": b, "kind": "co_mention", "directed": False,
                  "weight": c, "label": "", "valid": True}
                 for (a, b), c in pair_count.items() if c >= cooc_min]
+
+    def _semantic_links(self, namespaces, top_n: int = 60, sem_min: float = 0.82, limit: int = 40):
+        """Latent affinity: entity pairs whose memory-neighbourhoods are SIMILAR
+        in vector space but have no explicit edge. Built from already-stored
+        embeddings only (never embeds in the request path), capped to the top-N
+        busiest entities. Meaningful with a real embedder; quietly thin with the
+        offline hashing one. Opt-in (off by default)."""
+        from ._vector import cosine
+        from collections import defaultdict
+        embs: Dict[str, list] = defaultdict(list)
+        deg: Dict[str, int] = defaultdict(int)
+        existing: set = set()
+        for ns in (namespaces or [self.namespace]):
+            for m in self.store.all(ns, layers=[MemoryLayer.GRAPH]):
+                if "alias" in (m.tags or []):
+                    continue
+                md = m.metadata or {}
+                s, o = md.get("subject"), md.get("object")
+                if not (s and o):
+                    continue
+                existing.add(frozenset((s, o)))
+                deg[s] += 1
+                deg[o] += 1
+                emb = getattr(m, "embedding", None)
+                if emb:
+                    embs[s].append(emb)
+                    embs[o].append(emb)
+        ents = sorted([x for x in embs if embs[x]], key=lambda x: -deg[x])[:top_n]
+        cent = {x: [sum(c) / len(embs[x]) for c in zip(*embs[x])] for x in ents}
+        out = []
+        for i in range(len(ents)):
+            for j in range(i + 1, len(ents)):
+                a, b = ents[i], ents[j]
+                if frozenset((a, b)) in existing:
+                    continue
+                sim = cosine(cent[a], cent[b])
+                if sim >= sem_min:
+                    out.append({"source": a, "target": b, "kind": "semantic", "directed": False,
+                                "weight": round(sim, 3), "label": "", "valid": True})
+        out.sort(key=lambda x: -x["weight"])
+        return out[:limit]
 
     def how_related(self, a: str, b: str, namespaces: Optional[List[str]] = None) -> Dict[str, Any]:
         """"How is A related to B?" — the confidence-weighted shortest path between

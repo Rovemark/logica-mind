@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb } from "lucide-react";
+import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb, Spline } from "lucide-react";
 import { api, tShort, type GraphData, type PathResult, type SuggestedLink } from "../api";
 import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
 import NodeDetail from "../components/NodeDetail";
@@ -23,8 +23,10 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const [history, setHistory] = useState(true);
   const [colorBy, setColorBy] = useState<ColorBy>("namespace");
   const [coMention, setCoMention] = useState(true);
+  const [semantic, setSemantic] = useState(false);
   const [suggest, setSuggest] = useState(false);
   const [suggestedLinks, setSuggestedLinks] = useState<SuggestedLink[]>([]);
+  const [tintQuery, setTintQuery] = useState("");
   const [areaFilter, setAreaFilter] = useState<Area | null>(null);
   const [minConf, setMinConf] = useState(0);
   const [predOff, setPredOff] = useState<Set<string>>(new Set());
@@ -49,9 +51,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const gref = useRef<GraphHandle>(null);
 
   useEffect(() => {
-    const layers = coMention ? ["relation", "co_mention"] : ["relation"];
+    const layers = ["relation", coMention && "co_mention", semantic && "semantic"].filter(Boolean) as string[];
     api.graph(ns, history, at, { layers, focus: focusNode || undefined, depth }).then(setData).catch(() => setData({ nodes: [], links: [] }));
-  }, [ns, history, at, coMention, focusNode, depth]);
+  }, [ns, history, at, coMention, semantic, focusNode, depth]);
 
   // reset transient view state when switching namespace
   useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); setPathRes(null); }, [ns]);
@@ -114,10 +116,14 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     return { nodes, links };
   }, [data, colorBy, areaFilter, minConf, predOff, t, suggest, suggestedLinks]);
 
-  const tint = colorBy === "area" ? (n: any) => (n.dimension ? dimColor(n.dimension) : "var(--dim2)")
+  // a highlight query paints matches gold and dims the rest (Obsidian colour groups);
+  // otherwise colour follows the colour-by mode
+  const tq = tintQuery.trim().toLowerCase();
+  const tint = tq ? (n: any) => (n.id.toLowerCase().includes(tq) ? "#fbbf24" : "var(--dim2)")
+    : colorBy === "area" ? (n: any) => (n.dimension ? dimColor(n.dimension) : "var(--dim2)")
     : colorBy === "centrality" ? (n: any) => centColor(n.centrality || 0)
     : undefined;
-  const communities = colorBy === "community";
+  const communities = colorBy === "community" && !tq;
 
   async function toggleScrub() {
     if (scrub) { setScrub(false); setAt(null); return; }
@@ -159,7 +165,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     shown.nodes.forEach((n) => (n.namespaces || []).forEach((x) => s.add(x)));
     return [...s].slice(0, 8);
   }, [shown]);
-  const nFilters = (minConf > 0 ? 1 : 0) + predOff.size;
+  const nFilters = (minConf > 0 ? 1 : 0) + predOff.size + (tq ? 1 : 0);
 
   return (
     <div className="fadein">
@@ -211,6 +217,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           </div>
           {/* connection layers */}
           <Btn on={coMention} onClick={() => setCoMention((v) => !v)} icon={Hexagon}>{t("glayer_comention")}</Btn>
+          <Btn on={semantic} onClick={() => setSemantic((v) => !v)} icon={Spline}>{t("glayer_semantic")}</Btn>
           <Btn on={suggest} onClick={() => setSuggest((v) => !v)} icon={Lightbulb}>{t("glayer_suggested")}</Btn>
           {/* filters popover */}
           <div className="relative">
@@ -221,12 +228,15 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
               <div className="absolute right-0 mt-1 glass border border-[var(--line)] rounded-[12px] p-3 w-[248px] shadow-[var(--shadow)]">
                 <div className="flex items-center mb-2">
                   <span className="text-[var(--dim2)] text-[10px] uppercase tracking-[.6px]">{t("graph_filters")}</span>
-                  {nFilters > 0 && <button onClick={() => { setMinConf(0); setPredOff(new Set()); }} className="ml-auto text-[11px] text-[var(--accent)] hover:underline">{t("graph_reset")}</button>}
+                  {nFilters > 0 && <button onClick={() => { setMinConf(0); setPredOff(new Set()); setTintQuery(""); }} className="ml-auto text-[11px] text-[var(--accent)] hover:underline">{t("graph_reset")}</button>}
                 </div>
                 <div className="text-[11.5px] text-[var(--dim)] flex items-center justify-between mb-1">
                   <span>{t("graph_min_conf")}</span><span className="tabular-nums text-[var(--txt)]">{Math.round(minConf * 100)}%</span>
                 </div>
                 <input type="range" min={0} max={1} step={0.05} value={minConf} onChange={(e) => setMinConf(+e.target.value)} className="w-full accent-[var(--accent)] mb-3" />
+                <div className="text-[11.5px] text-[var(--dim)] mb-1.5">{t("graph_highlight")}</div>
+                <input value={tintQuery} onChange={(e) => setTintQuery(e.target.value)} placeholder="…"
+                  className="w-full bg-[var(--panel2)] border border-[var(--line)] rounded-[8px] px-2 py-1.5 text-[12px] text-[var(--txt)] outline-none focus:border-[var(--accent)]/60 mb-3" />
                 {predsPresent.length > 0 && <>
                   <div className="text-[11.5px] text-[var(--dim)] mb-1.5">{t("graph_predicates")}</div>
                   <div className="flex flex-wrap gap-1.5">
