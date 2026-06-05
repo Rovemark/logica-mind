@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { PALETTE, type GraphData } from "../api";
 
-export interface GraphHandle { reheat: () => void; fit: () => void; }
+export interface GraphHandle { reheat: () => void; fit: () => void; center: (id: string) => void; }
 
 // edge grammar: relations are hued by their predicate CLASS (so the graph reads
 // like a sentence, not a tangle of identical blue lines); emergent layers get
@@ -51,6 +51,15 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   useImperativeHandle(ref, () => ({
     reheat: () => { G.current.alpha = 1; },
     fit: () => fitGraph(true),
+    // pan/zoom to a node and highlight it (used by search-focus + backlink jumps)
+    center: (id: string) => {
+      const g = G.current, n = g.byId[id]; if (!n) return;
+      const k = Math.max(g.t.k, 1.25);
+      const s = { ...g.t }, tx = g.W / 2 - n.x * k, ty = g.H / 2 - n.y * k, st = performance.now();
+      g.hover = id;
+      const an = () => { const p = Math.min(1, (performance.now() - st) / 350), e = 1 - Math.pow(1 - p, 3);
+        g.t = { x: s.x + (tx - s.x) * e, y: s.y + (ty - s.y) * e, k: s.k + (k - s.k) * e }; if (p < 1) requestAnimationFrame(an); }; an();
+    },
   }));
 
   function computeComponents() {
