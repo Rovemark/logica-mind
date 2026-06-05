@@ -193,6 +193,38 @@ def seed(mind: "LogicaMind", *, rng_seed: int = 7, days: int = 75) -> int:
     edge("the mobile app", "part_of", COMPANY, ns="org:acme")
     edge("the billing service", "part_of", COMPANY, ns="org:acme")
 
+    # ---- categorized facts on the org entities ----
+    # lights up the new graph layers + the Profile in the demo: facts carry a
+    # life/work dimension (life-areas + categorization), pairs that get talked
+    # about together WITHOUT an edge become co-mentions, and 'Maya'/'Acme' fold
+    # onto their canonical nodes via aliases.
+    ORG_FACTS = [
+        ("Acme Inc hit $45k MRR in Q3, up 30% quarter over quarter.", "biz_revenue", "MRR"),
+        ("Acme Inc closed a $2M seed round at a $12M valuation.", "biz_funding", "Fundraising"),
+        ("Acme Inc set the new pricing tier at $49/mo.", "biz_pricing", "Pricing"),
+        ("Priya Nair leads research on user retention at Acme Inc.", "org_strategy", "Strategy"),
+        ("Alex Rivera maintains the data pipeline behind the analytics.", "org_product", "Platform"),
+        ("The mobile app launch slipped to May, blocked on a payments bug.", "project_timeline", "Launch"),
+        # co-mention pairs (no direct edge) — each said twice so they cross cooc_min
+        ("Sam Okafor and Priya Nair shipped the analytics dashboard.", "org_product", "Platform"),
+        ("Sam Okafor and Priya Nair paired on the retention metrics.", "org_strategy", "Metrics"),
+        ("Alex Rivera and Jordan Lee debated the data pipeline design.", "project_decision", "Architecture"),
+        ("Alex Rivera and Jordan Lee reviewed the pipeline rollout.", "project_status", "Status"),
+        # the founder as a person — personal life-areas up Maslow
+        ("Maya Chen is a Scorpio who meditates every morning before work.", "spirituality", "Daily ritual"),
+        ("Maya Chen dreams of building a company that outlives her.", "ambition", "Legacy"),
+        ("Maya Chen prefers strong flat whites and works from cafés on Fridays.", "preference", "Coffee preference"),
+    ]
+    for content, dim, cat in ORG_FACTS:
+        add("org:acme", content, MemoryLayer.SEMANTIC, rng.randint(0, days),
+            importance=0.7, meta={"dimension": dim, "category": cat, "source": "claude-code"})
+    org = mind.for_namespace("org:acme")
+    org.add_alias("Maya", FOUNDER)
+    org.add_alias("Acme", COMPANY)
+    for am in org.store.all("org:acme", [MemoryLayer.GRAPH]):
+        if "alias" in (am.tags or []):
+            org.store.add([_flag(am)])
+
     # ---- a USER-typed context (the founder's own memory) ----
     # gives the Memory Lake a typed catalog (USER / ORG / AGENT) instead of one
     # uniform kind, and a richer User view for this namespace.
