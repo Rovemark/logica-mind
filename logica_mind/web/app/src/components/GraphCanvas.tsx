@@ -26,6 +26,9 @@ interface Props {
   // optional per-node tint (e.g. colour by life-area). Returning null falls back
   // to the default namespace/shared colouring.
   nodeTint?: (n: any) => string | null;
+  // fired when the hovered node changes (id=null on leave), with canvas-local
+  // coords — powers the hover preview card.
+  onHover?: (id: string | null, x: number, y: number) => void;
 }
 
 // Live canvas force-simulation (Obsidian-style continuous physics):
@@ -33,7 +36,7 @@ interface Props {
 // interaction. Pan/zoom/drag with mouse AND touch (pinch-zoom). A click/tap on a
 // node calls onPick(name) so the parent can show its memories + relations.
 const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
-  { data, communities, colorFor, onPick, nodeTint }, ref,
+  { data, communities, colorFor, onPick, nodeTint, onHover }, ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,10 +44,12 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   const colorRef = useRef(colorFor);
   const pickRef = useRef(onPick);
   const tintRef = useRef(nodeTint);
+  const hoverCbRef = useRef(onHover);
   commRef.current = communities;
   colorRef.current = colorFor;
   pickRef.current = onPick;
   tintRef.current = nodeTint;
+  hoverCbRef.current = onHover;
 
   const G = useRef<any>({ nodes: [], links: [], byId: {}, adj: {}, comp: {}, t: { x: 0, y: 0, k: 1 }, hover: null, drag: null, alpha: 0, raf: 0, W: 0, H: 0, dpr: 1, fitOnce: false });
 
@@ -207,7 +212,11 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const onMove = (e: MouseEvent) => { const r = cv.getBoundingClientRect();
       if (mode === "pan") { g.t.x += e.clientX - last.x; g.t.y += e.clientY - last.y; last = { x: e.clientX, y: e.clientY }; }
       else if (mode === "node" && g.drag) { g.drag.fx = (e.clientX - r.left - g.t.x) / g.t.k; g.drag.fy = (e.clientY - r.top - g.t.y) / g.t.k; g.alpha = Math.max(g.alpha, 0.3); }
-      else { const n = nodeAt(e.clientX - r.left, e.clientY - r.top); g.hover = n ? n.id : null; cv.style.cursor = n ? "pointer" : "grab"; } };
+      else { const n = nodeAt(e.clientX - r.left, e.clientY - r.top); const id = n ? n.id : null;
+        if (id !== g.hover) { g.hover = id; hoverCbRef.current?.(id, e.clientX - r.left, e.clientY - r.top); }
+        cv.style.cursor = n ? "pointer" : "grab"; } };
+    const onLeave = () => { if (g.hover) { g.hover = null; hoverCbRef.current?.(null, 0, 0); } };
+    cv.addEventListener("mouseleave", onLeave);
     const onUp = (e: MouseEvent) => {
       const moved = downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 5;
       if (downNode && !moved) pickRef.current(downNode.id);   // click (not drag) → open detail
@@ -249,6 +258,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     return () => {
       cancelAnimationFrame(g.raf);
       cv.removeEventListener("wheel", onWheel); cv.removeEventListener("mousedown", onDown);
+      cv.removeEventListener("mouseleave", onLeave);
       window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);
       cv.removeEventListener("touchstart", onTStart); cv.removeEventListener("touchmove", onTMove); cv.removeEventListener("touchend", onTEnd);
       window.removeEventListener("resize", onResize);
