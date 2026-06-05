@@ -15,9 +15,10 @@ export interface Memory {
 }
 export interface Stats { episodic: number; semantic: number; graph: number; user: number; total: number; }
 export interface NsItem { namespace: string; total: number; stats: Stats; }
-export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; dimension?: string; }
-export interface GraphLink { source: string; target: string; label: string; confidence?: number; valid?: boolean; }
-export interface GraphData { nodes: GraphNode[]; links: GraphLink[]; }
+export type LinkKind = "relation" | "co_mention" | "semantic";
+export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; dimension?: string; degree?: number; centrality?: number; }
+export interface GraphLink { source: string; target: string; label: string; confidence?: number; valid?: boolean; kind?: LinkKind; weight?: number; directed?: boolean; pclass?: string; }
+export interface GraphData { nodes: GraphNode[]; links: GraphLink[]; namespaces?: string[]; focus?: string | null; depth?: number; }
 export interface Relation { source: string; target: string; label: string; confidence?: number; valid?: boolean; valid_from?: string; valid_to?: string; }
 export interface RecallHit { score: number; components?: Record<string, any>; memory: Memory; }
 export interface ContextCandidate { score: number; components?: Record<string, any>; included: boolean; memory: Memory; }
@@ -74,8 +75,12 @@ export const api = {
     j(`/api/recall?${nsq(ns)}&q=${encodeURIComponent(q)}&limit=${limit}`),
   memories: (ns: string, layer?: string, dimension?: string, category?: string): Promise<{ memories: Memory[] }> =>
     j(`/api/memories?${nsq(ns)}${layer ? `&layer=${layer}` : ""}${dimension ? `&dimension=${encodeURIComponent(dimension)}` : ""}${category ? `&category=${encodeURIComponent(category)}` : ""}`),
-  graph: (ns: string, history: boolean, at?: string | null): Promise<GraphData> =>
-    j(`/api/graph?${nsq(ns)}&history=${history ? 1 : 0}${at ? `&at=${encodeURIComponent(at)}` : ""}`),
+  graph: (ns: string, history: boolean, at?: string | null,
+          opts?: { layers?: string[]; focus?: string | null; depth?: number }): Promise<GraphData> =>
+    j(`/api/graph?${nsq(ns)}&history=${history ? 1 : 0}${at ? `&at=${encodeURIComponent(at)}` : ""}`
+      + `${opts?.layers ? `&layers=${opts.layers.join(",")}` : ""}`
+      + `${opts?.focus ? `&focus=${encodeURIComponent(opts.focus)}` : ""}`
+      + `${opts?.depth ? `&depth=${opts.depth}` : ""}`),
   timerange: (ns: string): Promise<{ min: string | null; max: string | null }> => j(`/api/timerange?${nsq(ns)}`),
   communities: (ns: string): Promise<{ namespace: string; communities: Community[] }> => j(`/api/communities?${nsq(ns)}`),
   reflect: (ns: string): Promise<{ namespace: string; insight: string }> => j(`/api/reflect?${nsq(ns)}`),

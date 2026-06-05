@@ -3,6 +3,21 @@ import { PALETTE, type GraphData } from "../api";
 
 export interface GraphHandle { reheat: () => void; fit: () => void; }
 
+// edge grammar: relations are hued by their predicate CLASS (so the graph reads
+// like a sentence, not a tangle of identical blue lines); emergent layers get
+// their own cool, low-contrast treatment.
+const PCLASS_RGB: Record<string, string> = {
+  social: "245,158,11", has: "74,222,128", causal: "251,113,133",
+  locative: "34,211,238", temporal: "167,139,250", is_a: "124,156,255", other: "148,163,184",
+};
+const COMENTION_RGB = "120,140,170";   // dashed — "talked about together"
+const SEMANTIC_RGB = "150,130,200";    // dotted — latent affinity
+
+// node radius scales with PageRank centrality, so hubs read as hubs
+function baseRad(n: any, hover: boolean): number {
+  return 4 + (n.centrality || 0) * 6 + (n.shared ? 1.5 : 0) + (hover ? 3 : 0);
+}
+
 interface Props {
   data: GraphData;
   communities: boolean;
@@ -82,7 +97,6 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const hi = g.hover, nbr = hi ? (g.adj[hi] || new Set()) : null;
     // theme-aware ink so labels/edges read on both the light and dark canvas
     const light = document.documentElement.getAttribute("data-theme") === "light";
-    const edgeRGB = light ? "60,88,200" : "124,156,255";
     const edgeDead = light ? "rgba(120,130,150,.35)" : "rgba(90,100,120,.28)";
     const labelFill = light ? "#1f2940" : "#e8eef7", labelFillDim = light ? "#8a93a6" : "#5a6477";
     const labelStroke = light ? "rgba(255,255,255,.9)" : "#0a0d14";
@@ -90,18 +104,45 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const nodeRing = (shared: boolean) => shared ? (light ? "rgba(60,80,160,.55)" : "rgba(255,255,255,.55)")
                                                  : (light ? "rgba(40,55,90,.3)" : "rgba(10,13,20,.9)");
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
-      const conf = l.confidence == null ? 1 : l.confidence;
       const active = !hi || l.source === hi || l.target === hi;
-      c.beginPath(); c.moveTo(A.x, A.y);
+      const kind = l.kind || "relation";
       const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2 - Math.hypot(B.x - A.x, B.y - A.y) * 0.07;
-      c.quadraticCurveTo(mx, my, B.x, B.y);
-      c.strokeStyle = l.valid ? `rgba(${edgeRGB},${active ? 0.22 + 0.6 * conf : 0.1})` : edgeDead;
-      c.lineWidth = (0.6 + 1.7 * conf) / Math.sqrt(t.k); if (!l.valid) c.setLineDash([5 / t.k, 4 / t.k]);
+      c.beginPath(); c.moveTo(A.x, A.y); c.quadraticCurveTo(mx, my, B.x, B.y);
+      let rgb: string, alpha: number, width: number, dash: number[] | null = null, arrow = false;
+      if (kind === "co_mention") {
+        rgb = COMENTION_RGB; alpha = active ? 0.5 : 0.16; dash = [4, 4];
+        width = 0.7 + Math.min(l.weight || 1, 5) * 0.26;
+      } else if (kind === "semantic") {
+        rgb = SEMANTIC_RGB; alpha = active ? 0.45 : 0.13; width = 0.8; dash = [1.2, 4];
+      } else {                                            // relation, hued by predicate class
+        const conf = l.confidence == null ? 1 : l.confidence;
+        if (!l.valid) {                                   // superseded — greyed + dashed, no arrow
+          c.strokeStyle = edgeDead; c.lineWidth = (0.6 + 1.2 * conf) / Math.sqrt(t.k);
+          c.setLineDash([5 / t.k, 4 / t.k]); c.stroke(); c.setLineDash([]);
+          if (t.k > 0.85 && active && l.label) { c.fillStyle = edgeLabel; c.font = `${10 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.fillText(l.label, mx, my - 3 / t.k); }
+          return;
+        }
+        rgb = PCLASS_RGB[l.pclass || "other"] || PCLASS_RGB.other;
+        alpha = active ? 0.3 + 0.55 * conf : 0.12; width = 0.7 + 1.8 * conf; arrow = true;
+      }
+      c.strokeStyle = `rgba(${rgb},${alpha})`;
+      c.lineWidth = width / Math.sqrt(t.k);
+      if (dash) c.setLineDash(dash.map((d) => d / t.k));
       c.stroke(); c.setLineDash([]);
-      if (t.k > 0.85 && active) { c.fillStyle = edgeLabel; c.font = `${10 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.fillText(l.label, mx, my - 3 / t.k); }
+      if (arrow && t.k > 0.7 && active) {                 // directional arrowhead at the target
+        const ang = Math.atan2(B.y - my, B.x - mx);
+        const br = baseRad(B, false) / Math.sqrt(t.k);
+        const tx = B.x - Math.cos(ang) * (br + 1.5 / t.k), ty = B.y - Math.sin(ang) * (br + 1.5 / t.k);
+        const s = 5 / t.k;
+        c.beginPath(); c.moveTo(tx, ty);
+        c.lineTo(tx - s * Math.cos(ang - 0.42), ty - s * Math.sin(ang - 0.42));
+        c.lineTo(tx - s * Math.cos(ang + 0.42), ty - s * Math.sin(ang + 0.42));
+        c.closePath(); c.fillStyle = `rgba(${rgb},${active ? 0.85 : 0.3})`; c.fill();
+      }
+      if (t.k > 0.85 && active && l.label) { c.fillStyle = edgeLabel; c.font = `${10 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.fillText(l.label, mx, my - 3 / t.k); }
     });
     g.nodes.forEach((n: any) => { const active = !hi || n.id === hi || (nbr && nbr.has(n.id));
-      const col = nodeColor(n), rad = (n.shared ? 7.5 : 5.5) + (n.id === hi ? 3 : 0);
+      const col = nodeColor(n), rad = baseRad(n, n.id === hi);
       if (n.id === hi || (nbr && nbr.has(n.id))) { c.beginPath(); c.arc(n.x, n.y, rad + 7 / t.k, 0, 6.283); c.fillStyle = col + "33"; c.fill(); }
       c.beginPath(); c.arc(n.x, n.y, rad / Math.sqrt(t.k), 0, 6.283);
       c.fillStyle = active ? col : col + "44"; c.fill();

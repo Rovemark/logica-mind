@@ -739,8 +739,13 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 elif path == "/api/graph":
                     hist = first(qs, "history", "1") == "1"
                     at = first(qs, "at") or None     # point-in-time view
+                    lyr = first(qs, "layers")        # csv: relation,co_mention,semantic
+                    layers = [s for s in lyr.split(",") if s] if lyr else None
+                    foc = first(qs, "focus") or None
+                    dep = int(first(qs, "depth", "1") or 1)
                     self._json(mind.graph_viz(namespace=None if is_all else ns,
-                                              include_history=hist, at=at))
+                                              include_history=hist, at=at,
+                                              layers=layers, focus=foc, depth=dep))
 
                 elif path == "/api/timerange":
                     # true min/max created_at via a cheap data-layer MIN/MAX (no row
