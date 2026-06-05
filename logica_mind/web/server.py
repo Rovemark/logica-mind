@@ -535,6 +535,26 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         obs = mind.for_namespace(ns).observations(limit=limit)
                         self._json({"observations": [{**o, "namespace": ns} for o in obs]})
 
+                elif path == "/api/integrations":
+                    # the live stack (store + redundancy, embedder, llm, reranker)
+                    # plus the catalog of what's available to enable — drives the
+                    # Settings → Integrations panel.
+                    from ..providers import detect
+                    emb, st = mind.embedder, mind.store
+                    if getattr(st, "name", "") == "multi":
+                        store_info = {"id": "multi", "backends": [getattr(s, "name", "?") for s in getattr(st, "stores", [])]}
+                    else:
+                        store_info = {"id": getattr(st, "name", "store"), "backends": []}
+                    dims = getattr(emb, "dim", None) or getattr(emb, "_dim", None) or getattr(emb, "dimension", None)
+                    active = {
+                        "store": store_info,
+                        "embedder": {"id": getattr(emb, "name", "?"), "model": getattr(emb, "model", None), "dims": dims},
+                        "llm": {"id": getattr(mind.llm, "name", "null"), "model": getattr(mind.llm, "model", None),
+                                "available": bool(getattr(mind.llm, "available", False))},
+                        "reranker": (getattr(mind.reranker, "name", None) if getattr(mind, "reranker", None) else None),
+                    }
+                    self._json({"active": active, "available": detect()})
+
                 elif path == "/api/memories":
                     layers = layers_of(qs)
                     session = first(qs, "session")     # optional: scope to one session

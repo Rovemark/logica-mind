@@ -61,8 +61,9 @@ export default function Sidebar({
 
       <div className="border-t border-[var(--line)] p-2.5 flex-none">
         <button onClick={onSettings}
-          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[9px] text-[13px] font-medium
-            text-[var(--dim)] hover:bg-[var(--panel2)] hover:text-[var(--txt)]">
+          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[9px] text-[13px] font-medium
+            ${view === "settings" ? "bg-[var(--panel2)] text-[var(--txt)] shadow-[inset_0_0_0_1px_var(--line)]"
+                                  : "text-[var(--dim)] hover:bg-[var(--panel2)] hover:text-[var(--txt)]"}`}>
           <SettingsIcon size={16} /> {t("settings")}
         </button>
       </div>

@@ -135,6 +135,15 @@ class LogicaMind:
         self.namespace = namespace
         self.store = store or SQLiteStore()
         self.embedder = embedder or HashingEmbedder()
+        # zero-config: if no LLM was passed but a provider key is already in the
+        # environment, pick it up so extraction/decomposition just turn on. Fully
+        # guarded — detection never breaks construction or the offline default.
+        if llm is None:
+            try:
+                from .providers import auto_llm
+                llm = auto_llm()
+            except Exception:
+                llm = None
         self.llm = llm or NullLLM()
         # default extractor: LLM-based if an LLM is available, else noop
         if extractor is not None:

@@ -26,7 +26,7 @@ import Insights from "./views/Insights";
 import Workspace from "./views/Workspace";
 import Dreams from "./views/Dreams";
 
-const VIEW_SET = new Set(VIEWS.map((v) => v.key as string));
+const VIEW_SET = new Set([...VIEWS.map((v) => v.key as string), "settings"]);
 function parseHash(): { view: ViewKey; ns: string } {
   const h = decodeURIComponent(location.hash.replace(/^#\/?/, ""));
   const [v, ...rest] = h.split("/");
@@ -47,7 +47,6 @@ export default function App() {
   const [drawer, setDrawer] = useState(false);
   const [rev, setRev] = useState(0);
   const [lang, setLangState] = useState<Lang>(getLang());
-  const [showSettings, setShowSettings] = useState(false);
   const [openMem, setOpenMem] = useState<Memory | null>(null);
   const colorsRef = useRef<Record<string, string>>({});
   const t = useMemo(() => makeT(lang), [lang]);
@@ -91,14 +90,14 @@ export default function App() {
   const onView = (v: ViewKey) => { setView(v); setQ(""); closeDrawer(); writeHash(v, ns); };
   const onNs = (n: string) => { setNs(n); closeDrawer(); writeHash(view, n); };
 
-  const View = { overview: Overview, analytics: Analytics, context: ContextBlock, graph: GraphView, memories: Memories, calendar: Calendar, sessions: Sessions, user: UserModel, peers: Peers, observations: Observations, changes: Changes, insights: Insights, workspace: Workspace, dreams: Dreams }[view];
+  const View = { overview: Overview, analytics: Analytics, context: ContextBlock, graph: GraphView, memories: Memories, calendar: Calendar, sessions: Sessions, user: UserModel, peers: Peers, observations: Observations, changes: Changes, insights: Insights, workspace: Workspace, dreams: Dreams, settings: Settings }[view];
 
   return (
     <LangCtx.Provider value={{ lang, setLang, t }}>
     <MemoryOpenCtx.Provider value={openMemory}>
     <div className="grid h-screen grid-cols-[256px_1fr] max-[820px]:grid-cols-[1fr]">
       <Sidebar view={view} ns={ns} namespaces={namespaces} colors={colorsRef.current}
-        open={drawer} onView={onView} onNs={onNs} onClose={closeDrawer} onSettings={() => setShowSettings(true)} />
+        open={drawer} onView={onView} onNs={onNs} onClose={closeDrawer} onSettings={() => onView("settings")} />
 
       <main className="flex flex-col min-w-0 min-h-0">
         <Topbar q={q} ns={ns} total={total} onSearch={setQ} action={<Composer ns={ns} onDone={bump} />} />
@@ -118,7 +117,6 @@ export default function App() {
 
       <TabBar view={view} onView={onView} onMenu={() => setDrawer(true)} />
       {drawer && <div className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px] hidden max-[820px]:block" onClick={closeDrawer} />}
-      {showSettings && <Settings ns={ns} onClose={() => setShowSettings(false)} />}
       {openMem && <MemoryDetail memory={openMem} onClose={() => setOpenMem(null)} />}
     </div>
     </MemoryOpenCtx.Provider>

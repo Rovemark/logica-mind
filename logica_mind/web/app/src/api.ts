@@ -25,6 +25,16 @@ export interface ContextResult { namespace: string; query: string; budget: numbe
 export interface Observation { kind: "hub" | "co_occurrence"; entities: string[]; count: number; shared: string[]; text: string; namespace?: string; }
 export interface AddResultItem { content: string; layer: string; op: "new" | "updated"; superseded?: string | null; category?: string | null; }
 export interface AddResult { ok: boolean; namespace: string; kind: string; llm: boolean; created: AddResultItem[]; graph_edges: number; user_updated: boolean; deduped: boolean; }
+export interface IntegrationOption { id: string; label: string; model?: string; blurb?: string; env?: string | null; detected: boolean; installed: boolean; }
+export interface IntegrationsData {
+  active: {
+    store: { id: string; backends: string[] };
+    embedder: { id: string; model?: string | null; dims?: number | null };
+    llm: { id: string; model?: string | null; available: boolean };
+    reranker?: string | null;
+  };
+  available: { llm: IntegrationOption[]; embedders: IntegrationOption[]; rerankers: IntegrationOption[]; stores: IntegrationOption[] };
+}
 export interface Community { nodes: string[]; size: number; facts: string[]; }
 export interface AnalyticsLakeRow { namespace: string; total: number; entities: number; facts: number; relations: number; last: string | null; spark: number[]; }
 export interface AnalyticsData {
@@ -46,6 +56,7 @@ export const api = {
   namespaces: (): Promise<{ namespaces: NsItem[] }> => j(`/api/namespaces`),
   stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),
   analytics: (ns: string): Promise<AnalyticsData> => j(`/api/analytics?${nsq(ns)}`),
+  integrations: (): Promise<IntegrationsData> => j(`/api/integrations`),
   context: (ns: string, q: string, budget = 1200): Promise<ContextResult> =>
     j(`/api/context?${nsq(ns)}&q=${encodeURIComponent(q)}&budget=${budget}`),
   observations: (ns: string): Promise<{ observations: Observation[] }> => j(`/api/observations?${nsq(ns)}`),

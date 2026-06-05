@@ -1,7 +1,7 @@
 import { LayoutGrid, BarChart3, Layers, Network, List, CalendarDays, MessagesSquare, UserRound, Sparkles, Telescope, Users, History, FolderGit2, Moon } from "lucide-react";
 import type { ComponentType } from "react";
 
-export type ViewKey = "overview" | "analytics" | "context" | "graph" | "memories" | "calendar" | "sessions" | "user" | "peers" | "observations" | "changes" | "insights" | "workspace" | "dreams";
+export type ViewKey = "overview" | "analytics" | "context" | "graph" | "memories" | "calendar" | "sessions" | "user" | "peers" | "observations" | "changes" | "insights" | "workspace" | "dreams" | "settings";
 export type CatKey = "explore" | "memory" | "intelligence" | "system";
 
 export interface ViewDef { key: ViewKey; label: string; Icon: ComponentType<{ size?: number; strokeWidth?: number }>; cat: CatKey; }
