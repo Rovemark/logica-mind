@@ -160,6 +160,15 @@ TOOLS = [
             "required": ["id"],
         },
     },
+    {
+        "name": "lm_how_related",
+        "description": "How is entity A related to entity B? Returns the confidence-weighted shortest path between them as an ordered chain of typed relationships.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"a": {"type": "string"}, "b": {"type": "string"}},
+            "required": ["a", "b"],
+        },
+    },
     # ---- coding-context devtools ----
     {
         "name": "lm_execute",
@@ -406,6 +415,8 @@ class MCPServer:
             return m.dimensions()
         if name == "lm_connected":
             return m.connections(args["id"])
+        if name == "lm_how_related":
+            return m.how_related(args["a"], args["b"])
         if name == "lm_context":
             return m.context(args["query"], token_budget=int(args.get("token_budget", 1500)))
         if name == "lm_ask_about_user":

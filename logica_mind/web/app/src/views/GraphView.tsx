@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check } from "lucide-react";
-import { api, tShort, type GraphData } from "../api";
+import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight } from "lucide-react";
+import { api, tShort, type GraphData, type PathResult } from "../api";
 import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
 import NodeDetail from "../components/NodeDetail";
 import { useI18n } from "../i18n";
@@ -38,6 +38,10 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const [depth, setDepth] = useState(2);
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
   const [hoverInfo, setHoverInfo] = useState<{ name: string; type: string; mems: any[] } | null>(null);
+  const [pathOpen, setPathOpen] = useState(false);
+  const [pathFrom, setPathFrom] = useState("");
+  const [pathTo, setPathTo] = useState("");
+  const [pathRes, setPathRes] = useState<PathResult | null>(null);
   const hoverCache = useRef<Record<string, { name: string; type: string; mems: any[] }>>({});
   const wrapRef = useRef<HTMLDivElement>(null);
   const gref = useRef<GraphHandle>(null);
@@ -48,7 +52,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   }, [ns, history, at, coMention, focusNode, depth]);
 
   // reset transient view state when switching namespace
-  useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); }, [ns]);
+  useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); setPathRes(null); }, [ns]);
 
   // hover preview: fetch (and cache) the hovered entity's top facts
   useEffect(() => {
@@ -116,6 +120,12 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
       || shown.nodes.find((n) => n.id.toLowerCase().includes(s));
     if (hit) { setPicked(hit.id); gref.current?.center(hit.id); }
   }
+
+  async function runPath() {
+    if (!pathFrom.trim() || !pathTo.trim()) return;
+    try { setPathRes(await api.path(ns, pathFrom.trim(), pathTo.trim())); } catch { setPathRes(null); }
+  }
+  const pathIds = pathRes?.found ? pathRes.path : undefined;
 
   const Btn = ({ on, onClick, icon: Icon, children }: any) => (
     <button onClick={onClick}
@@ -221,11 +231,41 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
               </div>
             )}
           </div>
+          <Btn on={pathOpen || !!pathIds} onClick={() => { setPathOpen((v) => !v); if (pathOpen) setPathRes(null); }} icon={Route}>{t("graph_path")}</Btn>
           <Btn on={history} onClick={() => setHistory((v) => !v)} icon={Clock}>{t("graph_history")}</Btn>
           <Btn on={scrub} onClick={toggleScrub} icon={Timer}>{t("graph_time")}</Btn>
           <Btn onClick={() => gref.current?.reheat()} icon={RotateCw}>{t("graph_shake")}</Btn>
           <Btn onClick={() => gref.current?.fit()} icon={Maximize2}>{t("graph_fit")}</Btn>
         </div>
+
+        {/* Path mode — "how is A related to B?" */}
+        {pathOpen && (
+          <div className="absolute top-[34px] left-3.5 z-[4] glass border border-[var(--line)] rounded-[12px] p-3 w-[320px] shadow-[var(--shadow)]">
+            <div className="text-[var(--dim2)] text-[10px] uppercase tracking-[.6px] mb-2 flex items-center gap-1.5"><Route size={12} /> {t("graph_path_hint")}</div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <input value={pathFrom} onChange={(e) => setPathFrom(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runPath()}
+                placeholder={t("graph_path_from")} className="flex-1 min-w-0 bg-[var(--panel2)] border border-[var(--line)] rounded-[8px] px-2 py-1.5 text-[12px] text-[var(--txt)] outline-none focus:border-[var(--accent)]/60" />
+              <ArrowRight size={13} className="text-[var(--dim2)] flex-none" />
+              <input value={pathTo} onChange={(e) => setPathTo(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runPath()}
+                placeholder={t("graph_path_to")} className="flex-1 min-w-0 bg-[var(--panel2)] border border-[var(--line)] rounded-[8px] px-2 py-1.5 text-[12px] text-[var(--txt)] outline-none focus:border-[var(--accent)]/60" />
+            </div>
+            <button onClick={runPath} disabled={!pathFrom.trim() || !pathTo.trim()}
+              className="w-full px-3 py-1.5 rounded-[8px] bg-[var(--accent)] text-white text-[12px] font-medium disabled:opacity-40">{t("graph_path_find")}</button>
+            {pathRes && (pathRes.found ? (
+              <div className="mt-2.5 text-[12.5px] leading-relaxed border-t border-[var(--line)] pt-2.5 flex flex-wrap items-center gap-x-1 gap-y-1">
+                <span className="font-semibold text-[var(--txt)]">{pathRes.path[0] ?? pathRes.from}</span>
+                {pathRes.hops.map((h, i) => (
+                  <span key={i} className="inline-flex items-center gap-1">
+                    <span className="text-[var(--gold)] text-[11px]">→ {predLabel(h.predicate, t)} →</span>
+                    <span className="font-semibold text-[var(--txt)]">{pathRes.path[i + 1]}</span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2.5 text-[12px] text-[var(--dim)] border-t border-[var(--line)] pt-2.5">{t("graph_no_path")}</div>
+            ))}
+          </div>
+        )}
 
         {/* life-area filter chips — only in the Life-area colour mode */}
         {colorBy === "area" && hasAreas && (
@@ -247,7 +287,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("graph_empty")}</div>
         ) : (
           <GraphCanvas ref={gref} data={shown} communities={communities} colorFor={colorFor} onPick={setPicked} nodeTint={tint}
-            onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} />
+            onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} pathIds={pathIds} />
         )}
 
         {/* hover preview — the entity's top facts without a click (Obsidian-style) */}
