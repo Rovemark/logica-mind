@@ -196,25 +196,29 @@ logica-mind mcp        # run as an MCP server over stdio
 logica-mind ui         # -> http://127.0.0.1:8420
 ```
 
-A self-hosted, single-page dashboard (zero external services) with **12 views**:
-Overview · **Analytics** · Graph · Memories · Calendar (activity heatmap) ·
-Sessions · User model · Peers · Changes (contradictions + changelog) · Insights ·
-Workspace (codebase DNA) · Dreams (forgetting curve, contested beliefs, dream
-journal). Dark / light themes, English / Português / Español.
+A self-hosted, single-page dashboard (zero external services) with **14 views**:
+Overview · **Analytics** · **Context block** · Graph · Memories · Calendar (activity
+heatmap) · Sessions · User model · Peers · **Observations** · Changes (contradictions
++ changelog) · Insights · Workspace (codebase DNA) · Dreams (forgetting curve,
+contested beliefs, dream journal). Dark / light themes, English / Português / Español.
 
 <div align="center">
-  <img src="docs/dashboard-analytics.png" alt="Logica Mind dashboard — analytics" width="100%">
+  <img src="docs/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
   <br>
-  <em>The Analytics view: usage, activity and reliability — added-over-time, distribution by layer / source / agent, and a per-agent memory table with live sparklines.</em>
+  <em>The Context block: smart assembly. Candidates are ranked, then the most relevant are fitted to a token budget — and you see exactly which made the cut, the per-section token cost, and the prompt-ready block to inject.</em>
 </div>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
-    <td width="50%"><img src="docs/dashboard-changes.png" alt="Changes — contradictions and a memory changelog"><br><sub><b>Changes</b> — what changed over time: contradictions and a first-class memory changelog.</sub></td>
+    <td width="50%"><img src="docs/dashboard-observations.png" alt="Observations — recurring patterns across memory"><br><sub><b>Observations</b> — structural patterns no single fact holds: entities that recur together and the hubs everything hangs off of.</sub></td>
+    <td width="50%"><img src="docs/dashboard-changes.png" alt="Changes — fact invalidation and a memory changelog"><br><sub><b>Changes</b> — when a fact's value changes, the old one is invalidated (not deleted): the current belief stands out, superseded ones stay queryable with their validity window.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/dashboard-calendar.png" alt="Calendar — activity heatmap"><br><sub><b>Calendar</b> — an Obsidian-style heatmap of memory activity, day by day.</sub></td>
+    <td width="50%"><img src="docs/dashboard-lake.png" alt="Memory lake — a typed, governed catalog of namespaces"><br><sub><b>Memory lake</b> — a typed catalog of every namespace (user / org / agent), each row provenance-tracked, source-attributed, versioned and erasable on request.</sub></td>
+    <td width="50%"><img src="docs/dashboard-analytics.png" alt="Analytics — usage, activity and reliability"><br><sub><b>Analytics</b> — usage, activity and reliability: added-over-time, distribution by layer / source / agent, real request latency and error rate.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
     <td width="50%"><img src="docs/dashboard-overview.png" alt="Overview — layer counts and insights"><br><sub><b>Overview</b> — per-layer counts, recent activity and synthesized insights.</sub></td>
   </tr>
 </table>

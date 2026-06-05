@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
-import { Database, Network, GitBranch, Users, MessagesSquare, AlertTriangle, Gauge, Activity } from "lucide-react";
+import { Database, Network, GitBranch, Users, MessagesSquare, AlertTriangle, Gauge, Activity, ShieldCheck } from "lucide-react";
 import { api, tShort, type AnalyticsData } from "../api";
 import { useI18n } from "../i18n";
+
+// namespaces are free-form; we classify each by a light naming convention
+// (kind:name) so the lake reads like a typed catalog — defaults to AGENT.
+const TYPE_COLOR: Record<string, string> = { USER: "#a78bfa", ORG: "#22d3ee", DOMAIN: "#f59e0b", AGENT: "#7c9cff" };
+function nsType(name: string): string {
+  const n = name.toLowerCase();
+  if (n.startsWith("user:") || n === "user" || n.includes("profile")) return "USER";
+  if (n.startsWith("org:") || n.includes("company") || n.includes("acme")) return "ORG";
+  if (n.startsWith("domain:") || n.includes("docs") || n.includes("kb")) return "DOMAIN";
+  return "AGENT";
+}
 
 const LAYER_COLOR: Record<string, string> = {
   episodic: "var(--gold)", semantic: "var(--accent)", graph: "#a78bfa", user: "#4ade80",
@@ -155,6 +166,10 @@ export default function Analytics({ ns, colorFor }: { ns: string; colorFor: (n: 
             <span className="flex items-center gap-2 min-w-0">
               <span className="w-2 h-2 rounded-full flex-none" style={{ background: colorFor(r.namespace) }} />
               <span className="font-semibold text-[13px] truncate">{r.namespace}</span>
+              {(() => { const ty = nsType(r.namespace), c = TYPE_COLOR[ty]; return (
+                <span className="text-[9px] font-bold tracking-wide px-1.5 py-px rounded-full flex-none"
+                  style={{ background: `${c}1f`, color: c }}>{ty}</span>
+              ); })()}
             </span>
             <span className="text-right tabular-nums text-[12.5px] text-[var(--dim)] max-[680px]:hidden">{r.entities}</span>
             <span className="text-right tabular-nums text-[12.5px] text-[var(--dim)]">{r.facts}</span>
@@ -163,6 +178,14 @@ export default function Analytics({ ns, colorFor }: { ns: string; colorFor: (n: 
             <span className="text-right text-[11px] text-[var(--dim2)] tabular-nums max-[680px]:hidden">{tShort(r.last)?.slice(0, 10)}</span>
           </div>
         ))}
+        {/* governance footer — the real guarantees every row carries */}
+        <div className="px-4 py-2.5 border-t border-[var(--line)] flex items-center gap-1.5 flex-wrap">
+          <ShieldCheck size={12} className="text-[var(--good)] flex-none" />
+          {["gov_provenance", "gov_sourced", "gov_versioned", "gov_erase"].map((k) => (
+            <span key={k} className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[var(--panel2)] border border-[var(--line)] text-[var(--dim)]">{t(k)}</span>
+          ))}
+          <span className="text-[10.5px] text-[var(--dim2)] ml-1 max-[680px]:hidden">{t("gov_note")}</span>
+        </div>
       </div>
     </div>
   );

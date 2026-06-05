@@ -20,6 +20,9 @@ export interface GraphLink { source: string; target: string; label: string; conf
 export interface GraphData { nodes: GraphNode[]; links: GraphLink[]; }
 export interface Relation { source: string; target: string; label: string; confidence?: number; valid?: boolean; valid_from?: string; valid_to?: string; }
 export interface RecallHit { score: number; components?: Record<string, any>; memory: Memory; }
+export interface ContextCandidate { score: number; components?: Record<string, any>; included: boolean; memory: Memory; }
+export interface ContextResult { namespace: string; query: string; budget: number; tokens: number; block: string; candidates: ContextCandidate[]; }
+export interface Observation { kind: "hub" | "co_occurrence"; entities: string[]; count: number; shared: string[]; text: string; namespace?: string; }
 export interface Community { nodes: string[]; size: number; facts: string[]; }
 export interface AnalyticsLakeRow { namespace: string; total: number; entities: number; facts: number; relations: number; last: string | null; spark: number[]; }
 export interface AnalyticsData {
@@ -41,6 +44,9 @@ export const api = {
   namespaces: (): Promise<{ namespaces: NsItem[] }> => j(`/api/namespaces`),
   stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),
   analytics: (ns: string): Promise<AnalyticsData> => j(`/api/analytics?${nsq(ns)}`),
+  context: (ns: string, q: string, budget = 1200): Promise<ContextResult> =>
+    j(`/api/context?${nsq(ns)}&q=${encodeURIComponent(q)}&budget=${budget}`),
+  observations: (ns: string): Promise<{ observations: Observation[] }> => j(`/api/observations?${nsq(ns)}`),
   recall: (ns: string, q: string, limit = 15): Promise<{ query: string; results: RecallHit[] }> =>
     j(`/api/recall?${nsq(ns)}&q=${encodeURIComponent(q)}&limit=${limit}`),
   memories: (ns: string, layer?: string): Promise<{ memories: Memory[] }> =>

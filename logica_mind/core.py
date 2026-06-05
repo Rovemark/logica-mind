@@ -847,6 +847,55 @@ class LogicaMind:
         """Every entity with its degree (how many edges touch it), busiest first."""
         return self.graph.nodes(include_history=include_history)
 
+    # ---- observations ------------------------------------------------------
+    def observations(self, limit: int = 12) -> List[Dict[str, Any]]:
+        """Surface structural PATTERNS the memory has noticed — recurrences and
+        co-occurrences that live across many facts, not inside any single one of
+        them. Honest detection over the temporal graph: hub entities (high
+        connectivity) and entity pairs that keep showing up together (shared
+        neighborhoods). Returns dicts: {kind, entities, count, shared, text}."""
+        from collections import Counter, defaultdict
+        deg: Counter = Counter()
+        neighbors: Dict[str, set] = defaultdict(set)
+        for e in self.graph.edges():
+            s, o = e.subject, e.object
+            deg[s] += 1
+            deg[o] += 1
+            neighbors[s].add(o)
+            neighbors[o].add(s)
+        if not deg:
+            return []
+
+        # hubs: the few entities everything else hangs off of
+        hubs: List[Dict[str, Any]] = []
+        for ent, d in deg.most_common(5):
+            if d >= 3:
+                hubs.append({
+                    "kind": "hub",
+                    "entities": [ent],
+                    "count": d,
+                    "shared": sorted(neighbors[ent])[:5],
+                    "text": f"{ent} is central — appears in {d} relationships",
+                })
+
+        # co-occurrence: entity pairs that keep landing in the same neighborhood
+        cooc: List[Dict[str, Any]] = []
+        ents = sorted(neighbors, key=lambda e: deg[e], reverse=True)
+        for i in range(len(ents)):
+            for j in range(i + 1, len(ents)):
+                a, b = ents[i], ents[j]
+                common = (neighbors[a] & neighbors[b]) - {a, b}
+                if len(common) >= 2:
+                    cooc.append({
+                        "kind": "co_occurrence",
+                        "entities": [a, b],
+                        "count": len(common),
+                        "shared": sorted(common)[:4],
+                        "text": f"{a} and {b} recur together — {len(common)} shared connections",
+                    })
+        cooc.sort(key=lambda x: x["count"], reverse=True)
+        return (hubs + cooc)[:limit]
+
     # ---- context assembly --------------------------------------------------
     @staticmethod
     def _approx_tokens(text: str) -> int:

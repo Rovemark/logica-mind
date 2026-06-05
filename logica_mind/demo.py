@@ -178,6 +178,34 @@ def seed(mind: "LogicaMind", *, rng_seed: int = 7, days: int = 75) -> int:
         if "contribution" in (m.tags or []) and (m.metadata or {}).get("session") == rec.metadata.get("session"):
             mind.store.add([_flag(m)])
 
+    # ---- a connected org graph (ORG-typed namespace) ----
+    # one densely-linked namespace so Observations has real structure to find:
+    # the founder/company become hub nodes, and people who report to the same
+    # founder + belong to the same company show up as recurring co-occurrences.
+    people = ["Alex Rivera", "Sam Okafor", "Jordan Lee", "Priya Nair"]
+    edge(FOUNDER, "founded", COMPANY, ns="org:acme")
+    for person in people:
+        edge(person, "reports_to", FOUNDER, ns="org:acme")
+        edge(person, "works_at", COMPANY, ns="org:acme")
+    edge("Alex Rivera", "owns", "the mobile app", ns="org:acme")
+    edge("Sam Okafor", "owns", "the billing service", ns="org:acme")
+    edge("Jordan Lee", "leads", "the data pipeline", ns="org:acme")
+    edge("the mobile app", "part_of", COMPANY, ns="org:acme")
+    edge("the billing service", "part_of", COMPANY, ns="org:acme")
+
+    # ---- a USER-typed context (the founder's own memory) ----
+    # gives the Memory Lake a typed catalog (USER / ORG / AGENT) instead of one
+    # uniform kind, and a richer User view for this namespace.
+    for txt in ["Maya prefers async updates over standups.",
+                "Maya's north-star metric is weekly active teams.",
+                "Maya reviews the roadmap every Monday morning.",
+                "Maya is based in Lisbon (GMT)."]:
+        add("user:maya", txt, MemoryLayer.SEMANTIC, rng.randint(0, days),
+            importance=0.7, meta={"source": "claude-code"})
+    mu = mind.for_namespace("user:maya").observe_user("Decides fast once the data is in front of her.")
+    if mu:
+        mind.store.add([_flag(mu)]); written += 1
+
     return written
 
 

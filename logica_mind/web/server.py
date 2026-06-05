@@ -451,6 +451,54 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         for r in results
                     ]})
 
+                elif path == "/api/context":
+                    # Smart context assembly: rank candidates for `q`, then fit the
+                    # most relevant into a token budget and return BOTH — the ranked
+                    # pool (with which ones made the cut) and the assembled block.
+                    q = first(qs, "q") or ""
+                    budget = _int(qs, "budget", 1200)
+                    if is_all:
+                        # context() is per-namespace; show the busiest one so the
+                        # block is populated, and let the UI switch namespaces.
+                        counts = {n["namespace"]: n.get("total", 0) for n in mind.list_namespaces()}
+                        tgt = max(counts, key=counts.get) if counts else mind.namespace
+                    else:
+                        tgt = ns
+                    sub = mind.for_namespace(tgt)
+                    cands = sub.recall(q, limit=20) if q.strip() else []
+                    block = sub.context(q, token_budget=budget) if q.strip() else ""
+                    tokens = mind._approx_tokens(block) if block else 0
+                    items = []
+                    for r in cands:
+                        c = r.memory.content or ""
+                        items.append({
+                            "score": round(r.score, 4),
+                            "components": r.components,
+                            "included": bool(block) and c[:60] in block,
+                            "memory": _strip(r.memory.to_dict()),
+                        })
+                    self._json({"namespace": tgt, "query": q, "budget": budget,
+                                "tokens": tokens, "block": block, "candidates": items})
+
+                elif path == "/api/observations":
+                    # structural patterns over the temporal graph (hubs +
+                    # co-occurrences) — recurrences that no single fact holds.
+                    limit = _int(qs, "limit", 12)
+                    if is_all:
+                        seen, merged = set(), []
+                        for nm in mind.store.namespaces():
+                            for o in mind.for_namespace(nm).observations(limit=limit):
+                                key = (o["kind"], tuple(o["entities"]))
+                                if key in seen:
+                                    continue
+                                seen.add(key)
+                                merged.append({**o, "namespace": nm})
+                        merged.sort(key=lambda x: x["count"], reverse=True)
+                        self._json({"observations": merged[:limit]})
+                    else:
+                        obs = mind.for_namespace(ns).observations(limit=limit)
+                        self._json({"observations": [{**o, "namespace": ns} for o in obs]})
+
                 elif path == "/api/memories":
                     layers = layers_of(qs)
                     session = first(qs, "session")     # optional: scope to one session

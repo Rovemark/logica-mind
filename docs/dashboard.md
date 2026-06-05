@@ -60,20 +60,23 @@ logica-mind demo --clear    # remove the demo data
 
 See [Demo banner](#demo-banner) below for the in-app controls.
 
-## The eleven views
+## The fourteen views
 
-The sidebar exposes eleven views. Each reads from the active namespace, or aggregates across all namespaces when you pick **All** (`__all__`).
+The sidebar exposes fourteen views. Each reads from the active namespace, or aggregates across all namespaces when you pick **All** (`__all__`).
 
 | View | What it shows | Backing endpoint(s) |
 | --- | --- | --- |
 | **Overview** | Per-layer counts, a one-line reflection insight, and the most recent memories | `/api/stats`, `/api/reflect`, `/api/memories` |
+| **Analytics** | Usage and reliability: memories over time, distribution by layer / source / agent, real request latency and error rate, and the typed Memory lake | `/api/analytics` |
+| **Context block** | Smart context assembly — ranked candidates fitted to a token budget, the per-section token cost, and the prompt-ready block | `/api/context` |
 | **Graph** | The interactive knowledge graph of entities and relations, with history and a point-in-time scrubber | `/api/graph`, `/api/timerange` |
 | **Memories** | The raw memory list, filterable by layer, each row openable and deletable | `/api/memories`, `/api/forget` (delete) |
 | **Calendar** | An Obsidian-style month heatmap of daily activity; pick a day to read its memories | `/api/calendar`, `/api/day` |
 | **Sessions** | Distinct conversation/run sessions with counts, time spans, and structured records | `/api/sessions`, `/api/session`, `/api/sessions/rename` |
 | **User** | The dialectic user-model profile, with a free-text "ask about this user" box | `/api/user`, `/api/ask_user` |
 | **Peers** | Directional, multi-perspective beliefs — what one peer believes about another | `/api/peers`, `/api/peer_card` |
-| **Changes** | A changelog of what was learned plus contradictions (values that changed over time) | `/api/diff`, `/api/contradictions` |
+| **Observations** | Structural patterns over the graph: entities that recur together (co-occurrence) and the hubs everything connects to | `/api/observations` |
+| **Changes** | A changelog of what was learned plus contradictions (values that changed over time, with the old value invalidated, not deleted) | `/api/diff`, `/api/contradictions` |
 | **Insights** | A reflection, knowledge communities, and beliefs flagged to re-verify | `/api/reflect`, `/api/communities`, `/api/stale` |
 | **Workspace** | "Project DNA" — scan any folder and read its languages, frameworks, and key files | `/api/scan` |
 | **Dreams** | The dream journal (consolidation cycles), the forget curve, contested beliefs, and surprises | `/api/dreams`, `/api/forget_curve`, `/api/contested`, `/api/surprises` |
@@ -81,6 +84,18 @@ The sidebar exposes eleven views. Each reads from the active namespace, or aggre
 ### Overview
 
 The landing view. It pulls per-layer counts and a total from `/api/stats`, a one-sentence "what's notable" insight from `/api/reflect`, and the eight most recent memories from `/api/memories`. It is the fastest way to confirm the store has what you expect.
+
+### Analytics
+
+![Analytics](./dashboard-analytics.png)
+
+Usage, activity and reliability in one place, all from `/api/analytics`: a stat strip (memories, agents, entities, relations, sessions, contradictions, average request latency, error rate), distribution charts (added-over-time, by layer, by source, by agent), and the **Memory lake** — a typed catalog of every namespace (`user` / `org` / `agent`), each row carrying its entity / fact / relation counts, an activity sparkline, and a governance footer (provenance-tracked, source-attributed, versioned, erasable on request). Latency and error rate are measured by the server itself, not estimated.
+
+### Context block
+
+![Context block](./dashboard-context.png)
+
+Smart context assembly for a query. `/api/context` ranks candidate memories, then fits the most relevant into a token budget and returns both halves of the story: the ranked pool (with which candidates made the cut) and the assembled, prompt-ready block — split into sections (User, Relevant memory) each with its own token estimate, against a budget meter you control (600 / 1,200 / 2,000 / 4,000 tokens). This is the same assembly exposed by the `lm_context` MCP tool, made visible.
 
 ### Graph
 
@@ -108,9 +123,15 @@ Renders the dialectic user-model profile for one namespace from `/api/user`. The
 
 Multi-perspective memory: pick a peer relationship and read the directional profile — what one peer believes about another — built from `/api/peers` (the relationship list) and `/api/peer_card` (the directional card).
 
+### Observations
+
+![Observations](./dashboard-observations.png)
+
+Patterns that live across many facts, not inside any single one. `/api/observations` reads the temporal graph structurally and surfaces two kinds: **recurring pairs** (entities that keep landing in the same neighbourhood — co-occurrence) and **central entities** (the hubs everything else connects to, by degree). It recomputes as the graph grows, so the patterns track reality rather than being hand-authored.
+
 ### Changes
 
-An audit of how beliefs evolved. It shows a changelog of what was learned within a time window (`/api/diff`) and a list of contradictions — facts whose value changed over time (`/api/contradictions`).
+An audit of how beliefs evolved. It shows a changelog of what was learned within a time window (`/api/diff`) and a list of contradictions — facts whose value changed over time (`/api/contradictions`). When a value changes, the old one is **invalidated, not deleted**: the current belief is highlighted, and each superseded value stays listed with its validity window, so point-in-time history remains queryable.
 
 ### Insights
 
@@ -126,7 +147,7 @@ The dream journal: a record of consolidation cycles loaded from `/api/dreams`, a
 
 ## Search, composer, and settings
 
-Beyond the eleven views, the top bar and side panels add a few cross-cutting tools:
+Beyond the fourteen views, the top bar and side panels add a few cross-cutting tools:
 
 - **Recall search** — a ranked search box that queries `/api/recall` (one namespace) or recalls across all namespaces, blending semantic and lexical scoring.
 - **Composer** — add a durable memory (`/api/remember`) or a user observation (`/api/observe_user`) directly from the UI.
