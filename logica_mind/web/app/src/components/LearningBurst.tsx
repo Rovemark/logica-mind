@@ -8,7 +8,7 @@ const LAYER_COLOR: Record<string, string> = {
 };
 
 // The "learn" animation: after you add text, show exactly what the engine did
-// with it — extracted facts revealed one by one (Mem0-style "memory n/n"), with
+// with it — extracted facts revealed one by one (a live "memory n/n" counter),
 // updates that supersede a prior belief, new graph links, and dedup/no-op.
 export default function LearningBurst({ input, result, onDone }: {
   input: string; result: AddResult; onDone: () => void;

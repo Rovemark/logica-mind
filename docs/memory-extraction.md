@@ -92,7 +92,7 @@ exactly what the engine learned, instead of silently closing:
 - the pipeline stages ticking off: **extracted → checked against memory → stored**,
   plus **linked _n_ relations** when graph extraction ran and **user model updated**
   for an observation;
-- a **no-op** reads as *"already known — reinforced, nothing duplicated."*
+- a **no-op** reads as *"already known — nothing duplicated."*
 
 Nothing in that animation is decoration: every line reflects a real operation the
 engine performed on your store.

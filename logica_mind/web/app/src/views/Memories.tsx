@@ -25,7 +25,7 @@ export default function Memories({ ns, focus, onChanged }: { ns: string; focus?:
   }, [ns, layer]);
 
   // when sent here to open a specific memory, drop any layer filter so it shows
-  useEffect(() => { if (focus) setLayer(""); /* eslint-disable-next-line */ }, [focus?.n]);
+  useEffect(() => { if (focus) setLayer(""); /* eslint-disable-next-line */ }, [focus?.n, focus?.id]);
 
   // scroll to + highlight the focused memory — jump to its page first if needed
   useEffect(() => {
@@ -41,7 +41,7 @@ export default function Memories({ ns, focus, onChanged }: { ns: string; focus?:
     const tm = setTimeout(() => setHl(null), 2200);
     return () => clearTimeout(tm);
     /* eslint-disable-next-line */
-  }, [focus?.n, mems, page]);
+  }, [focus?.id, focus?.n, mems, page]);
 
   const { pages, page: cp, slice } = paginate(mems, page, PAGE);
 

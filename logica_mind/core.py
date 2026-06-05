@@ -507,6 +507,7 @@ class LogicaMind:
         query = (query or "").strip()
         if not query:
             return []
+        limit = max(1, limit)   # guard: a negative limit would slice from the end
 
         # explicit session/category kwargs take precedence over metadata_filter,
         # but a genuine mismatch is a caller bug — fail loud instead of silently
@@ -665,6 +666,7 @@ class LogicaMind:
         limit: int = 8,
     ) -> List[SearchResult]:
         """Recall across many namespaces (or all) and merge the rankings."""
+        limit = max(1, limit)   # guard: a negative limit would slice from the end
         namespaces = namespaces or self.store.namespaces()
         merged: List[SearchResult] = []
         for ns in namespaces:
