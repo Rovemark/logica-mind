@@ -158,7 +158,7 @@ Beyond the fourteen views, the top bar and side panels add a few cross-cutting t
 
 The dashboard ships with **dark** and **light** themes plus an **auto** mode that follows the operating system's colour-scheme preference. The choice is persisted in the browser and applied as a `data-theme` attribute; the default is dark.
 
-The interface is translated into **nine languages** — English (`en`, the default), Português (`pt`), Español (`es`), 中文 (`zh`), हिन्दी (`hi`), العربية (`ar`, right-to-left), Français (`fr`), 日本語 (`ja`) and Deutsch (`de`). Arabic flips the whole layout to RTL, and even the graph's relationship labels are localized. Missing keys fall back to English. The active language is remembered in the browser. Switch both theme and language from the **Settings** panel.
+The interface is translated into **twelve languages** — English (`en`, the default), Português (`pt`), Español (`es`), Français (`fr`), Deutsch (`de`), Русский (`ru`), Bahasa Indonesia (`id`), 中文 (`zh`), 日本語 (`ja`), हिन्दी (`hi`), বাংলা (`bn`) and العربية (`ar`, right-to-left). Arabic flips the whole layout to RTL, and even the graph's relationship labels are localized. On a first visit the UI auto-matches the browser language; missing keys fall back to English. The choice is remembered in the browser. Switch both theme and language from the **Settings** panel. See [Internationalization](./internationalization.md).
 
 ## Demo banner
 
