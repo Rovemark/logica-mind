@@ -1,4 +1,4 @@
-import { LayoutGrid, BarChart3, Layers, Network, List, CalendarDays, MessagesSquare, UserRound, Sparkles, Telescope, Users, History, FolderGit2, Moon, Boxes } from "lucide-react";
+import { LayoutGrid, BarChart3, Layers, Network, List, CalendarDays, MessagesSquare, Sparkles, Telescope, Users, History, FolderGit2, Moon, Boxes } from "lucide-react";
 import type { ComponentType } from "react";
 
 export type ViewKey = "overview" | "analytics" | "context" | "graph" | "memories" | "calendar" | "sessions" | "user" | "profile" | "peers" | "observations" | "changes" | "insights" | "workspace" | "dreams" | "settings";
@@ -21,7 +21,6 @@ export const VIEWS: ViewDef[] = [
   { key: "profile", label: "Profile", Icon: Boxes, cat: "intelligence" },
   { key: "observations", label: "Observations", Icon: Telescope, cat: "intelligence" },
   { key: "insights", label: "Insights", Icon: Sparkles, cat: "intelligence" },
-  { key: "user", label: "User", Icon: UserRound, cat: "intelligence" },
   { key: "peers", label: "Peers", Icon: Users, cat: "intelligence" },
   // system
   { key: "workspace", label: "Workspace", Icon: FolderGit2, cat: "system" },
