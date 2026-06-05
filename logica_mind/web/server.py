@@ -867,9 +867,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     mems.sort(key=lambda m: m.created_at or "", reverse=True)
                     # first-class entity info (type + aliases) from the resolving ns
                     ent = mind.for_namespace(ns if not is_all else mind.namespace).entity(name)
+                    base = ns if not is_all else mind.namespace
+                    unlinked = mind.for_namespace(base).entity_unlinked(name, namespaces=scan)
                     self._json({"name": ent.get("name") or name, "type": ent.get("type", ""),
                                 "aliases": ent.get("aliases", []),
                                 "connected": list(connected.values()),
+                                "unlinked": unlinked,
                                 "memories": [_strip(m.to_dict()) for m in mems[:60]]})
 
                 elif path == "/api/contradictions":
@@ -930,6 +933,16 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     nss = mind.store.namespaces() if is_all else [ns]
                     base = nss[0] if nss else mind.namespace
                     self._json(mind.for_namespace(base).how_related(frm, to, namespaces=nss))
+
+                elif path == "/api/bridges":          # load-bearing connectors
+                    nss = mind.store.namespaces() if is_all else [ns]
+                    base = nss[0] if nss else mind.namespace
+                    self._json({"bridges": mind.for_namespace(base).bridges(namespaces=nss)})
+
+                elif path == "/api/suggested":        # predict the missing edge
+                    nss = mind.store.namespaces() if is_all else [ns]
+                    base = nss[0] if nss else mind.namespace
+                    self._json({"suggested": mind.for_namespace(base).suggested_links(namespaces=nss)})
 
                 elif path == "/api/stale":           # epistemic self-doubt
                     min_age = _float(qs, "min_age_days", 30)

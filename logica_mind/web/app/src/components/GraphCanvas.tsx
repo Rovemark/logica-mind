@@ -137,6 +137,8 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
         width = 0.7 + Math.min(l.weight || 1, 5) * 0.26;
       } else if (kind === "semantic") {
         rgb = SEMANTIC_RGB; alpha = active ? 0.45 : 0.13; width = 0.8; dash = [1.2, 4];
+      } else if (kind === "suggested") {                  // predicted-but-missing edge
+        rgb = "251,191,36"; alpha = active ? 0.55 : 0.18; width = 1; dash = [2, 5];
       } else {                                            // relation, hued by predicate class
         const conf = l.confidence == null ? 1 : l.confidence;
         if (!l.valid) {                                   // superseded — greyed + dashed, no arrow
@@ -177,6 +179,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       c.fillStyle = dim ? col + "1f" : (active ? col : col + "44"); c.fill();
       c.lineWidth = (n.shared ? 2 : 1.4) / t.k; c.strokeStyle = nodeRing(!!n.shared); c.stroke();
       if (onP) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(251,191,36,.95)"; c.stroke(); }
+      else if (n.bridge && !dim) { c.beginPath(); c.arc(n.x, n.y, (rad + 2.5) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 1.4 / t.k; c.setLineDash([2 / t.k, 2 / t.k]); c.strokeStyle = "rgba(245,158,11,.85)"; c.stroke(); c.setLineDash([]); }
       if (t.k > 0.6 && (active || onP)) { c.fillStyle = active || onP ? labelFill : labelFillDim; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
         c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.strokeText(n.id, n.x, n.y - (rad + 5) / t.k); c.fillText(n.id, n.x, n.y - (rad + 5) / t.k); }
     });

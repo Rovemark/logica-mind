@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight } from "lucide-react";
-import { api, tShort, type GraphData, type PathResult } from "../api";
+import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb } from "lucide-react";
+import { api, tShort, type GraphData, type PathResult, type SuggestedLink } from "../api";
 import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
 import NodeDetail from "../components/NodeDetail";
 import { useI18n } from "../i18n";
@@ -23,6 +23,8 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const [history, setHistory] = useState(true);
   const [colorBy, setColorBy] = useState<ColorBy>("namespace");
   const [coMention, setCoMention] = useState(true);
+  const [suggest, setSuggest] = useState(false);
+  const [suggestedLinks, setSuggestedLinks] = useState<SuggestedLink[]>([]);
   const [areaFilter, setAreaFilter] = useState<Area | null>(null);
   const [minConf, setMinConf] = useState(0);
   const [predOff, setPredOff] = useState<Set<string>>(new Set());
@@ -53,6 +55,12 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
 
   // reset transient view state when switching namespace
   useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); setPathRes(null); }, [ns]);
+
+  // suggested links (predicted-but-missing edges) — opt-in overlay
+  useEffect(() => {
+    if (!suggest) { setSuggestedLinks([]); return; }
+    api.suggested(ns).then((d) => setSuggestedLinks(d.suggested || [])).catch(() => setSuggestedLinks([]));
+  }, [suggest, ns]);
 
   // hover preview: fetch (and cache) the hovered entity's top facts
   useEffect(() => {
@@ -98,8 +106,13 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     });
     // localize the predicate shown on each edge (display-only; pclass logic uses the raw value)
     links = links.map((l) => (l.label ? { ...l, label: predLabel(l.label, t) } : l));
+    // overlay predicted-but-missing edges (only between nodes already shown)
+    if (suggest && suggestedLinks.length) {
+      const ids = new Set(nodes.map((n) => n.id));
+      for (const s of suggestedLinks) if (ids.has(s.a) && ids.has(s.b)) links.push({ source: s.a, target: s.b, label: "", kind: "suggested", weight: s.score });
+    }
     return { nodes, links };
-  }, [data, colorBy, areaFilter, minConf, predOff, t]);
+  }, [data, colorBy, areaFilter, minConf, predOff, t, suggest, suggestedLinks]);
 
   const tint = colorBy === "area" ? (n: any) => (n.dimension ? dimColor(n.dimension) : "var(--dim2)")
     : colorBy === "centrality" ? (n: any) => centColor(n.centrality || 0)
@@ -198,6 +211,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           </div>
           {/* connection layers */}
           <Btn on={coMention} onClick={() => setCoMention((v) => !v)} icon={Hexagon}>{t("glayer_comention")}</Btn>
+          <Btn on={suggest} onClick={() => setSuggest((v) => !v)} icon={Lightbulb}>{t("glayer_suggested")}</Btn>
           {/* filters popover */}
           <div className="relative">
             <Btn on={filtersOpen || nFilters > 0} onClick={() => setFiltersOpen((v) => !v)} icon={SlidersHorizontal}>
@@ -356,6 +370,8 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                     <span key={p} className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-3 border-t-2 flex-none" style={{ borderColor: PCLASS_HEX[p] }} />{t(("pclass_" + p) as any)}</span>
                   ))}
                   {coMention && <span className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-3 border-t border-dashed flex-none" style={{ borderColor: "#7888aa" }} />{t("glayer_comention")}</span>}
+                  {suggest && <span className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-3 border-t border-dashed flex-none" style={{ borderColor: "#f59e0b" }} />{t("legend_suggested")}</span>}
+                  <span className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-2.5 h-2.5 rounded-full border border-dashed flex-none" style={{ borderColor: "#f59e0b" }} />{t("legend_bridge")}</span>
                   <span className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-3 border-t border-dashed border-[var(--dim2)] flex-none" />{t("superseded")}</span>
                 </div>
               </div>
