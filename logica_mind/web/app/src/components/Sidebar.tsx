@@ -51,22 +51,16 @@ export default function Sidebar({
         {namespaces.length === 0 && <div className="text-[var(--dim)] text-center py-6">{t("no_data_yet")}</div>}
       </div>
 
-      <div className="border-t border-[var(--line)] px-5 py-[11px] text-[11.5px] text-[var(--dim)]">
-        <div className="text-[var(--dim2)] text-[10px] uppercase tracking-[.7px] mb-2">{t("graph_legend")}</div>
-        {namespaces.slice(0, 4).map((n) => (
-          <div key={n.namespace} className="flex items-center gap-2 my-[5px]">
-            <span className="w-2.5 h-2.5 rounded-[3px]" style={{ background: colors[n.namespace] || "#7c9cff" }} />
-            {n.namespace}
-          </div>
-        ))}
-        <div className="flex items-center gap-2 my-[5px]"><span className="w-2.5 h-2.5 rounded-full bg-[var(--gold)]" />{t("shared_entity")}</div>
-        <div className="flex items-center gap-2 my-[5px]"><span className="w-2.5 h-0.5 bg-[var(--dim2)]" />{t("superseded")}</div>
+      {/* the graph legend lives inside the Graph view (collapsible), so the sidebar
+          stays clean and the namespace list gets the full height — it scrolls when
+          there are many agents instead of fighting a fixed legend block. */}
+      <div className="border-t border-[var(--line)] p-2.5">
+        <button onClick={onSettings}
+          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[9px] text-[13px] font-medium
+            text-[var(--dim)] hover:bg-[var(--panel2)] hover:text-[var(--txt)]">
+          <SettingsIcon size={16} /> {t("settings")}
+        </button>
       </div>
-      <button onClick={onSettings}
-        className="flex items-center gap-2.5 mx-3 mb-3 mt-1 px-3 py-2.5 rounded-[9px] text-[13px] font-medium
-          text-[var(--dim)] hover:bg-[var(--panel2)] hover:text-[var(--txt)]">
-        <SettingsIcon size={16} /> {t("settings")}
-      </button>
     </aside>
   );
 }
