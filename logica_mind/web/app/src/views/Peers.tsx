@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, Users } from "lucide-react";
 import { api, type PeerPair } from "../api";
+import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
 
 // Multi-perspective: what one peer believes about another (directional).
@@ -9,10 +10,13 @@ export default function Peers({ ns }: { ns: string }) {
   const [pairs, setPairs] = useState<PeerPair[]>([]);
   const [sel, setSel] = useState<PeerPair | null>(null);
   const [card, setCard] = useState<string>("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.peers(ns).then((d) => { setPairs(d.peers || []); setSel(d.peers?.[0] || null); }).catch(() => setPairs([]));
+    setPage(1);
   }, [ns]);
+  const ppg = paginate(pairs, page, 12);
 
   useEffect(() => {
     if (!sel) { setCard(""); return; }
@@ -25,7 +29,7 @@ export default function Peers({ ns }: { ns: string }) {
     <div className="fadein flex gap-4 max-[900px]:flex-col">
       <div className="w-[340px] max-w-full flex-none">
         <h2 className="m-0 mb-4 text-[18px] font-bold tracking-tight">{t("peers")}</h2>
-        {pairs.length ? pairs.map((p, i) => {
+        {pairs.length ? (<>{ppg.slice.map((p, i) => {
           const on = sel && sel.observer === p.observer && sel.observed === p.observed && sel.namespace === p.namespace;
           return (
             <button key={i} onClick={() => setSel(p)}
@@ -38,7 +42,7 @@ export default function Peers({ ns }: { ns: string }) {
               <span className="text-[var(--dim2)] text-[11px] bg-[var(--panel2)] border border-[var(--line)] px-1.5 rounded">{p.namespace}</span>
             </button>
           );
-        }) : <div className="text-[var(--dim)] card-surface text-center py-10">{t("no_peer_obs")}</div>}
+        })}<Pager page={ppg.page} pages={ppg.pages} onPage={setPage} /></>) : <div className="text-[var(--dim)] card-surface text-center py-10">{t("no_peer_obs")}</div>}
       </div>
 
       <div className="flex-1 min-w-0">

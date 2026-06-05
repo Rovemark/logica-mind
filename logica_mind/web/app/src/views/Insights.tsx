@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { api, type Community } from "../api";
 import InsightList from "../components/InsightList";
+import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
 
 interface StaleItem { id: string; content: string; age_days: number; confidence: number; }
@@ -12,12 +13,15 @@ export default function Insights({ ns }: { ns: string }) {
   const [comms, setComms] = useState<Community[]>([]);
   const [stale, setStale] = useState<StaleItem[]>([]);
   const [staleOpen, setStaleOpen] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.reflect(ns).then((d) => setInsight(d.insight || "")).catch(() => setInsight(""));
     api.communities(ns).then((d) => setComms(d.communities || [])).catch(() => setComms([]));
     api.staleBeliefs(ns).then((d) => setStale(d.stale || [])).catch(() => setStale([]));
+    setPage(1);
   }, [ns]);
+  const cpg = paginate(comms, page, 8);
 
   return (
     <div className="fadein">
@@ -65,11 +69,11 @@ export default function Insights({ ns }: { ns: string }) {
       <div className="text-[var(--dim2)] text-[12px] uppercase tracking-[.7px] mb-2.5">
         {t("knowledge_communities")} · {comms.length}
       </div>
-      {comms.length ? comms.map((c, i) => (
+      {comms.length ? (<>{cpg.slice.map((c, i) => (
         <div key={i} className="card-surface px-[15px] py-[13px] mb-2.5">
           <div className="flex items-center gap-[9px] mb-1.5">
             <span className="bg-graph text-[10px] px-2 py-[2px] rounded-full font-bold uppercase tracking-wide">
-              {t("cluster_word")} {i + 1}
+              {t("cluster_word")} {(cpg.page - 1) * 8 + i + 1}
             </span>
             <span className="text-[11px] text-[var(--dim)] bg-[var(--panel2)] border border-[var(--line)] px-2 py-[1px] rounded-full">
               {c.size} {t("graph_entities")}
@@ -82,7 +86,7 @@ export default function Insights({ ns }: { ns: string }) {
             </div>
           )}
         </div>
-      )) : <div className="text-[var(--dim)] text-center py-8">{t("no_graph")}</div>}
+      ))}<Pager page={cpg.page} pages={cpg.pages} onPage={setPage} /></>) : <div className="text-[var(--dim)] text-center py-8">{t("no_graph")}</div>}
     </div>
   );
 }

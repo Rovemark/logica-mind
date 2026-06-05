@@ -57,7 +57,7 @@ const nsq = (ns: string) => `namespace=${encodeURIComponent(ns)}`;
 export const api = {
   namespaces: (): Promise<{ namespaces: NsItem[] }> => j(`/api/namespaces`),
   stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),
-  analytics: (ns: string): Promise<AnalyticsData> => j(`/api/analytics?${nsq(ns)}`),
+  analytics: (ns: string, range = 30): Promise<AnalyticsData> => j(`/api/analytics?${nsq(ns)}&range=${range}`),
   integrations: (): Promise<IntegrationsData> => j(`/api/integrations`),
   search: (q: string, limit = 6): Promise<SearchResults> => j(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   context: (ns: string, q: string, budget = 1200): Promise<ContextResult> =>

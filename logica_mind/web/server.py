@@ -989,10 +989,23 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                             spark.append(day_spark.get(dd, 0))
                         ns_rows[nm] = {"namespace": nm, "total": total_ns, "entities": ent,
                                        "facts": facts, "relations": rel, "last": last, "spark": spark}
-                    # 30-day timeseries (fill gaps with 0)
-                    series = []
+                    # timeseries over the requested window (range<=0 → all-time
+                    # from the earliest recorded day), gaps filled with 0
+                    range_days = _int(qs, "range", 30)
                     base = _dt.datetime.now(_dt.timezone.utc)
-                    for i in range(29, -1, -1):
+                    if range_days and range_days > 0:
+                        span = range_days
+                    elif by_day:
+                        try:
+                            ed = _dt.datetime.strptime(min(by_day), "%Y-%m-%d").replace(tzinfo=_dt.timezone.utc)
+                            span = (base - ed).days + 1
+                        except Exception:
+                            span = 30
+                    else:
+                        span = 30
+                    span = max(1, min(span, 366))
+                    series = []
+                    for i in range(span - 1, -1, -1):
                         dd = (base - _dt.timedelta(days=i)).strftime("%Y-%m-%d")
                         series.append({"date": dd, "count": by_day.get(dd, 0)})
                     reqs = _OPS["requests"]

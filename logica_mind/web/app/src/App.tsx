@@ -3,6 +3,7 @@ import { api, ALL, PALETTE, type NsItem, type Memory } from "./api";
 import { VIEWS, type ViewKey } from "./nav";
 import { LangCtx, makeT, getLang, saveLang, type Lang } from "./i18n";
 import { MemoryOpenCtx } from "./memctx";
+import { NavCtx } from "./navctx";
 import MemoryDetail from "./components/MemoryDetail";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
@@ -91,6 +92,7 @@ export default function App() {
 
   return (
     <LangCtx.Provider value={{ lang, setLang, t }}>
+    <NavCtx.Provider value={{ onView, onNs }}>
     <MemoryOpenCtx.Provider value={openMemory}>
     <div className="grid h-screen grid-cols-[256px_1fr] max-[820px]:grid-cols-[1fr]">
       <Sidebar view={view} ns={ns} namespaces={namespaces} colors={colorsRef.current}
@@ -111,6 +113,7 @@ export default function App() {
       {openMem && <MemoryDetail memory={openMem} onClose={() => setOpenMem(null)} />}
     </div>
     </MemoryOpenCtx.Provider>
+    </NavCtx.Provider>
     </LangCtx.Provider>
   );
 }

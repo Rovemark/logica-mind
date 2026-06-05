@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { Database, Network, GitBranch, Users, MessagesSquare, AlertTriangle, Gauge, Activity, ShieldCheck } from "lucide-react";
 import { api, tShort, type AnalyticsData } from "../api";
+import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
+import { useNav } from "../navctx";
+
+const RANGES: [string, number][] = [["7d", 7], ["30d", 30], ["90d", 90]];
 
 // namespaces are free-form; we classify each by a light naming convention
 // (kind:name) so the lake reads like a typed catalog — defaults to AGENT.
@@ -102,13 +106,16 @@ function Spark({ values, color = "var(--accent2)" }: { values: number[]; color?:
 
 export default function Analytics({ ns, colorFor }: { ns: string; colorFor: (n: string) => string }) {
   const { t } = useI18n();
+  const { onNs } = useNav();
   const [d, setD] = useState<AnalyticsData | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [range, setRange] = useState(30);
+  const [lpage, setLpage] = useState(1);
 
   useEffect(() => {
     setLoaded(false);
-    api.analytics(ns).then((r) => { setD(r); setLoaded(true); }).catch(() => setLoaded(true));
-  }, [ns]);
+    api.analytics(ns, range).then((r) => { setD(r); setLoaded(true); }).catch(() => setLoaded(true));
+  }, [ns, range]);
 
   if (!loaded) return <div className="fadein text-[var(--dim)] py-16 text-center">{t("loading")}</div>;
   if (!d) return <div className="fadein text-[var(--dim)] py-16 text-center">{t("nothing_here")}</div>;
@@ -118,12 +125,21 @@ export default function Analytics({ ns, colorFor }: { ns: string; colorFor: (n: 
     .map((l) => ({ label: t(`layer_${l}` as any), value: tot[l] || 0, color: LAYER_COLOR[l] }));
   const sourceRows = d.by_source.map((s, i) => ({ label: s.source, value: s.count, color: SRC_COLOR[i % SRC_COLOR.length] }));
   const agentRows = d.by_namespace.slice(0, 8).map((r) => ({ label: r.namespace, value: r.total, color: colorFor(r.namespace) }));
+  const lake = paginate(d.by_namespace, lpage, 12);
 
   return (
     <div className="fadein">
       <div className="flex items-baseline gap-3 mb-4">
         <h2 className="m-0 text-[18px] font-bold tracking-tight">{t("analytics")}</h2>
-        <span className="text-[var(--dim2)] text-[12px]">{t("analytics_sub")}</span>
+        <span className="text-[var(--dim2)] text-[12px] max-[680px]:hidden">{t("analytics_sub")}</span>
+        <div className="ml-auto flex gap-1">
+          {RANGES.map(([l, dval]) => (
+            <button key={l} onClick={() => setRange(dval)}
+              className={`px-2.5 py-1 rounded-lg border text-[12px] tabular-nums ${range === dval ? "bg-[var(--panel2)] text-[var(--txt)] border-[var(--line)]" : "border-[var(--line)] text-[var(--dim)] hover:text-[var(--txt)]"}`}>{l}</button>
+          ))}
+          <button onClick={() => setRange(0)}
+            className={`px-2.5 py-1 rounded-lg border text-[12px] ${range === 0 ? "bg-[var(--panel2)] text-[var(--txt)] border-[var(--line)]" : "border-[var(--line)] text-[var(--dim)] hover:text-[var(--txt)]"}`}>{t("all_word")}</button>
+        </div>
       </div>
 
       {/* stat strip */}
@@ -140,7 +156,7 @@ export default function Analytics({ ns, colorFor }: { ns: string; colorFor: (n: 
 
       {/* 2x2 chart grid */}
       <div className="grid grid-cols-2 gap-2.5 mb-3 max-[760px]:grid-cols-1">
-        <TimeBars data={d.timeseries} title={t("memories_over_time")} sub={t("last_30_days")} />
+        <TimeBars data={d.timeseries} title={t("memories_over_time")} sub={range === 0 ? t("all_time") : t("last_n_days", { n: String(range) })} />
         <HBars rows={layerRows} title={t("by_layer")} />
         <HBars rows={sourceRows} title={t("by_source")} />
         <HBars rows={agentRows} title={t("by_agent")} />
@@ -160,9 +176,9 @@ export default function Analytics({ ns, colorFor }: { ns: string; colorFor: (n: 
           <span className="max-[680px]:hidden">{t("lake_activity")}</span>
           <span className="text-right max-[680px]:hidden">{t("lake_updated")}</span>
         </div>
-        {d.by_namespace.map((r) => (
-          <div key={r.namespace}
-            className="grid grid-cols-[1fr_72px_72px_72px_110px_84px] gap-2 px-4 py-2.5 items-center border-b border-[var(--line)] last:border-0 hover:bg-[var(--panel2)] max-[680px]:grid-cols-[1fr_60px_92px]">
+        {lake.slice.map((r) => (
+          <div key={r.namespace} onClick={() => onNs(r.namespace)} title={r.namespace}
+            className="grid grid-cols-[1fr_72px_72px_72px_110px_84px] gap-2 px-4 py-2.5 items-center border-b border-[var(--line)] last:border-0 hover:bg-[var(--panel2)] cursor-pointer max-[680px]:grid-cols-[1fr_60px_92px]">
             <span className="flex items-center gap-2 min-w-0">
               <span className="w-2 h-2 rounded-full flex-none" style={{ background: colorFor(r.namespace) }} />
               <span className="font-semibold text-[13px] truncate">{r.namespace}</span>
@@ -178,6 +194,7 @@ export default function Analytics({ ns, colorFor }: { ns: string; colorFor: (n: 
             <span className="text-right text-[11px] text-[var(--dim2)] tabular-nums max-[680px]:hidden">{tShort(r.last)?.slice(0, 10)}</span>
           </div>
         ))}
+        {lake.pages > 1 && <div className="px-4 pb-2"><Pager page={lake.page} pages={lake.pages} onPage={setLpage} /></div>}
         {/* governance footer — the real guarantees every row carries */}
         <div className="px-4 py-2.5 border-t border-[var(--line)] flex items-center gap-1.5 flex-wrap">
           <ShieldCheck size={12} className="text-[var(--good)] flex-none" />

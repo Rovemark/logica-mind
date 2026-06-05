@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { MessagesSquare, Pencil, Check, X, Download, Users, Activity, Link2, CheckCircle2 } from "lucide-react";
 import { api, tShort, type SessionItem, type Memory, type SessionRecordMeta } from "../api";
 import MemoryCard, { SourceBadge } from "../components/MemoryCard";
+import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
 
 // Rich header for a structured session/run record (generic: participants + roles
@@ -97,6 +98,7 @@ export default function Sessions({ ns }: { ns: string }) {
   const [mems, setMems] = useState<Memory[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [page, setPage] = useState(1);
 
   const load = () =>
     api.sessions(ns).then((d) => {
@@ -105,7 +107,8 @@ export default function Sessions({ ns }: { ns: string }) {
       setSel(prev => prev ? (list.find(s => s.id === prev.id && s.namespace === prev.namespace) || list[0] || null) : list[0] || null);
     }).catch(() => setSessions([]));
 
-  useEffect(() => { load(); }, [ns]);
+  useEffect(() => { load(); setPage(1); }, [ns]);
+  const spg = paginate(sessions, page, 12);
 
   useEffect(() => {
     if (!sel) { setMems([]); return; }
@@ -146,7 +149,7 @@ export default function Sessions({ ns }: { ns: string }) {
             {importing ? t("importing") : "↓ Claude"}
           </button>
         </div>
-        {sessions.length ? sessions.map((s, i) => {
+        {sessions.length ? (<>{spg.slice.map((s, i) => {
           const on = sel && sel.id === s.id && sel.namespace === s.namespace;
           const isEditing = editing === s.id;
           return (
@@ -180,7 +183,7 @@ export default function Sessions({ ns }: { ns: string }) {
               )}
             </div>
           );
-        }) : <div className="text-[var(--dim)] card-surface text-center py-10">{t("no_sessions")}</div>}
+        })}<Pager page={spg.page} pages={spg.pages} onPage={setPage} /></>) : <div className="text-[var(--dim)] card-surface text-center py-10">{t("no_sessions")}</div>}
       </div>
 
       {/* session detail */}

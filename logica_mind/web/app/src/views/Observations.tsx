@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { GitMerge, Radius, Sparkles } from "lucide-react";
 import { api, type Observation } from "../api";
 import { useI18n } from "../i18n";
+import { useNav } from "../navctx";
 
 export default function Observations({ ns }: { ns: string }) {
   const { t } = useI18n();
@@ -64,9 +65,12 @@ export default function Observations({ ns }: { ns: string }) {
 }
 
 function Card({ o, icon, t }: { o: Observation; icon: "hub" | "cooc"; t: (k: any) => string }) {
+  const { onNs, onView } = useNav();
   const accent = icon === "hub" ? "var(--gold)" : "var(--accent2)";
+  const go = () => { if (o.namespace) { onNs(o.namespace); onView("graph"); } };
   return (
-    <div className="card-surface px-4 py-3 mb-2.5">
+    <div onClick={go} title={o.namespace ? t("open_in_graph") : undefined}
+      className={`card-surface px-4 py-3 mb-2.5 ${o.namespace ? "cursor-pointer hover:bg-[var(--panel2)]" : ""}`}>
       <div className="flex items-center gap-2 flex-wrap mb-2">
         {o.entities.map((e, k) => (
           <span key={k} className="text-[12.5px] font-semibold px-2.5 py-1 rounded-lg border"

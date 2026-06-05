@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Gauge, Search, SlidersHorizontal } from "lucide-react";
 import { api, type ContextResult, type ContextCandidate, type Layer } from "../api";
 import { useI18n } from "../i18n";
+import { useOpenMemory } from "../memctx";
 
 const LAYER_COLOR: Record<string, string> = {
   episodic: "#7c9cff", semantic: "#4ade80", graph: "#f59e0b", user: "#a78bfa",
@@ -154,10 +155,12 @@ export default function ContextBlock({ ns }: { ns: string }) {
 }
 
 function Candidate({ c, rank }: { c: ContextCandidate; rank: number }) {
+  const open = useOpenMemory();
   const layer = (c.memory.layer as Layer) || "episodic";
   const col = LAYER_COLOR[layer] || "#7c9cff";
   return (
-    <div className={`card-surface px-3.5 py-2.5 mb-2 border-l-2 ${c.included ? "" : "opacity-55"}`}
+    <div onClick={() => open(c.memory)}
+      className={`card-surface px-3.5 py-2.5 mb-2 border-l-2 cursor-pointer hover:bg-[var(--panel2)] ${c.included ? "" : "opacity-55"}`}
       style={{ borderLeftColor: c.included ? "var(--good)" : "var(--line)" }}>
       <div className="flex items-center gap-2 mb-1">
         <span className="text-[10.5px] tabular-nums text-[var(--dim2)] w-5">#{rank}</span>

@@ -2,15 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { api, tShort, type Contradiction, type DiffItem } from "../api";
 import { LayerPill } from "../components/MemoryCard";
+import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
+import { useNav } from "../navctx";
 
 const RANGES: [string, number][] = [["7d", 7], ["30d", 30], ["90d", 90]];
 
 export default function Changes({ ns }: { ns: string }) {
   const { t } = useI18n();
+  const { onNs, onView } = useNav();
   const [contras, setContras] = useState<Contradiction[]>([]);
   const [diff, setDiff] = useState<DiffItem[]>([]);
   const [days, setDays] = useState(30);
+  const [page, setPage] = useState(1);
 
   const since = useMemo(() => {
     const d = new Date(); d.setDate(d.getDate() - days);
@@ -22,7 +26,9 @@ export default function Changes({ ns }: { ns: string }) {
   }, [ns]);
   useEffect(() => {
     api.diff(ns, since).then((d) => setDiff(d.diff || [])).catch(() => setDiff([]));
+    setPage(1);
   }, [ns, since]);
+  const dpg = paginate(diff, page, 25);
 
   return (
     <div className="fadein">
@@ -75,14 +81,19 @@ export default function Changes({ ns }: { ns: string }) {
           ))}
         </div>
       </div>
-      {diff.length ? diff.slice(0, 80).map((d, i) => (
-        <div key={i} className="flex items-center gap-3 px-3 py-2 border-b border-[var(--line)]/60">
+      {diff.length ? (<>
+        {dpg.slice.map((d, i) => (
+        <div key={i} onClick={() => { if (d.namespace) onNs(d.namespace); onView("memories"); }}
+          title={t("open_in_memories")}
+          className="flex items-center gap-3 px-3 py-2 border-b border-[var(--line)]/60 cursor-pointer hover:bg-[var(--panel2)] rounded-md">
           <span className="text-[var(--dim2)] text-[11px] tabular-nums w-[78px] flex-none">{tShort(d.created_at)?.slice(0, 10)}</span>
           <LayerPill layer={d.layer} />
           <span className="text-[13.5px] truncate">{d.content}</span>
           {d.namespace && <span className="ml-auto text-[var(--dim2)] text-[11px] flex-none">{d.namespace}</span>}
         </div>
-      )) : <div className="text-[var(--dim)] card-surface text-center py-8">{t("nothing_window")}</div>}
+        ))}
+        <Pager page={dpg.page} pages={dpg.pages} onPage={setPage} />
+      </>) : <div className="text-[var(--dim)] card-surface text-center py-8">{t("nothing_window")}</div>}
     </div>
   );
 }

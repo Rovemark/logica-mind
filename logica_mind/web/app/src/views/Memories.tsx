@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
 import { api, LAYERS, type Memory } from "../api";
 import MemoryCard from "../components/MemoryCard";
+import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
+
+const PAGE = 20;
 
 export default function Memories({ ns, focus, onChanged }: { ns: string; focus?: { id: string; n: number } | null; onChanged?: () => void; [k: string]: any }) {
   const { t } = useI18n();
   const [layer, setLayer] = useState("");
   const [mems, setMems] = useState<Memory[]>([]);
   const [hl, setHl] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   async function del(m: Memory) {
     await api.forget(m.namespace, m.id);
@@ -17,22 +21,29 @@ export default function Memories({ ns, focus, onChanged }: { ns: string; focus?:
 
   useEffect(() => {
     api.memories(ns, layer || undefined).then((d) => setMems(d.memories)).catch(() => setMems([]));
+    setPage(1);
   }, [ns, layer]);
 
   // when sent here to open a specific memory, drop any layer filter so it shows
   useEffect(() => { if (focus) setLayer(""); /* eslint-disable-next-line */ }, [focus?.n]);
 
-  // scroll to + highlight the focused memory once the list is loaded
+  // scroll to + highlight the focused memory — jump to its page first if needed
   useEffect(() => {
     if (!focus) return;
+    const idx = mems.findIndex((m) => m.id === focus.id);
+    if (idx < 0) return;
+    const target = Math.floor(idx / PAGE) + 1;
+    if (target !== page) { setPage(target); return; }     // re-runs after page change
     const el = document.getElementById(`mc-${focus.id}`);
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     setHl(focus.id);
-    const t = setTimeout(() => setHl(null), 2200);
-    return () => clearTimeout(t);
+    const tm = setTimeout(() => setHl(null), 2200);
+    return () => clearTimeout(tm);
     /* eslint-disable-next-line */
-  }, [focus?.n, mems]);
+  }, [focus?.n, mems, page]);
+
+  const { pages, page: cp, slice } = paginate(mems, page, PAGE);
 
   const chips: [string, string][] = [
     ["", t("all_word")],
@@ -50,8 +61,10 @@ export default function Memories({ ns, focus, onChanged }: { ns: string; focus?:
                             : "border-[var(--line)] text-[var(--dim)] hover:text-[var(--txt)]"}`}>{l}</button>
         ))}
       </div>
-      {mems.length ? mems.map((m) => <MemoryCard key={m.id} m={m} highlight={hl === m.id} onDelete={() => del(m)} />)
-        : <div className="text-[var(--dim)] text-center py-12">{t("nothing_here")}</div>}
+      {mems.length ? (<>
+        {slice.map((m) => <MemoryCard key={m.id} m={m} highlight={hl === m.id} onDelete={() => del(m)} />)}
+        <Pager page={cp} pages={pages} onPage={setPage} />
+      </>) : <div className="text-[var(--dim)] text-center py-12">{t("nothing_here")}</div>}
     </div>
   );
 }

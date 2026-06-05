@@ -4,6 +4,7 @@ import {
   AlertTriangle, TrendingDown, ChevronDown, ChevronUp, Activity, Sparkles
 } from "lucide-react";
 import { api, tShort, type DreamReport, type ContestedPair, type ForgetCurveEntry, type SurpriseEvent } from "../api";
+import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
 
 // ---- stat pill at top -------------------------------------------------------
@@ -285,10 +286,13 @@ export default function Dreams({ ns }: { ns: string }) {
   const { t } = useI18n();
   const [dreams, setDreams] = useState<DreamReport[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     api.dreams(ns).then(d => { setDreams(d.dreams || []); setLoaded(true); }).catch(() => setLoaded(true));
+    setPage(1);
   }, [ns]);
+  const dpg = paginate(dreams, page, 8);
 
   const totalOps  = dreams.reduce((a, r) => a + r.distilled + r.reinforced + r.forgotten + r.derived + r.inferred, 0);
   const totalForgotten = dreams.reduce((a, r) => a + r.forgotten, 0);
@@ -332,7 +336,7 @@ export default function Dreams({ ns }: { ns: string }) {
             <code className="bg-[var(--panel2)] border border-[var(--line)] rounded px-1.5 py-0.5">mind.dream()</code>
           </div>
         </div>
-      ) : dreams.map((r, i) => <DreamCard key={i} report={r} />)}
+      ) : (<>{dpg.slice.map((r, i) => <DreamCard key={i} report={r} />)}<Pager page={dpg.page} pages={dpg.pages} onPage={setPage} /></>)}
     </div>
   );
 }

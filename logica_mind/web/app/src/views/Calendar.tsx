@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import { api, type Memory, type Stats } from "../api";
 import MemoryCard from "../components/MemoryCard";
+import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -19,7 +20,10 @@ export default function Calendar({ ns }: { ns: string }) {
   const [dayMems, setDayMems] = useState<Memory[]>([]);
   const [mode, setMode] = useState<"month" | "week">("month");
   const [weekAnchor, setWeekAnchor] = useState<Date>(() => new Date());
+  const [page, setPage] = useState(1);
   const paneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { setPage(1); }, [sel]);
+  const dpg = paginate(dayMems, page, 15);
 
   useEffect(() => {
     api.calendar(ns).then((d) => {
@@ -128,7 +132,7 @@ export default function Calendar({ ns }: { ns: string }) {
           {sel ? `${t("memories_on")} ${sel} · ${dayMems.length}` : t("pick_day")}
         </div>
         {sel ? (
-          dayMems.length ? dayMems.map((m) => <MemoryCard key={m.id} m={m} />)
+          dayMems.length ? (<>{dpg.slice.map((m) => <MemoryCard key={m.id} m={m} />)}<Pager page={dpg.page} pages={dpg.pages} onPage={setPage} /></>)
             : <div className="text-[var(--dim)] card-surface text-center py-10">{t("no_memories_day")}</div>
         ) : (
           <div className="text-[var(--dim)] card-surface text-center py-10">{t("select_day")}</div>
