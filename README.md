@@ -123,12 +123,24 @@ bundle = mind.export_bundle(secret=k)  # HMAC-signed, portable memory you can mo
 - **GDPR-native erase** — `forget_about(entity)` deletes every memory mentioning an entity across all four layers *and* the graph, in one call. Right-to-be-forgotten as a primitive.
 - **Portable, signed memory** — export an HMAC-signed bundle and carry your memory between apps and vendors. Tamper-evident, provider-independent. *Your memory follows you.*
 - **Source attribution** — every captured memory is tagged with the client that produced it (Claude Code / Cursor / ChatGPT …), read from the MCP handshake.
+- **PII redaction** — `redact_pii()` masks emails, phone numbers and long digit runs from recall output in shared contexts.
 
 ### 🖥️ Built to be lived in
 
 - **A live, animated graph explorer** — Obsidian-style canvas physics, community coloring, confidence-weighted edges, entity drill-down, and a **time-scrubber** that replays the graph at any date. Served by the standard library — no Node required for end users.
 - **Obsidian-style note pane** — click any memory to open it as a document with a Properties panel and its provenance; entities are first-class (alias resolution collapses *"OpenAI" = "Open AI"*).
+- **Context survives compaction** — a `PreCompact` hook distills the conversation into durable memory *right before the host truncates the window*, then brings the relevant slice back on the next session. The fix for "it compacted and we lost everything."
+- **Sessions that follow you across machines** — sessions auto-name from their first message, can be renamed and exported, and import directly from your local assistant history. Take your session index anywhere.
+- **Danger-zone controls** — scoped erasure from the dashboard: clear by layer, clear stale (old & untouched), or reset a namespace — all behind a typed confirmation.
 - **A demo you control** — ship empty, load a rich fictional dataset to explore, then clear it with one click (it only removes the demo, never your data).
+
+### 🧰 More than memory — a coding-context server too
+
+The *same package* is also a Logica-Context-class devtools server: a sandboxed
+code `execute`, **Project DNA** (`scan` any repo for its languages, frameworks
+and key files), `git` context, a token `budget` meter, an MCP aggregator, and a
+shared team knowledge base. One install is a deep memory brain **and** a coding
+assistant's context layer.
 
 ---
 
