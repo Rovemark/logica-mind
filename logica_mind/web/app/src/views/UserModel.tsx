@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
 import { api } from "../api";
+import Markdown from "../components/Markdown";
 import { useI18n } from "../i18n";
 
 export default function UserModel({ ns }: { ns: string }) {
@@ -45,16 +46,13 @@ export default function UserModel({ ns }: { ns: string }) {
           </button>
         </div>
         {answer && (
-          <div className="mt-3 text-[13px] text-[var(--txt)] leading-relaxed border-t border-[var(--line)] pt-3">
-            {answer}
-          </div>
+          <Markdown text={answer} className="mt-3 text-[13px] text-[var(--txt)] leading-relaxed border-t border-[var(--line)] pt-3" />
         )}
       </div>
 
       {/* profile */}
       {profile ? (
-        <pre className="whitespace-pre-wrap card-surface p-[18px] text-[var(--txt)]"
-          style={{ font: "13.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace" }}>{profile}</pre>
+        <Markdown text={profile} className="card-surface p-[18px] text-[var(--txt)] text-[13.5px] leading-[1.7]" />
       ) : (
         <div className="text-[var(--dim)] text-center py-12">{t("no_user_model")}</div>
       )}

@@ -146,9 +146,9 @@ function Glyph({ it }: { it: Item }) {
 
 function Tag({ it, t }: { it: Item; t: (k: any) => string }) {
   const label = it.kind === "view" ? t("grp_views").slice(0, -1)
-    : it.kind === "agent" ? "agent"
-    : it.kind === "entity" ? (it.entity.type || "entity")
+    : it.kind === "agent" ? t("tag_agent")
+    : it.kind === "entity" ? (it.entity.type || t("tag_entity"))
     : it.kind === "category" ? `${it.count}`
-    : it.memory.layer;
+    : (t(`layer_${it.memory.layer}` as any) || it.memory.layer);
   return <span className="text-[10px] text-[var(--dim2)] flex-none uppercase tracking-wide">{label}</span>;
 }

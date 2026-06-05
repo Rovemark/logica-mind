@@ -75,7 +75,7 @@ export default function MemoryDetail({ memory, onClose }: { memory: Memory; onCl
           shadow-[var(--shadow)] overflow-y-auto fadein">
         <div className="sticky top-0 bg-[var(--bg2)] border-b border-[var(--line)] px-6 py-3 flex items-center gap-2 z-10">
           {stack.length > 0 && (
-            <button onClick={back} className="text-[var(--dim)] hover:text-[var(--txt)] -ml-1" title="Back"><CornerUpLeft size={16} /></button>
+            <button onClick={back} className="text-[var(--dim)] hover:text-[var(--txt)] -ml-1" title={t("back")}><CornerUpLeft size={16} /></button>
           )}
           <span className="text-[var(--dim2)] text-[12px]">{cur.namespace} / {cur.layer}</span>
           <button onClick={onClose} className="ml-auto text-[var(--dim)] hover:text-[var(--txt)]"><X size={18} /></button>

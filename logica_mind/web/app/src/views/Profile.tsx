@@ -2,18 +2,26 @@ import { useEffect, useRef, useState } from "react";
 import { Send, Layers as LayersIcon, UserRound, FolderGit2, Building2, DollarSign, LayoutGrid, Network } from "lucide-react";
 import { api, type DimensionsData, type DimensionEntry, type GraphData } from "../api";
 import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
+import Markdown from "../components/Markdown";
 import { useI18n } from "../i18n";
 import { useNav, type MemFilter } from "../navctx";
 
 const GROUP_COLOR: Record<string, string> = {
   personal: "#a78bfa", project: "#7c9cff", organization: "#22d3ee", business: "#4ade80",
 };
-const GROUP_LABEL2: Record<string, string> = {
-  personal: "Person", project: "Projects", organization: "Organization", business: "Business",
+// group / Maslow labels live in i18n — these map to the keys (rendered via t())
+const GRP_KEY: Record<string, string> = {
+  personal: "grp_person", project: "grp_projects", organization: "grp_organization", business: "grp_business",
+};
+const MASLOW_KEY: Record<string, string> = {
+  "self-actualization": "maslow_self_actualization", esteem: "maslow_esteem", belonging: "maslow_belonging",
+  safety: "maslow_safety", physiological: "maslow_physiological",
 };
 
-// build a navigable group → dimension → category graph from the dimension profile
-function buildCatGraph(dims: DimensionEntry[]): { data: GraphData; meta: Record<string, MemFilter | { group: string }> } {
+// build a navigable group → dimension → category graph from the dimension profile.
+// `groupLabel` resolves a group id to its (translated) display label, which doubles
+// as the node id, so the map speaks the active language.
+function buildCatGraph(dims: DimensionEntry[], groupLabel: (g: string) => string): { data: GraphData; meta: Record<string, MemFilter | { group: string }> } {
   const nodes: GraphData["nodes"] = [];
   const links: GraphData["links"] = [];
   const meta: Record<string, any> = {};
@@ -24,28 +32,24 @@ function buildCatGraph(dims: DimensionEntry[]): { data: GraphData; meta: Record<
     const dimId = d.label;
     nodes.push({ id: dimId, namespaces: [d.group] });
     meta[dimId] = { dimension: d.id, label: d.label };
-    links.push({ source: GROUP_LABEL2[d.group], target: dimId, label: "" });
+    links.push({ source: groupLabel(d.group), target: dimId, label: "" });
     for (const c of d.categories) {
       if (!meta[c.name]) { nodes.push({ id: c.name, namespaces: [d.group] }); meta[c.name] = { category: c.name, label: c.name }; }
       links.push({ source: dimId, target: c.name, label: "" });
     }
   }
-  for (const g of groups) { const gl = GROUP_LABEL2[g]; nodes.unshift({ id: gl, namespaces: [g], shared: true }); meta[gl] = { group: g }; }
+  for (const g of groups) { const gl = groupLabel(g); nodes.unshift({ id: gl, namespaces: [g], shared: true }); meta[gl] = { group: g }; }
   return { data: { nodes, links }, meta };
 }
 
 // the unified profile: the dialectic user model + the dimension/category map,
-// organized by the four life/work groups.
+// organized by the four life/work groups. Labels resolve through i18n at render.
 const TABS = [
-  { id: "personal", label: "Person", color: "#a78bfa", Icon: UserRound },
-  { id: "project", label: "Projects", color: "#7c9cff", Icon: FolderGit2 },
-  { id: "organization", label: "Organization", color: "#22d3ee", Icon: Building2 },
-  { id: "business", label: "Business", color: "#4ade80", Icon: DollarSign },
+  { id: "personal", labelKey: "grp_person", color: "#a78bfa", Icon: UserRound },
+  { id: "project", labelKey: "grp_projects", color: "#7c9cff", Icon: FolderGit2 },
+  { id: "organization", labelKey: "grp_organization", color: "#22d3ee", Icon: Building2 },
+  { id: "business", labelKey: "grp_business", color: "#4ade80", Icon: DollarSign },
 ];
-const MASLOW_LABEL: Record<string, string> = {
-  "self-actualization": "Self-actualization", esteem: "Esteem", belonging: "Love & Belonging",
-  safety: "Safety", physiological: "Physiological",
-};
 
 export default function Profile({ ns }: { ns: string }) {
   const { t } = useI18n();
@@ -97,7 +101,7 @@ export default function Profile({ ns }: { ns: string }) {
 
       {/* map mode: the group → dimension → category graph */}
       {mode === "map" && (() => {
-        const { data: gd, meta } = buildCatGraph(dims);
+        const { data: gd, meta } = buildCatGraph(dims, (g) => t(GRP_KEY[g] as any) || g);
         return gd.nodes.length ? (
           <div className="h-[600px] mt-4">
             <GraphCanvas ref={graphRef} data={gd} communities={false}
@@ -112,7 +116,7 @@ export default function Profile({ ns }: { ns: string }) {
       {/* group tabs (cards mode) */}
       {mode === "cards" && <>
       <div className="flex gap-1.5 my-4 flex-wrap">
-        {TABS.map(({ id, label, color, Icon }) => {
+        {TABS.map(({ id, labelKey, color, Icon }) => {
           const on = tab === id;
           const c = groupCount(id);
           return (
@@ -120,7 +124,7 @@ export default function Profile({ ns }: { ns: string }) {
               className={`flex items-center gap-2 px-3.5 py-2 rounded-[10px] border text-[13px] font-medium ${
                 on ? "text-[var(--txt)]" : "border-[var(--line)] text-[var(--dim)] hover:text-[var(--txt)]"}`}
               style={on ? { borderColor: color, background: `${color}14` } : {}}>
-              <Icon size={15} style={{ color: on ? color : undefined }} /> {label}
+              <Icon size={15} style={{ color: on ? color : undefined }} /> {t(labelKey as any)}
               <span className="tabular-nums text-[11.5px]" style={{ color }}>{c}</span>
             </button>
           );
@@ -140,9 +144,9 @@ export default function Profile({ ns }: { ns: string }) {
               <Send size={13} /> {asking ? t("asking") : t("ask_btn")}
             </button>
           </div>
-          {answer && <div className="text-[13px] text-[var(--txt)] leading-relaxed border-t border-[var(--line)] pt-3 mb-3">{answer}</div>}
+          {answer && <Markdown text={answer} className="text-[13px] text-[var(--txt)] leading-relaxed border-t border-[var(--line)] pt-3 mb-3" />}
           {profile
-            ? <pre className="whitespace-pre-wrap m-0 text-[13px] text-[var(--dim)] leading-[1.6]">{profile}</pre>
+            ? <Markdown text={profile} className="text-[13px] text-[var(--dim)] leading-[1.6]" />
             : <div className="text-[var(--dim2)] text-[12.5px]">{t("no_user_model")}</div>}
         </div>
       )}
@@ -172,7 +176,7 @@ function DimCard({ d, color, onOpen, t }: { d: DimensionEntry; color: string; on
       <button onClick={() => onOpen({ dimension: d.id, label: d.label })} title={t("open_in_memories")}
         className="w-full flex items-center gap-2 mb-2 text-left group">
         <span className="text-[13px] font-semibold group-hover:text-[var(--accent)]">{d.label}</span>
-        {d.maslow && <span className="text-[10px] text-[var(--dim2)] bg-[var(--panel2)] border border-[var(--line)] px-1.5 py-px rounded-full">{MASLOW_LABEL[d.maslow] || d.maslow}</span>}
+        {d.maslow && <span className="text-[10px] text-[var(--dim2)] bg-[var(--panel2)] border border-[var(--line)] px-1.5 py-px rounded-full">{t(MASLOW_KEY[d.maslow] as any) || d.maslow}</span>}
         <span className="ml-auto text-[12px] tabular-nums font-bold" style={{ color }}>{d.count}</span>
       </button>
       <div className="flex flex-wrap gap-1.5">
