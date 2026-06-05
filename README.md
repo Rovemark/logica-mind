@@ -8,8 +8,8 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
-[![MCP](https://img.shields.io/badge/MCP-29%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
+[![Tests](https://img.shields.io/badge/tests-189%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
+[![MCP](https://img.shields.io/badge/MCP-32%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-orange.svg)](CONTRIBUTING.md)
 
 </div>
@@ -34,14 +34,14 @@ mind.contradictions()            # every belief that changed value — and exact
 ```
 
 It runs fully offline on the standard library — **zero dependencies, no API key
-to start** — and is covered by **183 tests**, so you can verify every claim on
+to start** — and is covered by **189 tests**, so you can verify every claim on
 this page in five minutes. It then lights up Voyage, OpenAI, Supabase, Postgres
 or Redis whenever you want them.
 
 <div align="center">
-  <img src="docs/img/dashboard-graph.png" alt="Logica Mind dashboard — live temporal knowledge graph" width="100%">
+  <img src="docs/img/dashboard-graph.png" alt="Logica Mind dashboard — the intelligent temporal knowledge graph" width="100%">
   <br>
-  <em>The built-in dashboard: a live, animated knowledge graph with point-in-time replay, shared-entity detection across agents, and a one-click demo you can clear.</em>
+  <em>The built-in dashboard: edges hued by relation type, nodes sized by centrality, emergent co-mentions, a full filter bar, point-in-time replay — and intelligence (path-finding, bridges, suggested links) a hand-linked note graph can't have.</em>
 </div>
 
 ---
@@ -165,7 +165,7 @@ bundle = mind.export_bundle(secret=k)  # HMAC-signed, portable memory you can mo
 
 ### 🖥️ Built to be lived in
 
-- **A live, animated graph explorer** — Obsidian-style canvas physics, community coloring, confidence-weighted edges, entity drill-down, and a **time-scrubber** that replays the graph at any date. Toggle **colour-by-life-area** to paint every entity by its dominant dimension (Person / Projects / Organization / Business) and filter the graph down to one area. Served by the standard library — no Node required for end users.
+- **A graph that explains itself** — not a hairball of identical lines. Edges are **hued by relation type** with directional arrows and confidence-weighted width; nodes are **sized by PageRank centrality** so hubs stand out. A real top filter bar: **colour by** namespace / community / life-area / centrality, toggle connection **layers** (relations, co-mentions, semantic affinity, suggested), search-to-focus, a min-confidence declutter slider, and per-relation-type filters. Plus the intelligence a hand-linked note graph can't have: **"how is A related to B?"** (a narrated, spotlighted path), **bridges** (load-bearing connectors), **suggested links** (the edge you're missing, predicted), a **local/ego graph** with a depth slider, **hover previews**, and a **time-scrubber** that replays the graph at any past date. Served by the standard library — no Node for end users.
 - **Backlinks that write themselves** — Obsidian makes you *type* `[[links]]`; here the connective tissue is **inferred**. Open any memory and the **Connected** panel shows the entities it mentions, the relations among them, other notes that touch the same entities, and siblings sharing its category — all derived from the graph, nothing to maintain. Click to walk note-to-note; `[[wikilinks]]` in content are clickable too. Exposed as `mind.connections(id)` and the `lm_connected` MCP tool.
 - **Context survives compaction** — a `PreCompact` hook distills the conversation into durable memory *right before the host truncates the window*, then brings the relevant slice back on the next session. The fix for "it compacted and we lost everything."
 - **Sessions that follow you across machines** — sessions auto-name from their first message, can be renamed and exported, and import directly from your local assistant history. Take your session index anywhere.
@@ -205,7 +205,7 @@ assistant's context layer.
 
 ## 🔌 Model Context Protocol (MCP)
 
-Logica Mind is a full MCP server — **29 tools** covering memory, recall, the
+Logica Mind is a full MCP server — **32 tools** covering memory, recall, the
 temporal graph, peers, dreaming, contested beliefs, the forgetting curve, GDPR
 erase and structured session records. Point any MCP client (Claude Code, Cursor,
 …) at it and your assistant gets durable, queryable memory:
@@ -286,7 +286,7 @@ Full guides live in [`docs/`](docs/):
 ```bash
 git clone https://github.com/Rovemark/logica-mind.git
 cd logica-mind
-pip install -e ".[dev]" && pytest -q          # 183 tests, fully offline
+pip install -e ".[dev]" && pytest -q          # 189 tests, fully offline
 
 # rebuild the dashboard (only if you change the UI)
 cd logica_mind/web/app && npm ci && npm run build
@@ -298,7 +298,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ## 📦 Status
 
-**v0.1.0 — Beta.** The full feature set above is shipped and covered by 183 tests.
+**v0.1.0 — Beta.** The full feature set above is shipped and covered by 189 tests.
 Episodic, semantic, temporal-graph and dialectic user memory; automatic
 extraction; embeddings + reranking; a temporal knowledge graph; sleep-time
 consolidation; an MCP server and a self-hosted dashboard — one cohesive library,

@@ -343,6 +343,51 @@ Each node in the `graph_viz` payload also carries a `dimension` field when one c
 
 Any entity (and any memory) exposes its neighborhood through [`mind.connections(id)`](./connections.md) — the relations touching it, the other memories that mention it, and siblings of the same category. It's the derived-backlink layer the dashboard's **Connected** panel renders.
 
+## Graph intelligence
+
+The graph doesn't just draw — it reasons about its own structure. Each of these is pure-Python over the temporal graph (no LLM), exposed in the dashboard, the REST API and as an MCP tool.
+
+### Connection layers
+
+`graph_viz(layers=[…])` returns more than explicit relations. Every link carries a `kind`:
+
+- **relation** — an explicit typed edge (always on), `directed`, `weight` = confidence, plus a `pclass` (predicate class: social / has / causal / locative / temporal / is_a) the canvas hues it by.
+- **co_mention** — an *emergent* link between two entities a single memory names together, with no explicit edge. One regex scan, capped per memory. The computed version of Obsidian's "unlinked mention".
+- **semantic** — *opt-in*. Entity pairs whose memory-neighbourhoods are close in vector space but unlinked. Built from stored embeddings only (never embeds in the request path), capped to the busiest entities. Meaningful with a real embedder.
+
+Every node also carries a **`centrality`** (normalized PageRank) for sizing, a **`degree`**, and a **`bridge`** flag (see below).
+
+### How is A related to B?
+
+```python
+mind.how_related("the billing service", "Priya Nair")
+# → the billing service --part_of--> Acme Inc --works_at--> Priya Nair
+```
+
+A confidence-weighted shortest path (Dijkstra, cost = 1/confidence) returned as an ordered chain of **typed** hops. The dashboard's **Path** mode traces it and spotlights it on the canvas — path nodes gold-ringed, path edges gold, everything else dimmed. The question a graph of hand-authored, untyped links can't answer. MCP: `lm_how_related`.
+
+![Path mode — how is A related to B?](img/dashboard-graph-path.png)
+
+### Bridges
+
+```python
+mind.bridges()    # entities whose removal fragments the graph (articulation points)
+```
+
+The load-bearing connectors that broker between otherwise-separate clusters — often low-degree nodes that centrality ranking misses. Flagged on nodes (`bridge: true`) and ringed on the canvas. MCP: `lm_bridges`.
+
+### Suggested links (predict the missing edge)
+
+```python
+mind.suggested_links()   # pairs with a strong shared neighbourhood but no edge
+```
+
+Link prediction by Adamic-Adar: entity pairs with no direct relation but many common neighbours — "these two probably relate, you just never said so". A **Suggested** layer overlays them as dashed candidate edges. The biggest "nobody has this" moment — note tools make you author every link. MCP: `lm_suggested_links`.
+
+### Local graph, hover & filters
+
+The dashboard adds a **local/ego graph** (focus an entity → collapse to its neighbourhood, with a 1–3 hop depth slider), **hover previews** (a node's top facts without a click), search-to-focus, a min-confidence declutter slider, per-predicate-class filters, and **colour-by** (namespace / community / life-area / centrality) plus a highlight-by-query colour group.
+
 ---
 
 ## See also

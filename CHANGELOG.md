@@ -5,6 +5,23 @@ All notable changes to Logica Mind. Format loosely follows
 
 ## [Unreleased]
 
+### Graph intelligence
+- The knowledge graph became an instrument. Every link now carries a kind
+  (relation / co-mention / semantic), direction, weight and predicate class;
+  every node a PageRank **centrality** and a **bridge** flag. New connection
+  **layers**: emergent **co-mentions** and opt-in **semantic** affinity.
+- New reasoning: **`how_related(a, b)`** (narrated shortest path),
+  **`bridges()`** (articulation points), **`suggested_links()`** (Adamic-Adar
+  link prediction), and **`entity_unlinked()`** (unlinked mentions). Exposed
+  as `lm_how_related` / `lm_bridges` / `lm_suggested_links` and `/api/path`,
+  `/api/bridges`, `/api/suggested`. **MCP server is now 32 tools.**
+- Dashboard graph: an **edge grammar** (hue by relation type, arrows, width by
+  confidence, node size by centrality), a professional **top filter bar**
+  (colour-by, layer toggles, search-focus, min-confidence + predicate filters,
+  highlight-by-query), a **local/ego graph** with a depth slider, **hover
+  previews**, and **Path mode** that traces & spotlights "how is A related to
+  B?". Predicate labels localize (pt/es) with a graceful fallback.
+
 ### Fact categorization
 - Every durable fact is tagged with a **category** (an open label the LLM coins)
   and a **dimension** from a 34-dimension taxonomy across four groups — Personal
