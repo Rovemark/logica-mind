@@ -2,12 +2,14 @@ import type { ReactNode } from "react";
 import { Search } from "lucide-react";
 import { ALL } from "../api";
 import { useI18n } from "../i18n";
+import HelpTip from "./HelpTip";
 
 // The header search is the global Spotlight trigger — clicking it (or ⌘K) opens
-// the command palette that searches across everything.
+// the command palette that searches across everything. A contextual "?" explains
+// whatever page you're on.
 export default function Topbar({
-  ns, total, onOpen, action,
-}: { ns: string; total: number; onOpen: () => void; action?: ReactNode }) {
+  view, ns, total, onOpen, action,
+}: { view: string; ns: string; total: number; onOpen: () => void; action?: ReactNode }) {
   const { t } = useI18n();
   const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
   return (
@@ -24,6 +26,7 @@ export default function Topbar({
       <div className="ml-auto text-[var(--dim)] text-[12.5px] flex items-center gap-2 max-[820px]:hidden">
         <b className="text-[var(--txt)]">{total}</b> {t("memories_word")} · <b className="text-[var(--txt)]">{ns === ALL ? t("all_word") : ns}</b>
       </div>
+      <HelpTip k={view} />
       {action && <div className="flex-none ml-1">{action}</div>}
     </div>
   );

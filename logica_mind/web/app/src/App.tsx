@@ -97,7 +97,7 @@ export default function App() {
         open={drawer} onView={onView} onNs={onNs} onClose={closeDrawer} onSettings={() => onView("settings")} />
 
       <main className="flex flex-col min-w-0 min-h-0">
-        <Topbar ns={ns} total={total} onOpen={() => setPalette(true)} action={<Composer ns={ns} onDone={bump} />} />
+        <Topbar view={view} ns={ns} total={total} onOpen={() => setPalette(true)} action={<Composer ns={ns} onDone={bump} />} />
         <DemoBanner onChange={bump} />
         <div className="flex-1 min-h-0 overflow-auto px-6 pt-[22px] pb-[30px] max-[820px]:px-3.5 max-[820px]:pb-[92px]">
           <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} />
