@@ -117,6 +117,79 @@ def _seed_categorized(m):
     m.graph.ingest("Maya", "invested_in", "Acme Corp")
 
 
+def _seed_org(m):
+    """A small org graph: a hub (Acme) with several people + assets, so paths,
+    bridges, co-mentions and centrality are all exercised."""
+    g = m.graph
+    for p in ["Maya", "Jordan", "Sam", "Priya"]:
+        g.ingest(p, "works_at", "Acme")
+    g.ingest("Maya", "founded", "Acme")
+    g.ingest("Jordan", "leads", "the mobile app")   # the app hangs off Jordan ONLY → he's a bridge
+    g.ingest("Sam", "reports_to", "Maya")
+    g.ingest("Priya", "reports_to", "Maya")         # Sam & Priya share {Acme, Maya}, no direct edge
+    # co-mention facts (no edge between the named pairs)
+    def fact(c):
+        m.store.add([Memory(content=c, namespace=m.namespace, layer=MemoryLayer.SEMANTIC)])
+    fact("Maya and Jordan reviewed the roadmap together.")
+    fact("Maya and Jordan met about hiring.")
+
+
+def test_predicate_class_buckets():
+    from logica_mind.graph.analytics import predicate_class
+    assert predicate_class("works_at") == "social"
+    assert predicate_class("part_of") == "has"
+    assert predicate_class("scheduled_for") == "temporal"
+    assert predicate_class("blocks") == "causal"
+    assert predicate_class("zzz") == "other"
+
+
+def test_pagerank_ranks_the_hub_highest():
+    from logica_mind.graph.analytics import pagerank
+    edges = [("Acme", p, 1.0) for p in ["Maya", "Jordan", "Sam", "Priya"]]
+    pr = pagerank(["Acme", "Maya", "Jordan", "Sam", "Priya"], edges)
+    assert pr["Acme"] == 1.0                       # normalized max = the hub
+    assert all(pr[p] < pr["Acme"] for p in ["Maya", "Jordan", "Sam", "Priya"])
+
+
+def test_graph_viz_tags_kind_weight_and_centrality():
+    m = mk()
+    _seed_org(m)
+    viz = m.graph_viz(namespace="t", layers=["relation", "co_mention"])
+    rels = [l for l in viz["links"] if l["kind"] == "relation"]
+    assert rels and all("pclass" in l and l["directed"] for l in rels)
+    coms = [l for l in viz["links"] if l["kind"] == "co_mention"]
+    assert any({l["source"], l["target"]} == {"Maya", "Jordan"} for l in coms)  # co-mentioned 2x
+    cby = {n["id"]: n["centrality"] for n in viz["nodes"]}
+    assert cby["Acme"] > cby["the mobile app"]     # a hub outranks a leaf
+
+
+def test_how_related_returns_typed_path():
+    m = mk()
+    _seed_org(m)
+    r = m.how_related("the mobile app", "Sam")
+    assert r["found"]
+    assert r["path"][0] == "the mobile app" and r["path"][-1] == "Sam"
+    assert "Acme" in r["path"]                      # routes through the hub
+    assert all(h["predicate"] for h in r["hops"])
+
+
+def test_bridges_finds_articulation_point():
+    m = mk()
+    _seed_org(m)
+    names = {b["entity"] for b in m.bridges()}
+    assert "Jordan" in names                        # removing Jordan isolates the mobile app
+
+
+def test_suggested_links_predicts_unconnected_pairs():
+    m = mk()
+    _seed_org(m)
+    sug = m.suggested_links(min_common=2)
+    # Sam & Priya share ≥2 neighbours (Acme + via people) yet have no edge
+    pairs = {frozenset((s["a"], s["b"])) for s in sug}
+    assert any(len(p) == 2 for p in pairs)
+    assert all(s["score"] > 0 for s in sug)
+
+
 def test_graph_viz_annotates_entities_with_life_area():
     m = mk()
     _seed_categorized(m)
