@@ -22,6 +22,14 @@ All notable changes to Logica Mind. Format loosely follows
   previews**, and **Path mode** that traces & spotlights "how is A related to
   B?". Predicate labels localize (pt/es) with a graceful fallback.
 
+### Internationalization & UX
+- **9 languages** — added 中文, हिन्दी, العربية (RTL), Français, 日本語 and Deutsch
+  to English / Português / Español, with full key parity (420 keys each). Even
+  the graph's relationship labels localize. Arabic flips the layout to RTL.
+- **Clean URLs** — dropped the `#`: real history routing (`/graph/org:acme`),
+  deep links and refresh work via the server's app-shell fallback.
+- Hover tooltips on every graph control.
+
 ### Fact categorization
 - Every durable fact is tagged with a **category** (an open label the LLM coins)
   and a **dimension** from a 34-dimension taxonomy across four groups — Personal
