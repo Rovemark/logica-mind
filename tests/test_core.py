@@ -155,6 +155,21 @@ def test_dreaming_reinforces_recalled_memories():
     assert after >= before
 
 
+def test_dream_consolidation_preserves_categorization():
+    # a belief born in a dream must be as queryable as one stated directly:
+    # the extractor's category/dimension has to ride onto the distilled fact.
+    llm = FakeLLM(facts=[{"content": "The user loves espresso.",
+                          "category": "Coffee preference", "dimension": "preference", "op": "add"}])
+    m = LogicaMind(namespace="t", store=InMemoryStore(), llm=llm)
+    m.log("we talked about coffee this morning")
+    m.log("they mentioned espresso again later")
+    m.dream(prune=False)
+    distilled = [x for x in m.store.all("t", [MemoryLayer.SEMANTIC]) if "distilled" in (x.tags or [])]
+    assert distilled, "dream should distill at least one semantic fact"
+    assert any((x.metadata or {}).get("dimension") == "preference"
+               and (x.metadata or {}).get("category") == "Coffee preference" for x in distilled)
+
+
 def test_user_model_observe_and_profile():
     m = mk()
     m.observe_user("Likes concise answers.")

@@ -16,7 +16,7 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
 
-Run the full suite (roughly 182 tests; it is fully offline and needs no API
+Run the full suite (roughly 183 tests; it is fully offline and needs no API
 keys — it uses the default SQLite store and the offline hashing embedder):
 
 ```bash

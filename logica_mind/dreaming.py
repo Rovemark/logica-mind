@@ -166,6 +166,14 @@ class Dreamer:
             emb = m._embed(fact.content)
             if m._find_duplicate(fact.content, emb, MemoryLayer.SEMANTIC):
                 continue
+            # carry the extractor's life-area categorization onto sleep-distilled
+            # facts too, so a belief born in a dream is as queryable as one the
+            # user stated directly (Profile, search, graph colouring, connections).
+            meta = {}
+            if getattr(fact, "category", None):
+                meta["category"] = fact.category
+            if getattr(fact, "dimension", None):
+                meta["dimension"] = fact.dimension
             m.store.add([Memory(
                 content=fact.content,
                 namespace=m.namespace,
@@ -173,6 +181,7 @@ class Dreamer:
                 importance=max(0.5, fact.importance),
                 embedding=emb,
                 source_ids=source_ids,
+                metadata=meta or None,
                 tags=["distilled"],
             )])
             report.distilled += 1
