@@ -319,6 +319,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                 "op": "updated" if md.get("supersedes") else "new",
                                 "superseded": (md.get("superseded_belief") or {}).get("content"),
                                 "category": md.get("category"),
+                                "dimension": md.get("dimension"),
                             })
                         self._json({"ok": True, "namespace": ns, "kind": kind, "llm": has_llm,
                                     "created": items, "graph_edges": max(0, after - before),
@@ -565,6 +566,36 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         obs = mind.for_namespace(ns).observations(limit=limit)
                         self._json({"observations": [{**o, "namespace": ns} for o in obs]})
 
+                elif path == "/api/dimensions":
+                    # the life-dimension profile: every categorized fact grouped by
+                    # dimension and Maslow tier — powers the Profile view + filters.
+                    from ..extract.taxonomy import DIMENSIONS, MASLOW
+                    names = mind.store.namespaces() if is_all else [ns]
+                    agg = {}
+                    uncategorized = 0
+                    for nm in names:
+                        for m in mind.store.all(nm):
+                            if _is_internal(m):
+                                continue
+                            md = m.metadata or {}
+                            dim = md.get("dimension")
+                            if not dim:
+                                uncategorized += 1
+                                continue
+                            e = agg.setdefault(dim, {"count": 0, "cats": {}})
+                            e["count"] += 1
+                            cat = md.get("category")
+                            if cat:
+                                e["cats"][cat] = e["cats"].get(cat, 0) + 1
+                    out = []
+                    for d in DIMENSIONS:
+                        info = agg.get(d["id"], {"count": 0, "cats": {}})
+                        cats = sorted(info["cats"].items(), key=lambda x: -x[1])
+                        out.append({"id": d["id"], "label": d["label"], "group": d["group"],
+                                    "maslow": d["maslow"], "count": info["count"],
+                                    "categories": [{"name": c, "count": n} for c, n in cats]})
+                    self._json({"dimensions": out, "uncategorized": uncategorized, "maslow": MASLOW})
+
                 elif path == "/api/integrations":
                     # the live stack (store + redundancy, embedder, llm, reranker)
                     # plus the catalog of what's available to enable — drives the
@@ -588,13 +619,20 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 elif path == "/api/memories":
                     layers = layers_of(qs)
                     session = first(qs, "session")     # optional: scope to one session
+                    dim = first(qs, "dimension")       # optional: a life-dimension filter
+                    category = first(qs, "category")   # optional: an exact-category filter
                     names = [n["namespace"] for n in mind.list_namespaces()] if is_all else [ns]
                     mems = []
                     for name in names:
                         for m in mind.store.all(name, layers):
                             if _is_internal(m):
                                 continue
-                            if session and (m.metadata or {}).get("session") != session:
+                            md = m.metadata or {}
+                            if session and md.get("session") != session:
+                                continue
+                            if dim and md.get("dimension") != dim:
+                                continue
+                            if category and md.get("category") != category:
                                 continue
                             mems.append(m)
                     mems.sort(key=lambda m: m.created_at or "", reverse=True)

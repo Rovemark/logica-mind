@@ -6,6 +6,14 @@ import { useI18n } from "../i18n";
 const LAYER_COLOR: Record<string, string> = {
   episodic: "#7c9cff", semantic: "#4ade80", graph: "#f59e0b", user: "#a78bfa",
 };
+// colour a fact by the group of its life/work dimension
+function dimColor(dim?: string | null): string {
+  if (!dim) return "var(--accent2)";
+  if (dim.startsWith("biz_")) return "#4ade80";
+  if (dim.startsWith("project_")) return "#7c9cff";
+  if (dim.startsWith("org_")) return "#22d3ee";
+  return "#a78bfa";
+}
 
 // The "learn" animation: after you add text, show exactly what the engine did
 // with it — extracted facts revealed one by one (a live "memory n/n" counter),
@@ -82,7 +90,10 @@ export default function LearningBurst({ input, result, onDone }: {
                   </span>
                   <span className="text-[10px] px-1.5 py-px rounded-full font-bold uppercase tracking-wide flex-none"
                     style={{ background: `${col}1f`, color: col }}>{it.layer}</span>
-                  {it.category && <span className="text-[10.5px] text-[var(--dim2)]">{it.category}</span>}
+                  {it.category && (() => { const dc = dimColor(it.dimension); return (
+                    <span className="text-[11px] font-semibold px-2 py-px rounded-full flex-none"
+                      style={{ background: `${dc}1f`, color: dc }}>{it.category}</span>
+                  ); })()}
                   <span className={`ml-auto text-[9.5px] font-bold uppercase tracking-wide px-1.5 py-px rounded-full flex-none ${
                     it.op === "updated" ? "text-[var(--gold)] bg-[var(--gold)]/15" : "text-[var(--good)] bg-[var(--good)]/15"}`}>
                     {it.op === "updated" ? t("op_updated") : t("op_new")}

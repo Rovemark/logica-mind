@@ -15,11 +15,14 @@ from ..types import Memory
 from ..llm.base import LLM, NullLLM
 from .base import Extractor, Fact, ExtractOp
 from .noop import NoopExtractor
+from .taxonomy import prompt_guidance, DIM_IDS
 
 _SYSTEM = (
     "You extract durable, atomic facts from a message for a long-term memory store. "
     "Return ONLY JSON: a list of objects with keys "
     '"content" (the fact, self-contained, third person), '
+    '"category" (a short 1-3 word topical label you coin, e.g. "Coffee preference", "Zodiac sign", "Career goal"), '
+    '"dimension" (the single best life-dimension id from the list below), '
     '"op" (one of "add", "update", "delete", "noop"), '
     '"target_id" (id of the existing memory to act on for "update"/"delete", else null), '
     '"importance" (0..1). '
@@ -27,8 +30,11 @@ _SYSTEM = (
     'Use "delete" when an existing memory is now FALSE or retracted and has no replacement (set target_id). '
     'Use "noop" if the fact is already represented in existing memories. '
     "Extract only meaningful, lasting facts — skip greetings, filler and transient chatter. "
-    "If the message contains no durable fact, return []."
+    "Be thorough: a single sentence often carries several facts across different dimensions. "
+    "If the message contains no durable fact, return [].\n\n"
+    + prompt_guidance()
 )
+_DIMS = set(DIM_IDS)
 
 
 class LLMExtractor(Extractor):
@@ -90,12 +96,18 @@ class LLMExtractor(Extractor):
                 continue
             if not content:
                 continue
+            cat = (item.get("category") or "").strip() or None
+            dim = (item.get("dimension") or "").strip().lower() or None
+            if dim and dim not in _DIMS:
+                dim = None
             facts.append(
                 Fact(
                     content=content,
                     op=op,
                     target_id=target_id,
                     importance=float(item.get("importance", 0.5) or 0.5),
+                    category=cat,
+                    dimension=dim,
                 )
             )
         return facts

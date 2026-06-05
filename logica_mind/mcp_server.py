@@ -146,6 +146,11 @@ TOOLS = [
         "description": "Per-layer counts of stored memories.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "lm_dimensions",
+        "description": "The categorization profile: facts grouped by life/work dimension and Maslow tier, with the open categories under each.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
     # ---- coding-context devtools ----
     {
         "name": "lm_execute",
@@ -378,11 +383,18 @@ class MCPServer:
         src_meta = {"source": self.source} if self.source else None
         if name == "lm_remember":
             created = m.remember(args["text"], session=args.get("session"), metadata=src_meta)
-            return {"stored": [c.content for c in created], "count": len(created)}
+            return {"stored": [c.content for c in created], "count": len(created),
+                    "facts": [{"content": c.content,
+                               "category": (c.metadata or {}).get("category"),
+                               "dimension": (c.metadata or {}).get("dimension")} for c in created]}
         if name == "lm_recall":
             hits = m.recall(args["query"], limit=int(args.get("limit", 8)), session=args.get("session"))
             return [{"score": round(h.score, 4), "layer": h.memory.layer.value,
-                     "content": h.memory.content} for h in hits]
+                     "content": h.memory.content,
+                     "category": (h.memory.metadata or {}).get("category"),
+                     "dimension": (h.memory.metadata or {}).get("dimension")} for h in hits]
+        if name == "lm_dimensions":
+            return m.dimensions()
         if name == "lm_context":
             return m.context(args["query"], token_budget=int(args.get("token_budget", 1500)))
         if name == "lm_ask_about_user":
