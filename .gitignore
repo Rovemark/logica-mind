@@ -35,3 +35,7 @@ logica_mind/web/app/.vite/
 /FEATURES.md
 /ROADMAP.md
 /ARCHITECTURE.md
+
+# never commit deps (incl. build symlinks)
+node_modules
+**/node_modules
