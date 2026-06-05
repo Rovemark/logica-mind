@@ -2,9 +2,9 @@
 
 # 🧠 Logica Mind
 
-### Long-term memory for AI agents — that thinks like a brain, not a database.
+### Memory that thinks like a brain, not a database.
 
-**Episodic · Semantic · Temporal Knowledge Graph · Dialectic User Model — in one library.**
+**Long-term memory for AI agents — episodic, semantic, a temporal knowledge graph & a dialectic user model in one library.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -16,14 +16,27 @@
 
 ---
 
-Most memory libraries are a vector store with a nice API: you write a fact, you
-search it back. **Logica Mind is different.** It gives your agent four kinds of
-memory, a *temporal* knowledge graph that remembers what was true and **when it
-changed**, a sleep-time consolidation cycle, and a self-hosted dashboard to watch
-it all happen — with **zero required dependencies** and **no API key** to start.
+Most memory libraries for AI agents are a vector store with a friendlier API: you
+write a fact, you search it back, and the moment a fact changes, the old one is
+overwritten and gone. That's a flat database — it can tell you what your agent
+believes *now*, but never what it believed last Tuesday when it made the call
+that broke production.
 
-It runs fully offline on the standard library (SQLite + a hashing embedder), then
-lights up Voyage / OpenAI / Supabase / Postgres / Redis when you want them.
+**Logica Mind is built differently.** Four memory layers and a *temporal*
+knowledge graph where every belief is stamped with when it became true and when
+it stopped — so you can replay your agent's entire knowledge state at any past
+instant, trace why any fact is believed, and watch a sleep-time cycle
+consolidate, infer, and forget while the agent sits idle.
+
+```python
+mind.state_at("2026-01-01")     # replay everything the agent knew, at any past instant
+mind.contradictions()            # every belief that changed value — and exactly when
+```
+
+It runs fully offline on the standard library — **zero dependencies, no API key
+to start** — and is covered by **180 tests**, so you can verify every claim on
+this page in five minutes. It then lights up Voyage, OpenAI, Supabase, Postgres
+or Redis whenever you want them.
 
 <div align="center">
   <img src="docs/dashboard-graph.png" alt="Logica Mind dashboard — live temporal knowledge graph" width="100%">
