@@ -1,0 +1,98 @@
+const e={overview:"概要",workspace:"ワークスペース",graph:"グラフ",memories:"メモリ",calendar:"カレンダー",user:"ユーザー",peers:"ピア",changes:"変更履歴",insights:"インサイト",settings:"設定",brand_sub:"メモリインテリジェンス",agents_clones:"エージェントとクローン",all_namespaces:"すべてのNamespace",graph_legend:"グラフの凡例",shared_entity:"共有エンティティ",superseded:"置き換え済み（履歴）",search_ph:"メモリ全体を検索…（セマンティック＋字句・ランク付け）",memories_word:"件のメモリ",all_word:"すべて",add_memory:"メモリに追加",durable_memory:"永続メモリ",user_observation:"ユーザー観察",memory_ph:"記憶すべき永続的な事実…",observation_ph:"このユーザーについての事実…",save:"保存",saving:"保存中…",cmd_save:"⌘↵ で保存",recall:"想起",no_match:"一致するメモリがありません。",recent_activity:"最近のアクティビティ",insight:"インサイト",whats_notable:"注目すべき点",knowledge_communities:"ナレッジコミュニティ",total:"合計",nothing_here:"まだ何もありません。",no_memories_yet:"メモリはまだありません。",click_to_open:"クリックで開く",relations:"リレーション",connected:"接続済み",pick_day:"日を選択",memories_on:"のメモリ",no_memories_day:"この日のメモリはありません。",select_day:"カレンダーで日を選択すると、その日のメモリを読めます。",jump_today:"今日へ移動",busier:"濃いほど活発",memories_this_month:"今月のメモリ",user_model:"ユーザーモデル",no_user_model:"ユーザーモデルはまだありません。observe_user(…) で追加してください。",pick_peer:"ピア関係を選択",believes_about:"{a} が {b} について信じていること",no_peer_obs:"ピア観察はまだありません。",contradictions:"矛盾・時間とともに変化した内容",no_contradictions:"矛盾はありません。まだ値が変化したものはありません。",changelog:"変更ログ・学習した内容",nothing_window:"この期間に学習した内容はありません。",contras_desc:"事実の値が変わると、古いものは削除されず無効化されます。任意時点の履歴は引き続き検索可能です。",current_now:"現在",since_word:"以降",until_word:"まで",not_enough_reflect:"省察するにはメモリが不足しています。",no_graph:"グラフはまだありません。",appearance:"外観",theme:"テーマ",dark:"ダーク",light:"ライト",auto:"自動",language:"言語",behavior:"動作",animations:"グラフアニメーション",animations_desc:"ナレッジグラフのライブ物理演算",done:"完了",open_settings:"設定",menu:"メニュー",sessions:"セッション",no_sessions:"セッションはまだありません。",pick_session:"セッションを選択",week:"週",month:"月",data:"データ",export_json:"メモリをエクスポート（JSON）",aliases:"エイリアス",type_word:"タイプ",colored_by_community:"コミュニティで色分け",dreams:"ドリーム",dream_journal:"ドリームジャーナル",dream_cycle:"サイクル",no_dreams:"ドリームサイクルはまだありません。mind.dream() を実行して開始します。",consolidated:"統合済み",distilled:"抽出済み",reinforced:"強化済み",forgotten:"忘却済み",derived:"導出済み",inferred:"推論済み",graph_edges:"グラフのエッジ",user_synthesized:"ユーザーモデル更新",rename_session:"セッション名を変更",session_name:"セッション名",rename:"名前を変更",importing:"インポート中…",import_claude:"Claude Code からインポート",contested_beliefs:"対立する信念",contested_desc:"これが変化したとき、両側とも高い確信度でした。",surprise_score:"驚き度",no_contested:"対立する信念はありません。高確信度の矛盾は見つかりませんでした。",danger_zone:"危険ゾーン",clear_layer:"レイヤー別に消去",clear_stale:"古いものを消去",clear_all_ns:"Namespaceをリセット",confirm_clear:"確認のため CLEAR と入力",cleared:"消去済み",clearing:"消去中…",forget_curve:"忘却曲線",retention:"保持率",projected:"7日後の予測",days_since:"想起からの日数",graph_communities:"コミュニティ",graph_history:"履歴",graph_time:"時間",graph_shake:"シェイク",graph_fit:"フィット",graph_areas:"ライフエリア",graph_colored_by_area:"ライフエリアで色分け",graph_color_by:"色分け",graph_color_namespace:"Namespace",graph_color_community:"コミュニティ",graph_color_area:"ライフエリア",graph_color_centrality:"中心性",graph_layers:"レイヤー",glayer_relation:"リレーション",glayer_comention:"共起",glayer_semantic:"セマンティック",graph_filters:"フィルター",graph_min_conf:"最小確信度",graph_search:"エンティティを検索…",graph_predicates:"リレーション種別",graph_reset:"リセット",colored_by_centrality:"中心性で色分け（サイズ＝重要度）",pclass_social:"社会的",pclass_has:"所有",pclass_causal:"因果",pclass_locative:"場所",pclass_temporal:"時間",pclass_is_a:"分類",pclass_other:"その他",cent_low:"低",cent_hub:"ハブ",pred_works_at:"勤務先は",pred_reports_to:"報告先は",pred_part_of:"の一部",pred_owns:"所有する",pred_leads:"率いる",pred_founded:"設立した",pred_scheduled_for:"予定日は",pred_studies:"学ぶ",pred_manages:"管理する",pred_knows:"知っている",pred_based_in:"拠点は",pred_located_in:"所在地は",pred_lives_in:"住んでいる",pred_invested_in:"出資した",pred_married_to:"結婚している",pred_depends_on:"依存する",pred_blocks:"ブロックする",pred_uses:"使用する",pred_created:"作成した",pred_member_of:"所属する",pred_works_with:"協働する",pred_focus:"注力する",pred_has:"持つ",graph_local:"ローカル",graph_depth:"深さ",graph_focus_here:"ここにフォーカス",graph_exit_local:"ローカル表示を終了",graph_path:"パス",graph_path_from:"始点エンティティ",graph_path_to:"終点エンティティ",graph_path_find:"トレース",graph_no_path:"両者の間にパスはありません。",graph_path_hint:"A と B はどう関係している？",glayer_suggested:"提案",legend_bridge:"ブリッジ（要となる接続）",legend_suggested:"提案リンク",node_unlinked:"共に言及あり、未リンク",graph_highlight:"一致をハイライト",tip_search:"エンティティを検索してジャンプ",tip_colour:"Namespace・コミュニティ・ライフエリア・中心性でノードを色分け",tip_comention:"共に言及されたエンティティ間の創発的リンク",tip_semantic:"類似メモリを持つエンティティ間のリンク（エンベッダーが必要）",tip_suggested:"未追加だが予測されるリンク。追加を検討できます",tip_filters:"最小確信度、リレーション種別、クエリによるハイライト",tip_path:"あるエンティティが別のものとどう関係するかをトレース",tip_history:"アーカイブ済み／置き換え済みの事実を含める",tip_time:"タイムラインをスクラブして過去の日付のグラフを表示",tip_shake:"レイアウトを再活性化",tip_fit:"グラフ全体を表示に収める",graph_entities:"エンティティ",graph_as_of:"時点",graph_empty:"このビューではグラフが空です。",graph_tip:"ヒント：ノードをクリックでメモリ表示・ドラッグで移動・スクロールでズーム・⬡ でコミュニティ色分け。",timeline:"タイムライン",loading:"読み込み中…",no_entity_memories:"このエンティティに言及するメモリはまだありません。",portable_bundle:"ポータブルバンドル",dream_noop:"無操作サイクル（オフラインまたは処理対象なし）",no_claude_sessions:"新しい Claude Code セッションは見つかりませんでした。",layer_episodic:"エピソード",layer_semantic:"セマンティック",layer_graph:"グラフ",layer_user:"ユーザー",weekdays:"日,月,火,水,木,金,土",months:"1月,2月,3月,4月,5月,6月,7月,8月,9月,10月,11月,12月",forget_entity:"エンティティを消去",forget_entity_confirm:"次に言及するすべてのメモリを消去",forget_entity_btn:"消去（GDPR）",erasing:"消去中…",erased:"消去済み",ask_about_user_ph:"このユーザーについて質問…",ask_btn:"質問",asking:"問い合わせ中…",stale_beliefs:"再検証すべき信念",stale_desc:"古く、一度も想起されず、確信度が低い。",no_stale:"古い信念はありません。すべて最近想起されました。",age_days:"日経過",confidence:"確信度",import_bundle:"バンドルをインポート",importing_bundle:"インポート中…",import_success:"インポート完了",import_error:"インポート失敗",prov_distilled:"抽出／推論された情報。ソースはリンクされていません。",prov_direct:"直接記録（上流ソースなし）。",prov_supersedes:"以前のメモリを置き換えます。",workspace_dna_title:"ワークスペース・プロジェクトDNA",workspace_dna_desc:"任意のフォルダ構造を読み取り、その仕組みをシステムが理解します。",workspace_path_ph:"/path/to/a/repo （空欄＝サーバーの作業ディレクトリ）",scan_word:"スキャン",scanning_word:"スキャン中…",ws_languages:"言語",ws_files:"ファイル",ws_no_code:"コードが検出されませんでした。",ws_frameworks:"フレームワーク",ws_none:"検出されませんでした。",ws_key_files:"主要ファイル",properties:"プロパティ",why_believe:"これを信じる理由",conn_sub:"自動検出・手動リンクなし",back:"戻る",grp_person:"人物",grp_projects:"プロジェクト",grp_organization:"組織",grp_business:"ビジネス",maslow_self_actualization:"自己実現",maslow_esteem:"承認",maslow_belonging:"愛と所属",maslow_safety:"安全",maslow_physiological:"生理的",tag_agent:"エージェント",tag_entity:"エンティティ",context_included_short:"内",conn_mentions:"言及",conn_relations:"リレーション",conn_backlinks:"被リンク",conn_related:"関連",conn_none:"接続はまだ見つかりません。",prop_agent:"エージェント",prop_session:"セッション",prop_date:"日付",prop_source:"ソース",prop_importance:"重要度",prop_tags:"タグ",prop_relation:"リレーション",prop_category:"カテゴリ",prop_id:"ID",captured_via:"取得経路",delete_word:"削除",recalled_word:"想起済み",cluster_word:"クラスタ",no_data_yet:"データはまだありません。",from_word:"出典",export_session:"セッションをエクスポート",no_peer_card:"カードはまだありません。",select_peer_rel:"関係を選択すると、方向性のあるプロファイルを読めます。",no_memories:"メモリなし",entries_word:"件",clear_error:"消去エラー。",stale_60d:"古い（60日超）",namespace_word:"Namespace",expiring_word:"期限切れ間近",avg_word:"平均",ops_word:"操作",total_ops:"総操作数",no_beliefs_at_risk:"今後7日間にリスクのある信念はありません。",participants:"参加者",portable_bundle_tip:"アプリ／ベンダー間で移動できるポータブルメモリ",demo_empty:"このダッシュボードは空です。架空のデモデータを読み込んで全機能を試せます。",demo_load:"デモを読み込む",demo_loading:"読み込み中…",demo_loaded:"架空のデモデータを表示中です。自分のデータを使う準備ができたら消去してください。",demo_clear:"デモを消去",demo_keep:"保持",learning:"学習中…",learned:"学習完了",learn_updating:"メモリ {i}/{n} を更新中…",learn_done:"{n} 件の事実を取得",learn_known:"既知",learn_known_desc:"これはすでにメモリにあります。重複は保存されず、既存のメモリが維持されます。",learn_extracted:"{n} 件の事実を抽出",learn_resolved:"メモリと照合済み",learn_stored:"保存・インデックス済み",learn_linked:"{n} 件のリレーションをリンク",learn_user:"ユーザーモデル更新",op_new:"新規",op_updated:"更新",op_was:"旧値",cat_explore:"探索",cat_memory:"メモリ",cat_intelligence:"インテリジェンス",cat_system:"システム",integrations:"連携",integrations_sub:"このインスタンスを支えるスタックと、追加できる連携先。",intg_active:"アクティブなスタック",intg_llm:"LLM",intg_embedder:"エンベッダー",intg_store:"ストア",intg_reranker:"リランカー",intg_none:"なし",intg_offline:"オフライン",intg_redundant:"ミラーリング先",intg_dims:"次元",intg_llms:"言語モデル",intg_embedders:"エンベッダー",intg_rerankers:"リランカー",intg_stores:"ストアとバックエンド",st_active:"アクティブ",st_ready:"準備完了",st_setkey:"{env} を設定",st_install:"インストール",st_available:"利用可能",settings_general:"一般",spotlight_open:"すべてを検索…",spotlight_ph:"メモリ、エンティティ、エージェント、ビューを検索…",spotlight_hint:"メモリ、エンティティ、エージェント、ビューを横断検索",spotlight_empty:"結果なし",grp_views:"ビュー",grp_agents:"エージェント",grp_memories:"メモリ",grp_entities:"エンティティ",profile:"プロフィール",profile_sub:"すべての事実を、生活と仕事の次元で分類し、Maslow にマッピング。",profile_empty:"分類済みの事実はまだありません。",profile_empty_hint:"分類には LLM（APIキー、またはローカルの Claude CLI）が必要です。メモリを追加すると整理される様子を確認できます。",profile_maslow:"Maslow の階層",profile_cards:"カード表示",profile_map:"ナレッジマップ",grp_categories:"カテゴリ",dim_filter_all:"すべての次元",help_profile:`プロフィール
+保存したすべての事実を、生活と仕事の次元で分類し、Maslow の階層にマッピングします。
+• グループカード（個人／プロジェクト／組織／ビジネスと財務）— 各分類に含まれる事実の件数。
+• 各次元カードには（個人の場合）その Maslow の段階と、配下のオープンなカテゴリが件数とともに表示されます。
+• カテゴリをクリックすると、その背後にあるメモリへ移動します。
+• 分類は取得時に行われ、LLM（APIキー、またはローカルの Claude CLI）が必要です。`,help_word:"ヘルプ",help_overview:`概要
+メモリライブラリと最近のアクティビティのスナップショット。
+• 合計 — このNamespace内の全レイヤーに保存されたメモリの総数。
+• レイヤー統計 — 各メモリレイヤーごとの件数カード。色分けでレイヤー分布を表示。
+• インサイト — メモリから自動生成された要約インサイト。利用可能なときに表示されます。
+• 最近のアクティビティ — ライブラリに追加された最新8件のメモリを個別カードで表示。`,help_analytics:`アナリティクス
+メモリシステムの規模、構造、健全性を一目で把握できる概要。
+• 上部の統計カードに合計値を表示：メモリ、エージェント、エンティティ、リレーション、セッション、検出された矛盾の件数に加え、平均応答レイテンシとエラー率。
+• 4つのチャートで、時間別（直近30日）、ストレージレイヤー（エピソード/セマンティック/グラフ/ユーザー）、データソース、上位エージェント別のメモリ構成を表示。
+• Memory Lake テーブルには、各Namespace（エージェント、ユーザー、またはドメイン）が、エンティティ、事実、リレーションの件数、アクティビティ傾向、最終更新日時とともに一覧表示されます。
+• Memory Lake の各行には色付きドットと種別バッジ（USER/ORG/DOMAIN/AGENT）があり、Namespaceを一目で分類・識別できます。
+• 下部のガバナンスバッジは、すべてのメモリが出所追跡され、正しくソース付けされ、バージョン管理され、要求に応じて消去可能であることを示します。`,help_context:`コンテキストブロック
+このページは、クエリとトークン予算に基づいて、メモリをプロンプト用ブロックに組み立てます。
+• クエリ入力：エージェントに記憶させたい内容を入力します（例：「ローンチのスケジュール、優先事項、関係者」）。メモリレイヤー全体を検索します。
+• 予算セレクター：組み立てるブロックが使えるトークン数を選びます（600、1200、2000、4000）。LLM のコンテキストウィンドウは有限なので、予算でプロンプトに収まるトークン数を制限し、この上限内に収まる上位ランクのメモリのみが挿入されます。
+• トークン進捗バー：組み立てたブロックが予算に対して使うトークン数を表示します（例：「245 / 1200 トークン」）。割合と選択された候補数も表示。
+• ランク付け候補（左）：含めるか検討されたすべてのメモリを関連度スコア順に表示。緑のチェックと実線の枠があるメモリは最終ブロックに含まれます。薄いものはトークン予算に収まりませんでした。
+• 組み立て済みブロック（右）：プロンプトに挿入できる Markdown 形式の最終ブロック。セクション分割され、セクションごとのトークン見積もりと、クリップボードへ送るコピーボタンが付きます。`,help_graph:`グラフ
+あなたの知識を生きた地図として — エンティティとその接続を、時系列で。
+• エッジの文法 — 各リレーションは種別（社会的、所有、因果、場所、時間）で色分けされ、方向を示す矢印が付きます。太いほど確信度が高い。共起は破線、提案リンクは金色の点線、置き換え済みの事実はグレー表示。
+• ノードサイズ — 大きいノードほど中心的（PageRank の重要度）で、ハブが目立ちます。ブリッジには破線のリングが付きます。
+• 色 — ノードの色分け方法を選択：Namespace、コミュニティ、ライフエリア、中心性（寒色→暖色）。
+• 接続レイヤー — 共起（共に名前が挙がるエンティティ）、セマンティック（類似メモリ）、提案（未追加だが予測されるリンク）を切り替え。
+• パス — 「A と B はどう関係している？」をトレースすると、その連鎖がキャンバス上で点灯します。
+• 検索とフォーカス — 検索でノードへジャンプ。ノードを開き「ここにフォーカス」でローカルグラフだけを表示（深さスライダー付き）。任意のノードにホバーで事実のプレビュー。
+• フィルター — 最小確信度スライダー、リレーション種別ごとの切り替え、クエリによるハイライト。
+• 履歴と時間 — アーカイブ済みの事実を含めたり、タイムラインをスクラブして任意の過去日付のグラフを表示。
+• 凡例と詳細 — 凡例を開くと色＋エッジのキー。任意のノードをクリックでそのメモリ、接続、未リンクの言及を表示。`,help_memories:`メモリ
+エージェントが保存したすべてのメモリを表示・管理します。
+• レイヤーフィルター - 上部のチップをクリックしてメモリ種別（すべて、エピソード、セマンティック、手続き）で絞り込み、異なるカテゴリを表示します。
+• メモリカード - 各カードは保存されたメモリを内容とメタデータとともに表示します。削除ボタンをクリックすると完全に削除されます。
+• 開いた際のハイライト - 特定のメモリへ移動すると一瞬ハイライトされ、リスト内で見つけやすくなります。
+• 空の状態 - フィルターに一致するメモリがない場合、リストが空であるメッセージが表示されます。`,help_calendar:`カレンダー
+メモリのアクティビティを日ごとに、インタラクティブなヒートマップで表示します。
+• ヒートマップ – 各日のセルにその日保存されたメモリ数を表示。青が濃いほど活発。
+• 今日のマーカー – 金色の枠が今日の日付を強調し、素早く参照できます。
+• 選択した日 – 任意の日をクリックすると青いリングで強調され、右側にその日のメモリが表示されます。
+• モード切替 – 月表示（1か月をまとめて）と週表示（7日分のスナップショット）を切り替え。
+• ナビゲーション – 矢印ボタンで月や週を前後に移動。
+• 日ペイン – 右パネルに選択した日に保存されたすべてのメモリを個別カードで表示。
+• 今日へ移動 – このボタンをクリックすると現在の日付へ即座に戻ります。`,help_sessions:`セッション
+AIエージェントの会話セッションと、そこに保存されたメモリを表示・管理します。
+• セッション一覧（左）：すべてのセッションを、名前、メモリ件数、最終アクティビティ日、Namespace、ソースとともに表示。
+• セッションを選択：一覧の任意のセッションをクリックすると、右側にそのメモリと詳細が表示されます。
+• セッション名を変更：選択中のセッション名の横にある鉛筆アイコンをクリックして編集します。
+• セッション詳細（右）：セッションレコードのヘッダー（ステータス、参加者、メトリクス、リンク）と、関連するすべてのメモリをカードで表示。
+• エクスポート：ダウンロードアイコンをクリックすると、選択したセッションとそのメモリを JSON としてエクスポートします。
+• Claude をインポート：「↓ Claude」ボタンをクリックすると、Claude から会話セッションをインポートします。`,help_user:`ユーザーモデル
+特定のユーザーについて AIエージェントが学習したプロフィールを表示・照会します。
+• 質問セクション – ユーザーについて質問を入力すると、保存されたプロフィールからインサイトを得られます。
+• 質問ボタン – 質問を送信して、エージェントの知識に基づく回答を受け取ります。
+• 回答表示 – 質問への応答を表示。送信後に入力欄の下に現れます。
+• プロフィール表示 – 完全なユーザープロフィールデータを整形済みテキストブロックで表示。プロフィールがまだ無い場合はメッセージを表示します。`,help_peers:`ピア
+あるエージェントやエンティティが、別のものについて信じている・知っていることを探索します。
+• ピア関係一覧：すべての方向性のあるペア（観察者 → 被観察者）を、観察件数とNamespaceとともに表示。
+• 観察者と被観察者：左の名前が観察を行った側で、矢印は観察された側を指します。
+• 件数バッジ：各ペアの右に表示される数字は、その関係に存在する観察の件数を示します。
+• 信念カード：ペアを選択すると、一方のピアがもう一方について記録した具体的な信念や事実を箇条書きで表示します。
+• Namespaceラベル：このピア関係が属するNamespaceを示す小さなタグ。異なる文脈間で関係を整理するのに役立ちます。`,help_observations:`観察
+このページは、Namespace内のエンティティについて発見されたパターンと接続を表示します。
+• 繰り返し現れるペア — 頻繁に共に現れるエンティティのペア。マージアイコンで表示。
+• 中心的エンティティ — 多くの他者と接続する重要なエンティティ（ハブ）。円アイコンで表示。
+• エンティティバッジ — 各観察に関わるエンティティを示す色付きタグ。
+• 件数バッジ — この観察が持つリレーション数（ハブの場合）または共有文脈の数を表示。
+• 説明テキスト — パターンや接続の簡潔な説明。
+• 共有文脈 — これらのエンティティが結びついた文脈やソースを示すタグ。`,help_changes:`変更履歴
+メモリの更新を表示し、時間とともに矛盾を検出します。
+• 矛盾：同じ主題が相反する値を持つ事実を表示。緑のバッジは現在の事実を示し、グレーの取り消し線は過去の置き換え済みの値を日付とともに示します。
+• 変更ログ：すべてのメモリ変更を逆時系列順に一覧表示。変更日、影響を受けたレイヤー、変更内容、Namespaceを表示。
+• 期間ボタン（7日、30日、90日）：変更ログを直近7日、30日、90日の変更に絞り込みます。変更ログのみに作用し、矛盾には影響しません。`,help_insights:`インサイト
+メモリ内の注目すべき点の要約を確認し、古くなっている可能性のある信念を見直します。
+• 古い信念：年数が経過した信念を表示（経過日数と確信度スコア付き）。クリックで展開し、更新が必要かもしれない内容を確認できます。
+• 注目すべき点：メモリから抽出されたパターンや重要情報の自動生成要約。
+• ナレッジコミュニティ：関連するエンティティとその接続のクラスタを、関連度とサイズで整理して表示します。`,help_workspace:`ワークスペース
+任意のプロジェクトフォルダの構造と構成を分析します。
+• パス入力 — フォルダパスを入力または貼り付け、Enter を押すか「スキャン」をクリックしてプロジェクトを分析します。
+• 言語 — プロジェクト内のプログラミング言語を、各言語を使用するファイル数を示す棒グラフとともに表示。
+• フレームワーク — プロジェクト内で検出されたフレームワークと依存関係を表示。
+• 主要ファイル — プロジェクト構造を定義する重要なファイル（設定ファイル、エントリーポイント、マニフェストなど）を一覧表示。
+• 総ファイル数 — 数字バッジは、すべての言語にわたってスキャンされた総ファイル数を示します。`,help_dreams:`ドリーム
+メモリ統合サイクルを追跡し、注意が必要な信念を特定します。
+• サマリーカード：実行したドリームサイクルの総数、メモリへ抽出された信念、忘却された信念、実行された総操作数を表示。
+• 忘却曲線：薄れつつあるメモリを、保持率と7日後の強度予測とともに表示し、弱まる信念の強化に役立てます。
+• 対立する信念：更新された相反する信念を見つけ、現在の信念を置き換え済みのものと確信度スコアとともに表示。
+• 驚きイベント：システムが予期しない情報に遭遇した瞬間を、新しいデータが既存の知識とどれだけ矛盾したかを示す驚き度スコアとともに確認。
+• ドリームサイクル：個々のドリーム統合の実行を閲覧。各実行で抽出・強化・忘却・導出・推論された信念の件数と、追加されたグラフのエッジ数を表示。`,help_settings:`設定
+メモリダッシュボードの見た目と動作をカスタマイズし、データのインポート・エクスポートを管理し、外部ツールと連携します。
+• テーマ — ダークモード、ライトモード、自動（システム設定に従う）から選択。
+• 言語 — ダッシュボードのインターフェースに使う言語を選択。
+• アニメーション — 視覚アニメーションのオン／オフを切り替え、より軽快な操作感に。
+• 連携 — 外部アプリやサービスを接続してメモリを保存・取得。
+• データ — メモリを JSON またはポータブルバンドルとしてエクスポート、あるいは保存済みデータをインポート。
+• 危険ゾーン — 特定のレイヤーからメモリを完全に削除、または古いエントリ（60日超）を削除。`,analytics:"アナリティクス",analytics_sub:"利用状況、アクティビティ、信頼性。",memories_over_time:"追加されたメモリ",last_30_days:"直近30日",all_time:"全期間",open_in_graph:"グラフで開く",open_in_memories:"メモリで開く",last_n_days:"直近 {n} 日",by_layer:"レイヤー別",by_source:"ソース別",by_agent:"エージェント別",avg_latency:"平均レイテンシ",requests_word:"リクエスト",error_rate:"エラー率",memory_lake:"Memory Lake",lake_subject:"主題",lake_entities:"エンティティ",lake_facts:"事実",lake_activity:"アクティビティ",lake_updated:"更新",lake_type:"種別",gov_provenance:"出所",gov_erase:"GDPR消去可",gov_versioned:"バージョン管理",gov_sourced:"ソース付与",gov_note:"可能な場合はソースが付与され出所が追跡されます。更新はバージョン管理され、すべての行は要求に応じて消去可能です。",context:"コンテキスト",context_block:"コンテキストブロック",context_block_sub:"スマート組み立て — トークン予算に合わせてランク付けされた候補。",context_query_ph:"エージェントが知っておくべきことは？",token_budget:"トークン予算",tokens_word:"トークン",utilized:"使用済み",candidates_selected:"選択済み",ranked_candidates:"ランク付け候補",assembled_block:"組み立て済みブロック",copy:"コピー",copied:"コピーしました",context_empty:"クエリを入力してコンテキストブロックを組み立てます。",context_foot:"予算に収まる最上位ランクのメモリのみが挿入されます。無駄はありません。",observations:"観察",observations_sub:"多くの事実にまたがるパターン — 単一の事実の内側ではなく。",observations_empty:"パターンを検出するにはグラフがまだ不足しています。",recurring_pairs:"繰り返し共起",central_entities:"中心的エンティティ",relations_word:"リレーション",shared_word:"共有",observations_foot:"時系列グラフから構造的に検出 — 接続性と共起から、メモリの成長に応じて再計算されます。"};export{e as default};
