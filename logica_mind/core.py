@@ -681,10 +681,19 @@ class LogicaMind:
         return merged[:limit]
 
     def graph_viz(self, namespace: Optional[str] = None, include_history: bool = True,
-                  at: Optional[str] = None) -> Dict[str, Any]:
+                  at: Optional[str] = None, layers: Optional[List[str]] = None,
+                  focus: Optional[str] = None, depth: int = 1) -> Dict[str, Any]:
         """Graph payload for the UI. A single namespace, or the *general* graph
-        across all of them with shared entities flagged. `at` (ISO timestamp)
-        gives a point-in-time view."""
+        across all of them with shared entities flagged.
+
+        `at` gives a point-in-time view. `layers` selects which CONNECTION kinds
+        to include (relation always; "co_mention" adds emergent links from facts
+        that name two entities together). `focus`+`depth` return the LOCAL graph —
+        only the neighbourhood within `depth` hops of one entity. Every link
+        carries a kind/weight/direction and every node a degree + centrality, so
+        the canvas can speak a real edge grammar instead of one flat blue line."""
+        want = set(layers) if layers is not None else {"relation", "co_mention"}
+
         if namespace and namespace not in ("__all__", "*", "all"):
             viz = TemporalGraph(self.store, namespace, self.embedder).to_viz(include_history, at=at)
             edim = self._entity_dimensions([namespace])
@@ -694,8 +703,9 @@ class LogicaMind:
                     n["dimension"] = edim[n["id"]]
             for l in viz["links"]:
                 l["namespace"] = namespace
-            viz["namespaces"] = [namespace]
-            return viz
+            node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth)
+            return {"nodes": node_list, "links": links, "namespaces": [namespace],
+                    "focus": focus, "depth": depth}
 
         nodes: Dict[str, set] = {}
         links: List[Dict[str, Any]] = []
@@ -717,7 +727,89 @@ class LogicaMind:
             if name in edim:
                 n["dimension"] = edim[name]
             node_list.append(n)
-        return {"nodes": node_list, "links": links, "namespaces": all_ns}
+        node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth)
+        return {"nodes": node_list, "links": links, "namespaces": all_ns,
+                "focus": focus, "depth": depth}
+
+    def _finish_viz(self, node_list, links, ns_scope, want, focus, depth):
+        """Shared graph augmentation: tag relation links (kind/weight/direction/
+        predicate-class), fold in the requested emergent layers, compute degree +
+        PageRank centrality, and (optionally) clip to a focus node's local graph."""
+        from .graph.analytics import pagerank, predicate_class, build_adjacency, ego_nodes
+        for l in links:
+            l.setdefault("kind", "relation")
+            l.setdefault("directed", True)
+            l.setdefault("weight", l.get("confidence", 1.0))
+            if l.get("label"):
+                l["pclass"] = predicate_class(l["label"])
+        node_ids = {n["id"] for n in node_list}
+        rel_pairs = {frozenset((l["source"], l["target"])) for l in links}
+        if "co_mention" in want:
+            for cm in self._co_mention_links(ns_scope):
+                if cm["source"] in node_ids and cm["target"] in node_ids \
+                        and frozenset((cm["source"], cm["target"])) not in rel_pairs:
+                    links.append(cm)
+        # degree + centrality over everything shown
+        deg = {nid: 0 for nid in node_ids}
+        weighted = []
+        for l in links:
+            if l["source"] in deg:
+                deg[l["source"]] += 1
+            if l["target"] in deg:
+                deg[l["target"]] += 1
+            weighted.append((l["source"], l["target"], l.get("weight", 1.0)))
+        cen = pagerank(list(node_ids), weighted)
+        for n in node_list:
+            n["degree"] = deg.get(n["id"], 0)
+            n["centrality"] = round(cen.get(n["id"], 0.0), 4)
+        # local graph: keep only the focus node's neighbourhood within `depth` hops
+        if focus and focus in node_ids:
+            keep = ego_nodes(build_adjacency(weighted), focus, max(1, int(depth or 1)))
+            node_list = [n for n in node_list if n["id"] in keep]
+            links = [l for l in links if l["source"] in keep and l["target"] in keep]
+        return node_list, links
+
+    def _co_mention_links(self, namespaces, cooc_min: int = 2, cap_per_mem: int = 8):
+        """Emergent connections: entity pairs that get TALKED ABOUT TOGETHER. One
+        regex scan over each namespace's facts; a fact that names two graph
+        entities votes a co-mention edge between them. No LLM, no embeddings — the
+        Obsidian 'unlinked mention', but computed. Capped per memory so a giant
+        note can't emit a quadratic fan of pairs."""
+        import re as _re
+        from collections import Counter
+        ents: set = set()
+        for ns in namespaces:
+            for e in TemporalGraph(self.store, ns, self.embedder).edges():
+                if e.subject and len(e.subject) >= 2:
+                    ents.add(e.subject)
+                if e.object and len(e.object) >= 2:
+                    ents.add(e.object)
+        if len(ents) < 2:
+            return []
+        lower_map = {e.lower(): e for e in ents}
+        pat = _re.compile(r"\b(" + "|".join(
+            _re.escape(e) for e in sorted(lower_map, key=len, reverse=True)) + r")\b")
+        pair_count: Counter = Counter()
+        for ns in namespaces:
+            for m in self.store.all(ns):
+                if "edge" in (m.tags or []) or "alias" in (m.tags or []):
+                    continue
+                found: List[str] = []
+                seen: set = set()
+                for mt in pat.finditer((m.content or "").lower()):
+                    nm = lower_map.get(mt.group(1))
+                    if nm and nm not in seen:
+                        seen.add(nm)
+                        found.append(nm)
+                        if len(found) >= cap_per_mem:
+                            break
+                for i in range(len(found)):
+                    for j in range(i + 1, len(found)):
+                        a, b = sorted((found[i], found[j]))
+                        pair_count[(a, b)] += 1
+        return [{"source": a, "target": b, "kind": "co_mention", "directed": False,
+                 "weight": c, "label": "", "valid": True}
+                for (a, b), c in pair_count.items() if c >= cooc_min]
 
     def graph_communities(self, summarize: bool = False, include_history: bool = False):
         """Clusters of related entities in this namespace's graph. With
