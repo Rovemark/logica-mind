@@ -1,6 +1,6 @@
 # Internationalization (i18n)
 
-The dashboard ships fully translated into **12 languages**, so the people using your agent's memory read it in their own language — not just the developer who installed it.
+The dashboard ships fully translated into **15 languages**, so the people using your agent's memory read it in their own language — not just the developer who installed it.
 
 ## Supported languages
 
@@ -11,8 +11,11 @@ The dashboard ships fully translated into **12 languages**, so the people using 
 | `es` | Español | Latin | LTR |
 | `fr` | Français | Latin | LTR |
 | `de` | Deutsch | Latin | LTR |
+| `it` | Italiano | Latin | LTR |
+| `tr` | Türkçe | Latin | LTR |
 | `id` | Bahasa Indonesia | Latin | LTR |
 | `ru` | Русский | Cyrillic | LTR |
+| `ko` | 한국어 | Hangul | LTR |
 | `zh` | 中文 | Han | LTR |
 | `ja` | 日本語 | Kana/Kanji | LTR |
 | `hi` | हिन्दी | Devanagari | LTR |
@@ -27,7 +30,7 @@ The same dashboard in 中文 — the whole UI, and the graph's relationship labe
 
 ## What's translated
 
-- **Every UI string** — all ~420 keys, with full parity across all 12 languages (a missing key, if any, falls back to English).
+- **Every UI string** — all ~420 keys, with full parity across all 15 languages (a missing key, if any, falls back to English).
 - **Contextual help** — the `?` on every page, including the multi-paragraph guides.
 - **Hover tooltips** — every graph control.
 - **Graph relationship labels** — predicates like `works_at` / `part_of` render as natural localized phrases (e.g. 工作于, trabalha em, trabaja en). A small controlled vocabulary is localized; any custom predicate gracefully prettifies (`abc_def` → "abc def"). This is **display-only** — the stored predicate never changes.
