@@ -3,7 +3,7 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
-## [Unreleased]
+## [0.2.0] — 2026-06-05
 
 ### Graph intelligence
 - The knowledge graph became an instrument. Every link now carries a kind

@@ -325,7 +325,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ## 📦 Status
 
-**v0.1.0 — Beta.** The full feature set above is shipped and covered by 189 tests.
+**v0.2.0 — Beta.** The full feature set above is shipped and covered by 189 tests.
 Episodic, semantic, temporal-graph and dialectic user memory; automatic
 extraction; embeddings + reranking; a temporal knowledge graph; sleep-time
 consolidation; an MCP server and a self-hosted dashboard — one cohesive library,
