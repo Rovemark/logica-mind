@@ -69,8 +69,8 @@ export const api = {
   observations: (ns: string): Promise<{ observations: Observation[] }> => j(`/api/observations?${nsq(ns)}`),
   recall: (ns: string, q: string, limit = 15): Promise<{ query: string; results: RecallHit[] }> =>
     j(`/api/recall?${nsq(ns)}&q=${encodeURIComponent(q)}&limit=${limit}`),
-  memories: (ns: string, layer?: string, dimension?: string): Promise<{ memories: Memory[] }> =>
-    j(`/api/memories?${nsq(ns)}${layer ? `&layer=${layer}` : ""}${dimension ? `&dimension=${encodeURIComponent(dimension)}` : ""}`),
+  memories: (ns: string, layer?: string, dimension?: string, category?: string): Promise<{ memories: Memory[] }> =>
+    j(`/api/memories?${nsq(ns)}${layer ? `&layer=${layer}` : ""}${dimension ? `&dimension=${encodeURIComponent(dimension)}` : ""}${category ? `&category=${encodeURIComponent(category)}` : ""}`),
   graph: (ns: string, history: boolean, at?: string | null): Promise<GraphData> =>
     j(`/api/graph?${nsq(ns)}&history=${history ? 1 : 0}${at ? `&at=${encodeURIComponent(at)}` : ""}`),
   timerange: (ns: string): Promise<{ min: string | null; max: string | null }> => j(`/api/timerange?${nsq(ns)}`),

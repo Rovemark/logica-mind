@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Send, Layers as LayersIcon, UserRound, FolderGit2, Building2, DollarSign } from "lucide-react";
 import { api, type DimensionsData, type DimensionEntry } from "../api";
 import { useI18n } from "../i18n";
-import { useNav } from "../navctx";
+import { useNav, type MemFilter } from "../navctx";
 
 // the unified profile: the dialectic user model + the dimension/category map,
 // organized by the four life/work groups.
@@ -19,7 +19,7 @@ const MASLOW_LABEL: Record<string, string> = {
 
 export default function Profile({ ns }: { ns: string }) {
   const { t } = useI18n();
-  const { onNs, onView } = useNav();
+  const { onMemories } = useNav();
   const [data, setData] = useState<DimensionsData | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState("personal");
@@ -44,7 +44,7 @@ export default function Profile({ ns }: { ns: string }) {
     setAsking(false);
   }
 
-  const openCat = () => { onNs(ns); onView("memories"); };
+  const openFilter = (f: MemFilter) => onMemories(ns, f);
   const dims = (data?.dimensions || []);
   const groupCount = (g: string) => dims.filter((d) => d.group === g).reduce((a, d) => a + d.count, 0);
   const active = TABS.find((x) => x.id === tab)!;
@@ -105,24 +105,25 @@ export default function Profile({ ns }: { ns: string }) {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2.5 max-[760px]:grid-cols-1">
-          {tabDims.map((d) => <DimCard key={d.id} d={d} color={active.color} onCat={openCat} t={t} />)}
+          {tabDims.map((d) => <DimCard key={d.id} d={d} color={active.color} onOpen={openFilter} t={t} />)}
         </div>
       )}
     </div>
   );
 }
 
-function DimCard({ d, color, onCat, t }: { d: DimensionEntry; color: string; onCat: () => void; t: (k: any) => string }) {
+function DimCard({ d, color, onOpen, t }: { d: DimensionEntry; color: string; onOpen: (f: MemFilter) => void; t: (k: any) => string }) {
   return (
     <div className="card-surface px-4 py-3">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-[13px] font-semibold">{d.label}</span>
+      <button onClick={() => onOpen({ dimension: d.id, label: d.label })} title={t("open_in_memories")}
+        className="w-full flex items-center gap-2 mb-2 text-left group">
+        <span className="text-[13px] font-semibold group-hover:text-[var(--accent)]">{d.label}</span>
         {d.maslow && <span className="text-[10px] text-[var(--dim2)] bg-[var(--panel2)] border border-[var(--line)] px-1.5 py-px rounded-full">{MASLOW_LABEL[d.maslow] || d.maslow}</span>}
         <span className="ml-auto text-[12px] tabular-nums font-bold" style={{ color }}>{d.count}</span>
-      </div>
+      </button>
       <div className="flex flex-wrap gap-1.5">
         {d.categories.map((c) => (
-          <button key={c.name} onClick={onCat} title={t("open_in_memories")}
+          <button key={c.name} onClick={() => onOpen({ category: c.name, label: c.name })} title={t("open_in_memories")}
             className="flex items-center gap-1.5 text-[11.5px] px-2 py-1 rounded-lg border border-[var(--line)] text-[var(--dim)] hover:text-[var(--txt)] hover:border-[var(--accent)]/60">
             {c.name}<span className="tabular-nums text-[var(--dim2)]">{c.count}</span>
           </button>

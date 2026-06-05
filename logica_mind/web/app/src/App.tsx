@@ -3,7 +3,7 @@ import { api, ALL, PALETTE, type NsItem, type Memory } from "./api";
 import { VIEWS, type ViewKey } from "./nav";
 import { LangCtx, makeT, getLang, saveLang, type Lang } from "./i18n";
 import { MemoryOpenCtx } from "./memctx";
-import { NavCtx } from "./navctx";
+import { NavCtx, type MemFilter } from "./navctx";
 import MemoryDetail from "./components/MemoryDetail";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
@@ -45,6 +45,7 @@ export default function App() {
   const [ns, setNs] = useState<string>(init.ns);
   const [view, setView] = useState<ViewKey>(init.view);
   const [palette, setPalette] = useState(false);
+  const [memFilter, setMemFilter] = useState<MemFilter | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [rev, setRev] = useState(0);
   const [lang, setLangState] = useState<Lang>(getLang());
@@ -86,14 +87,14 @@ export default function App() {
 
   const colorFor = (name: string) => colorsRef.current[name] || "#7c9cff";
   const closeDrawer = () => setDrawer(false);
-  const onView = (v: ViewKey) => { setView(v); closeDrawer(); writeHash(v, ns); };
+  const onView = (v: ViewKey) => { setMemFilter(null); setView(v); closeDrawer(); writeHash(v, ns); };
   const onNs = (n: string) => { setNs(n); closeDrawer(); writeHash(view, n); };
 
   const View = { overview: Overview, analytics: Analytics, context: ContextBlock, graph: GraphView, memories: Memories, calendar: Calendar, sessions: Sessions, user: UserModel, profile: Profile, peers: Peers, observations: Observations, changes: Changes, insights: Insights, workspace: Workspace, dreams: Dreams, settings: Settings }[view];
 
   return (
     <LangCtx.Provider value={{ lang, setLang, t }}>
-    <NavCtx.Provider value={{ onView, onNs }}>
+    <NavCtx.Provider value={{ onView, onNs, onMemories: (n, f) => { setMemFilter(f || null); setNs(n); setView("memories"); closeDrawer(); writeHash("memories", n); } }}>
     <MemoryOpenCtx.Provider value={openMemory}>
     <div className="grid h-screen grid-cols-[256px_1fr] max-[820px]:grid-cols-[1fr]">
       <Sidebar view={view} ns={ns} namespaces={namespaces} colors={colorsRef.current}
@@ -103,7 +104,7 @@ export default function App() {
         <Topbar view={view} ns={ns} total={total} onOpen={() => setPalette(true)} action={<Composer ns={ns} onDone={bump} />} />
         <DemoBanner onChange={bump} />
         <div className="flex-1 min-h-0 overflow-auto px-6 pt-[22px] pb-[30px] max-[820px]:px-3.5 max-[820px]:pb-[92px]">
-          <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} />
+          <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} filter={memFilter} />
         </div>
       </main>
 
