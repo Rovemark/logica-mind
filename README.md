@@ -257,10 +257,11 @@ heatmap) · Sessions · User model · Peers · **Observations** · Changes (cont
 contested beliefs, dream journal). A global **⌘K Spotlight** searches across every
 view, agent, memory and entity; a contextual **? on every page** explains what each
 element means; and a **Settings → Integrations** page shows the live stack and
-**auto-detects** any provider in your environment. Dark / light themes and **12
-languages** (English, Português, Español, Français, Deutsch, Русский, Bahasa
-Indonesia, 中文, 日本語, हिन्दी, বাংলা, العربية — RTL) — even the graph's
-relationship labels localize, and a first visit auto-matches the browser language.
+**auto-detects** any provider in your environment. Dark / light themes and **15
+languages** (English, Português, Español, Français, Deutsch, Italiano, Türkçe,
+Bahasa Indonesia, Русский, 한국어, 中文, 日本語, हिन्दी, বাংলা, العربية — RTL),
+each **lazy-loaded** so the bundle stays lean — even the graph's relationship
+labels localize, and a first visit auto-matches the browser language.
 
 <div align="center">
   <img src="docs/img/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
