@@ -1,216 +1,210 @@
-# Logica Mind
+<div align="center">
 
-**Pluggable, multi-store memory for any AI system.**
+# 🧠 Logica Mind
 
-One library that gives any agent four kinds of long-term memory, with storage
-backends and embedding providers you switch by config — not by rewrite.
+### Long-term memory for AI agents — that thinks like a brain, not a database.
 
-Logica Mind is the memory layer you drop in once. It owns *remember / recall /
-forget* and an evolving model of the user, while you toggle **where it stores**
-(SQLite, Postgres, Redis, Supabase, Obsidian, in-memory, or several at once) and
-**how it embeds** (offline hashing, Voyage, OpenAI, or a local model). It runs
-**out of the box with zero API keys and zero third-party dependencies** — the
-default is a local SQLite store plus an offline hashing embedder. Plug in a real
-embedder, a database, or an LLM and the matching feature lights up.
+**Episodic · Semantic · Temporal Knowledge Graph · Dialectic User Model — in one library.**
 
-> Originally extracted from an internal multi-agent system, now a standalone
-> Apache-2.0 library.
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-180%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
+[![MCP](https://img.shields.io/badge/MCP-27%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-orange.svg)](CONTRIBUTING.md)
+
+</div>
 
 ---
 
-## Install
+Most memory libraries are a vector store with a nice API: you write a fact, you
+search it back. **Logica Mind is different.** It gives your agent four kinds of
+memory, a *temporal* knowledge graph that remembers what was true and **when it
+changed**, a sleep-time consolidation cycle, and a self-hosted dashboard to watch
+it all happen — with **zero required dependencies** and **no API key** to start.
+
+It runs fully offline on the standard library (SQLite + a hashing embedder), then
+lights up Voyage / OpenAI / Supabase / Postgres / Redis when you want them.
+
+<div align="center">
+  <img src="docs/dashboard-graph.png" alt="Logica Mind dashboard — live temporal knowledge graph" width="100%">
+  <br>
+  <em>The built-in dashboard: a live, animated knowledge graph with point-in-time replay, shared-entity detection across agents, and a one-click demo you can clear.</em>
+</div>
+
+---
+
+## ⚡ Install
 
 ```bash
-pip install logica-mind              # core only (stdlib, fully offline)
-pip install "logica-mind[voyage]"    # + Voyage embeddings
-pip install "logica-mind[openai]"    # + OpenAI embeddings + LLM extraction
-pip install "logica-mind[local]"     # + local sentence-transformers embedder
-pip install "logica-mind[postgres]"  # + Postgres store
-pip install "logica-mind[redis]"     # + Redis store
-pip install "logica-mind[all]"       # everything
+pip install logica-mind                 # core: zero dependencies, fully offline
+pip install "logica-mind[voyage]"       # + Voyage embeddings & reranker
+pip install "logica-mind[all]"          # + Voyage, OpenAI, Supabase, Postgres, Redis, local
 ```
 
-Requires Python 3.9+.
-
-## 30-second Quickstart
-
-No API keys, no extra dependencies — local SQLite + offline embedder by default.
+## 🚀 30-second quickstart
 
 ```python
 from logica_mind import LogicaMind
 
-mind = LogicaMind(namespace="my-agent")
+mind = LogicaMind(namespace="my-app")          # SQLite + offline embedder, no keys
 
-# Remember durable facts (plug in your own content).
-mind.remember("The user prefers short, direct answers.")
-mind.remember("The user works in the Pacific time zone.")
+# remember durable facts — extraction, dedup and conflict-resolution are automatic
+mind.remember("The user prefers dark mode and concise answers.")
+mind.remember("The user is based in Lisbon and works in fintech.")
 
-# Recall the most relevant memories for a query.
-for hit in mind.recall("how should I phrase my replies?"):
-    print(round(hit.score, 3), hit.memory.content)
+# recall the most relevant memories (hybrid: semantic vector + lexical, ranked)
+for hit in mind.recall("what does the user like?"):
+    print(f"{hit.score:.2f}  {hit.memory.content}")
+
+# see it live — open the dashboard
+mind.serve()                                    # -> http://127.0.0.1:8420
 ```
 
-To light up real semantic search, swap in an embedder and a store — the rest of
-your code stays the same:
+> Prefer the terminal? `logica-mind demo` loads a fictional dataset so you can
+> explore every feature instantly, and `logica-mind demo --clear` removes it.
+
+---
+
+## ⭐ What no other memory library does
+
+This is the heart of Logica Mind. Everything below is **shipped and tested**.
+
+### 🕰️ It's a time machine, not a log
+
+Memory isn't just *what* you know — it's *when it became true and when it changed.*
 
 ```python
-from logica_mind import LogicaMind
-from logica_mind.embeddings import VoyageEmbedder
-from logica_mind.stores import SupabaseStore
-
-mind = LogicaMind(
-    namespace="my-agent",
-    embedder=VoyageEmbedder(model="voyage-3-lite"),  # reads VOYAGE_API_KEY
-    store=SupabaseStore(),                            # reads SUPABASE_URL / KEY
-)
+mind.graph.edges(at="2026-01-01")     # replay the ENTIRE knowledge state at a past instant
+mind.state_at("2026-01-01")           # "what did the agent know when it made that decision?"
+mind.contradictions()                  # every belief that changed value — and exactly when
+mind.diff(since, until)                # a memory changelog: "what did this agent learn this week?"
 ```
 
-Or write to several backends at once — fast local recall plus a human-readable
-audit trail:
+- **Point-in-time replay** — reconstruct the full graph (or the whole mind) at any past date. Audit and debug agent behavior after the fact.
+- **Temporal contradictions** — a new fact *closes* the old one instead of deleting it; the timeline stays queryable.
+- **Memory changelog** — a first-class diff over what was learned in any window. Flat vector stores can't give you this.
+
+### 🧬 A memory that behaves like a brain
 
 ```python
-from logica_mind.stores import MultiStore, SQLiteStore, ObsidianStore
-
-mind = LogicaMind(
-    namespace="my-agent",
-    store=MultiStore([
-        SQLiteStore("mind.db"),
-        ObsidianStore("~/vault/memories"),
-    ]),
-)
+mind.forget_curve(days_halflife=30)    # Ebbinghaus decay: unused beliefs fade, recall reinforces
+mind.dream(infer_links=True)           # sleep-time cycle: consolidate, reinforce, forget, INFER
+mind.stale_beliefs()                   # epistemic self-doubt: "I'm not sure about this anymore"
 ```
 
-## The four memory layers
+- **Ebbinghaus forgetting curve** — beliefs decay exponentially if never recalled; recalling one resets its clock. The only memory layer where knowledge actually *ages*.
+- **Inductive dreaming** — beyond consolidate/prune, the dream cycle **generates new inferred facts** (A→B, B→C ⟹ A relates to C) while idle. It doesn't just store; it reasons.
+- **Epistemic self-doubt** — surfaces old, never-recalled, low-confidence beliefs the agent should re-verify. No other memory system exposes its own uncertainty.
+- **Contested beliefs & surprise score** — when a new high-confidence belief overturns an old one, both are surfaced as *contested* and scored by how much the worldview shifted.
+- **Dream journal** — every consolidation cycle is recorded (distilled / reinforced / forgotten / inferred) so you can *watch the memory think over time*.
 
-| Layer | What it holds |
-|-------|---------------|
-| **episodic** | Raw turns and events, logged as they happened. |
-| **semantic** | Distilled, de-duplicated facts ("the user prefers X"). |
-| **graph** | A temporal knowledge graph: entities and relationships, each edge valid over a time range. |
-| **user** | A dialectic, evolving model of who the user is. |
+### 🤝 Multi-agent native
 
-A single `recall()` searches across layers with **hybrid retrieval** — vector
-similarity combined with lexical matching, scored by importance and recency,
-de-duplicated, and optionally reranked. When no embedder key is configured, recall
-degrades gracefully to lexical search instead of failing.
+```python
+mind.for_namespace("agent-a")          # one store, N agents/clones, each its own namespace
+mind.knowledge_gap("agent-b")          # "what does B know that A doesn't?" — directional
+mind.transfer_to("agent-b", fact_id)   # move a fact between agents, with provenance
+mind.observe_peer("a", "b", "...")     # directional theory-of-mind: what A believes about B
+```
 
-## What makes it different
+- **One brain, every agent** — a single store serves any number of agents/clones, with an aggregate graph that **detects entities shared across agents** (the gold nodes in the screenshot).
+- **Structured run records** — `record_session(...)` captures a whole multi-agent run (participants, roles, contributions, metrics, links) as rich, queryable memory — framework-agnostic, maps onto CrewAI / LangGraph / AutoGen or your own loop.
+- **Multi-perspective peers** — model what one participant knows about another, directionally, not merged.
 
-Beyond store-and-retrieve, Logica Mind models how memory actually behaves over
-time:
+### 🔒 Trust, provenance & portability
 
-- **Ebbinghaus forgetting curve** — beliefs decay on a configurable half-life;
-  surface what's about to be forgotten, or reinforce what keeps getting recalled.
-- **Contested beliefs** — when a new belief supersedes a high-confidence old one,
-  the system records the contest instead of silently overwriting it.
-- **Surprise scoring** — flags paradigm shifts where a new belief diverges sharply
-  from a prior high-confidence one (`surprise = old_importance × cosine_distance`).
-- **Dreaming** — a sleep-time consolidation cycle that distills episodic turns into
-  semantic facts, reinforces frequently-recalled memories, prunes stale traces,
-  derives user observations, and can infer new links.
-- **Temporal knowledge graph** — entity aliasing (variants resolve to a canonical
-  name) and point-in-time queries (`state_at`) reconstruct what was true at any
-  past moment.
-- **Dialectic user model** — answers questions *about* the user by reasoning over
-  accumulated observations, not just string matching.
-- **Peers** — directional, theory-of-mind observations: what one party knows or
-  believes about another.
-- **Multi-agent shared-entity graph** — multiple agents contribute to and query the
-  same entity graph.
-- **Structured session/run records** — capture an orchestrated run (participants,
-  per-participant contributions, aggregate metrics, status, links) as queryable,
-  recallable history. Framework-agnostic.
-- **HMAC-signed portable memory bundles** — export your memory and move it between
-  apps or vendors, optionally signed so the destination can verify integrity.
+```python
+mind.provenance(fact_id)               # "why do I believe this?" -> the source turns it came from
+mind.forget_about("Acme Inc")          # GDPR-native erase across ALL layers + the graph, one call
+bundle = mind.export_bundle(secret=k)  # HMAC-signed, portable memory you can move between vendors
+```
 
-## Rerankers
+- **"Why do I believe this?"** — trace any fact back to the exact source turns/documents it was distilled from. Belief explainability a vector can't give you.
+- **GDPR-native erase** — `forget_about(entity)` deletes every memory mentioning an entity across all four layers *and* the graph, in one call. Right-to-be-forgotten as a primitive.
+- **Portable, signed memory** — export an HMAC-signed bundle and carry your memory between apps and vendors. Tamper-evident, provider-independent. *Your memory follows you.*
+- **Source attribution** — every captured memory is tagged with the client that produced it (Claude Code / Cursor / ChatGPT …), read from the MCP handshake.
 
-Recall over-fetches a candidate pool, then optionally reranks it. Built-in
-rerankers: **MMR** (relevance vs. diversity), **Voyage** (cross-encoder),
-**RRF** (reciprocal rank fusion), **node-distance** (graph proximity), and
-**episode-mention** (recency of entity mentions in episodic memory).
+### 🖥️ Built to be lived in
 
-## Stores and embedders
+- **A live, animated graph explorer** — Obsidian-style canvas physics, community coloring, confidence-weighted edges, entity drill-down, and a **time-scrubber** that replays the graph at any date. Served by the standard library — no Node required for end users.
+- **Obsidian-style note pane** — click any memory to open it as a document with a Properties panel and its provenance; entities are first-class (alias resolution collapses *"OpenAI" = "Open AI"*).
+- **A demo you control** — ship empty, load a rich fictional dataset to explore, then clear it with one click (it only removes the demo, never your data).
 
-**Stores (7):** `SQLiteStore`, `InMemoryStore`, `ObsidianStore`, `MultiStore`,
-`SupabaseStore`, `PostgresStore`, `RedisStore`.
+---
 
-**Embedders (6):** `HashingEmbedder` (offline default), `VoyageEmbedder`,
-`OpenAIEmbedder`, `LocalEmbedder` (sentence-transformers), `BatchedEmbedder`
-(batching wrapper), `VoyageMultimodalEmbedder`.
+## 🧱 Core, done right
 
-## Framework adapters and SDKs
+| | |
+|---|---|
+| **Four memory layers** | `episodic` (raw turns) · `semantic` (distilled facts) · `graph` (temporal entity/relationship edges) · `user` (an evolving, dialectic model of who the user is) |
+| **Hybrid recall** | semantic vector + lexical (BM25), blended with importance and recency, then optionally reranked — degrades gracefully to lexical with no embedder |
+| **7 stores** | SQLite (default) · In-memory · Obsidian (markdown vault) · MultiStore (write to many at once) · Supabase (pgvector) · Postgres · Redis |
+| **6 embedders** | Hashing (offline default) · Voyage · OpenAI · Local (sentence-transformers) · Batched · Voyage-multimodal |
+| **5 rerankers** | MMR (diversity) · Voyage cross-encoder · RRF · node-distance · episode-mention |
+| **Extraction** | Mem0-style ADD / UPDATE / DELETE / NOOP with dedup and conflict resolution |
+| **Auto-capture hooks** | `SessionStart` / `UserPromptSubmit` / `Stop` / `PreCompact` — memory that survives context compaction |
+| **Adapters & SDKs** | LangChain · LlamaIndex · a [provider adapter](examples/provider_adapter.py) for any host · a [TypeScript SDK](sdk-ts/) |
 
-- **LangChain** — `logica_mind/integrations/langchain.py`
-- **LlamaIndex** — `logica_mind/integrations/llamaindex.py`
-- **TypeScript SDK** — a thin REST client in [`sdk-ts/`](sdk-ts/), published as
-  `@logica-mind/sdk`.
-- **Provider adapter** — [`examples/provider_adapter.py`](examples/provider_adapter.py)
-  shows how any host maps its `recall()` / `save()` calls onto Logica Mind through a
-  small, framework-agnostic interface.
+---
 
-See [`examples/quickstart.py`](examples/quickstart.py) for the minimal end-to-end
-example.
+## 🔌 Model Context Protocol (MCP)
 
-## Automatic capture (hooks)
-
-Don't want to call a tool to remember? Hooks capture sessions on their own, running
-on your agent's lifecycle events (Claude Code and any host with the same contract):
-
-| Event | What happens |
-|-------|--------------|
-| **SessionStart** | Injects a brief: what we know about the user + recent activity. |
-| **UserPromptSubmit** | Recalls memory relevant to the prompt, then saves the prompt. |
-| **Stop** | Saves what the assistant did on the last turn. |
-| **PreCompact** | Consolidates before the context window is compacted. |
+Logica Mind is a full MCP server — **27 tools** covering memory, recall, the
+temporal graph, peers, dreaming, contested beliefs, the forgetting curve, GDPR
+erase and structured session records. Point any MCP client (Claude Code, Cursor,
+…) at it and your assistant gets durable, queryable memory:
 
 ```bash
-logica-mind install-hooks    # writes the hooks into your host's settings
+logica-mind mcp        # run as an MCP server over stdio
 ```
 
-Each hook is a fast, fail-safe subprocess that reads the host's JSON event on
-stdin and returns additional context on stdout. It uses Voyage/OpenAI embeddings
-automatically when a key is set, else the offline default.
-
-## MCP server
-
-`logica-mind mcp` runs a stdio MCP server exposing **27 tools**, so any MCP client
-(Claude Code, Cursor, Windsurf) gets a deep memory brain plus a set of
-token-saving coding-context tools — memory (`lm_remember`, `lm_recall`,
-`lm_context`, `lm_forget`, `lm_dream`, …), user/peer modeling, temporal queries,
-team knowledge base, and dev utilities (`lm_execute`, `lm_scan`, `lm_git`,
-`lm_mcp`, `lm_budget`).
-
-Add it to your MCP client config:
-
-```json
-{ "logica-mind": { "type": "stdio", "command": "logica-mind", "args": ["mcp"] } }
+```jsonc
+// in your MCP client config
+{ "mcpServers": { "logica-mind": { "command": "logica-mind", "args": ["mcp"] } } }
 ```
 
-## Dashboard
+---
 
-A self-hosted web dashboard browses and inspects your memory. The published wheel
-ships the pre-built dashboard, so end users only need:
+## 📊 The dashboard
 
 ```bash
-logica-mind ui    # serves the dashboard on http://localhost:8420
+logica-mind ui         # -> http://127.0.0.1:8420
 ```
 
-To build the dashboard from source (Node 18+):
+A self-hosted, single-page dashboard (zero external services) with **11 views**:
+Overview · Graph · Memories · Calendar (activity heatmap) · Sessions · User model ·
+Peers · Changes (contradictions + changelog) · Insights · Workspace (codebase DNA) ·
+Dreams (forgetting curve, contested beliefs, dream journal). Dark / light themes,
+English / Português / Español.
+
+<div align="center">
+  <img src="docs/dashboard-overview.png" alt="Logica Mind dashboard — overview" width="100%">
+</div>
+
+---
+
+## 🛠️ Building from source
 
 ```bash
-cd logica_mind/web/app
-npm ci
-npm run build
+git clone https://github.com/Rovemark/logica-mind.git
+cd logica-mind
+pip install -e ".[dev]" && pytest -q          # 180 tests, fully offline
+
+# rebuild the dashboard (only if you change the UI)
+cd logica_mind/web/app && npm ci && npm run build
 ```
 
-Then launch it with `logica-mind ui` as above.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
-## Status
+---
 
-`v0.1.0` — alpha. Episodic, semantic, multi-store, and pluggable embeddings are
-solid. The temporal graph and dialectic user model are functional and deepening.
+## 📦 Status
 
-## License
+**v0.1.0 — Beta.** The full feature set above is shipped and covered by 180 tests.
+Logica Mind unifies design ideas from Honcho (dialectic user modeling), Zep /
+Graphiti (temporal graph), Voyage AI (embeddings + reranking) and Mem0
+(extraction) into one library — see [NOTICE](NOTICE).
 
-Apache-2.0 — © 2026 Rovemark. See [LICENSE](LICENSE).
+## 📄 License
+
+[Apache License 2.0](LICENSE) © Rovemark.
