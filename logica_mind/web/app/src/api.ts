@@ -29,7 +29,7 @@ export interface DimensionEntry { id: string; label: string; group: string; masl
 export interface DimensionsData { dimensions: DimensionEntry[]; uncategorized: number; maslow: string[]; }
 export interface AddResult { ok: boolean; namespace: string; kind: string; llm: boolean; created: AddResultItem[]; graph_edges: number; user_updated: boolean; deduped: boolean; }
 export interface SearchEntity { name: string; namespace: string; degree: number; type?: string; }
-export interface SearchResults { memories: { score: number; memory: Memory }[]; entities: SearchEntity[]; namespaces: string[]; }
+export interface SearchResults { memories: { score: number; memory: Memory }[]; entities: SearchEntity[]; namespaces: string[]; categories?: { name: string; count: number }[]; }
 export interface IntegrationOption { id: string; label: string; model?: string; blurb?: string; env?: string | null; detected: boolean; installed: boolean; }
 export interface IntegrationsData {
   active: {

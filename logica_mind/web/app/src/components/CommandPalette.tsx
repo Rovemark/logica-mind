@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, CornerDownLeft, Network, List as ListIcon, CircleUser } from "lucide-react";
+import { Search, CornerDownLeft, Network, List as ListIcon, CircleUser, Boxes } from "lucide-react";
 import { api, type NsItem, type Memory, type SearchEntity } from "../api";
 import { VIEWS, type ViewKey } from "../nav";
 import { useI18n } from "../i18n";
@@ -8,7 +8,8 @@ type Item =
   | { kind: "view"; key: ViewKey; label: string; Icon: any }
   | { kind: "agent"; ns: string; label: string }
   | { kind: "memory"; memory: Memory; label: string }
-  | { kind: "entity"; entity: SearchEntity; label: string };
+  | { kind: "entity"; entity: SearchEntity; label: string }
+  | { kind: "category"; name: string; count: number; label: string };
 
 // Global Spotlight (⌘K): one box over everything — views, agents, memories and
 // graph entities — keyboard-navigable, each result jumps you straight there.
@@ -23,6 +24,7 @@ export default function CommandPalette({ namespaces, onClose, onView, onNs, onOp
   const [q, setQ] = useState("");
   const [mems, setMems] = useState<{ score: number; memory: Memory }[]>([]);
   const [ents, setEnts] = useState<SearchEntity[]>([]);
+  const [cats, setCats] = useState<{ name: string; count: number }[]>([]);
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -32,9 +34,9 @@ export default function CommandPalette({ namespaces, onClose, onView, onNs, onOp
   // server search for memories + entities (debounced); views/agents filter locally
   useEffect(() => {
     const term = q.trim();
-    if (!term) { setMems([]); setEnts([]); return; }
+    if (!term) { setMems([]); setEnts([]); setCats([]); return; }
     const h = setTimeout(() => {
-      api.search(term, 6).then((d) => { setMems(d.memories || []); setEnts(d.entities || []); }).catch(() => {});
+      api.search(term, 6).then((d) => { setMems(d.memories || []); setEnts(d.entities || []); setCats(d.categories || []); }).catch(() => {});
     }, 180);
     return () => clearTimeout(h);
   }, [q]);
@@ -49,16 +51,18 @@ export default function CommandPalette({ namespaces, onClose, onView, onNs, onOp
     .map((n) => ({ kind: "agent", ns: n.namespace, label: n.namespace }));
   const memItems: Item[] = mems.map((m) => ({ kind: "memory", memory: m.memory, label: m.memory.content }));
   const entItems: Item[] = ents.map((e) => ({ kind: "entity", entity: e, label: e.name }));
+  const catItems: Item[] = cats.map((c) => ({ kind: "category", name: c.name, count: c.count, label: c.name }));
 
   const groups: { title: string; items: Item[] }[] = [
     { title: t("grp_views"), items: viewItems },
     { title: t("grp_agents"), items: agentItems },
+    { title: t("grp_categories"), items: catItems },
     { title: t("grp_entities"), items: entItems },
     { title: t("grp_memories"), items: memItems },
   ].filter((g) => g.items.length);
 
-  const flat = useMemo(() => groups.flatMap((g) => g.items), [q, mems, ents, namespaces]);
-  useEffect(() => { setSel(0); }, [q, mems, ents]);
+  const flat = useMemo(() => groups.flatMap((g) => g.items), [q, mems, ents, cats, namespaces]);
+  useEffect(() => { setSel(0); }, [q, mems, ents, cats]);
 
   function activate(it?: Item) {
     if (!it) return;
@@ -66,6 +70,7 @@ export default function CommandPalette({ namespaces, onClose, onView, onNs, onOp
     else if (it.kind === "agent") onNs(it.ns);
     else if (it.kind === "memory") onOpenMemory(it.memory);
     else if (it.kind === "entity") { onNs(it.entity.namespace); onView("graph"); }
+    else if (it.kind === "category") onView("profile");
     onClose();
   }
 
@@ -127,6 +132,7 @@ function itemKey(it: Item): string {
   if (it.kind === "view") return "view-" + it.key;
   if (it.kind === "agent") return "agent-" + it.ns;
   if (it.kind === "entity") return "entity-" + it.entity.namespace + "-" + it.entity.name;
+  if (it.kind === "category") return "cat-" + it.name;
   return "mem-" + it.memory.id;
 }
 
@@ -134,6 +140,7 @@ function Glyph({ it }: { it: Item }) {
   if (it.kind === "view") { const I = it.Icon; return <I size={15} className="text-[var(--dim)] flex-none" />; }
   if (it.kind === "agent") return <CircleUser size={15} className="text-[var(--dim)] flex-none" />;
   if (it.kind === "entity") return <Network size={15} className="text-[var(--gold)] flex-none" />;
+  if (it.kind === "category") return <Boxes size={15} className="text-[var(--accent2)] flex-none" />;
   return <ListIcon size={15} className="text-[var(--dim)] flex-none" />;
 }
 
@@ -141,6 +148,7 @@ function Tag({ it, t }: { it: Item; t: (k: any) => string }) {
   const label = it.kind === "view" ? t("grp_views").slice(0, -1)
     : it.kind === "agent" ? "agent"
     : it.kind === "entity" ? (it.entity.type || "entity")
+    : it.kind === "category" ? `${it.count}`
     : it.memory.layer;
   return <span className="text-[10px] text-[var(--dim2)] flex-none uppercase tracking-wide">{label}</span>;
 }
