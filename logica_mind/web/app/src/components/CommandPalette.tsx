@@ -105,7 +105,7 @@ export default function CommandPalette({ namespaces, onClose, onView, onNs, onOp
                 const i = idx;
                 const active = i === sel;
                 return (
-                  <button key={i} data-i={i} onMouseEnter={() => setSel(i)} onClick={() => activate(it)}
+                  <button key={itemKey(it)} data-i={i} onMouseEnter={() => setSel(i)} onClick={() => activate(it)}
                     className={`w-full flex items-center gap-2.5 px-4 py-2 text-left ${active ? "bg-[var(--panel2)]" : ""}`}>
                     <Glyph it={it} />
                     <span className="flex-1 min-w-0 truncate text-[13.5px] text-[var(--txt)]">{it.label}</span>
@@ -120,6 +120,14 @@ export default function CommandPalette({ namespaces, onClose, onView, onNs, onOp
       </div>
     </div>
   );
+}
+
+// stable React key per item (index keys break selection across re-filtering)
+function itemKey(it: Item): string {
+  if (it.kind === "view") return "view-" + it.key;
+  if (it.kind === "agent") return "agent-" + it.ns;
+  if (it.kind === "entity") return "entity-" + it.entity.namespace + "-" + it.entity.name;
+  return "mem-" + it.memory.id;
 }
 
 function Glyph({ it }: { it: Item }) {

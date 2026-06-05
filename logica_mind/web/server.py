@@ -491,7 +491,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # global Spotlight: memories (recall across all), entities
                     # (graph node names) and namespaces — for the ⌘K palette.
                     q = (first(qs, "q") or "").strip()
-                    limit = _int(qs, "limit", 6)
+                    limit = max(1, _int(qs, "limit", 6))
                     if not q:
                         self._json({"memories": [], "entities": [], "namespaces": []})
                     else:
@@ -549,7 +549,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 elif path == "/api/observations":
                     # structural patterns over the temporal graph (hubs +
                     # co-occurrences) — recurrences that no single fact holds.
-                    limit = _int(qs, "limit", 12)
+                    limit = max(1, _int(qs, "limit", 12))
                     if is_all:
                         seen, merged = set(), []
                         for nm in mind.store.namespaces():
