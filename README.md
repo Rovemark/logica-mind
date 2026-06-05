@@ -230,7 +230,11 @@ A self-hosted, single-page dashboard (zero external services) with **14 views**:
 Overview · **Analytics** · **Context block** · Graph · Memories · Calendar (activity
 heatmap) · Sessions · User model · Peers · **Observations** · Changes (contradictions
 + changelog) · Insights · Workspace (codebase DNA) · Dreams (forgetting curve,
-contested beliefs, dream journal). Dark / light themes, English / Português / Español.
+contested beliefs, dream journal). A global **⌘K Spotlight** searches across every
+view, agent, memory and entity; a contextual **? on every page** explains what each
+element means; and a **Settings → Integrations** page shows the live stack and
+**auto-detects** any provider in your environment. Dark / light themes, English /
+Português / Español.
 
 <div align="center">
   <img src="docs/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
@@ -246,6 +250,10 @@ contested beliefs, dream journal). Dark / light themes, English / Português / E
   <tr>
     <td width="50%"><img src="docs/dashboard-lake.png" alt="Memory lake — a typed, governed catalog of namespaces"><br><sub><b>Memory lake</b> — a typed catalog of every namespace (user / org / agent), each row provenance-tracked, source-attributed, versioned and erasable on request.</sub></td>
     <td width="50%"><img src="docs/dashboard-analytics.png" alt="Analytics — usage, activity and reliability"><br><sub><b>Analytics</b> — usage, activity and reliability: added-over-time, distribution by layer / source / agent, real request latency and error rate.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/dashboard-spotlight.png" alt="Spotlight — global ⌘K search"><br><sub><b>⌘K Spotlight</b> — one box over everything: jump to any view, agent, memory or graph entity, keyboard-first.</sub></td>
+    <td width="50%"><img src="docs/dashboard-integrations.png" alt="Integrations — the live stack with provider auto-detection"><br><sub><b>Integrations</b> — the live stack (store + redundancy, embedder, LLM, reranker) and every backend you can plug in, auto-detected from your environment.</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
