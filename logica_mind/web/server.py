@@ -923,6 +923,14 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     tgt = ns if not is_all else mind.namespace
                     self._json(mind.for_namespace(tgt).connections(first(qs, "id")))
 
+                elif path == "/api/path":             # "how is A related to B?"
+                    frm, to = first(qs, "from"), first(qs, "to")
+                    if not frm or not to:
+                        return self._json({"error": "from & to required"}, 400)
+                    nss = mind.store.namespaces() if is_all else [ns]
+                    base = nss[0] if nss else mind.namespace
+                    self._json(mind.for_namespace(base).how_related(frm, to, namespaces=nss))
+
                 elif path == "/api/stale":           # epistemic self-doubt
                     min_age = _float(qs, "min_age_days", 30)
                     items = []

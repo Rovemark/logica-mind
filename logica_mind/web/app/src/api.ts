@@ -41,6 +41,8 @@ export interface IntegrationsData {
   };
   available: { llm: IntegrationOption[]; embedders: IntegrationOption[]; rerankers: IntegrationOption[]; stores: IntegrationOption[] };
 }
+export interface PathHop { subject: string; predicate: string; object: string; confidence: number; }
+export interface PathResult { from: string; to: string; found: boolean; path: string[]; hops: PathHop[]; }
 export interface ConnEntity { name: string; degree: number; type?: string; dimension?: string | null; }
 export interface ConnRelation { subject: string; predicate: string; object: string; valid: boolean; id: string; }
 export interface Connections { entities: ConnEntity[]; relations: ConnRelation[]; mentions: Memory[]; siblings: Memory[]; }
@@ -98,6 +100,8 @@ export const api = {
     j(`/api/provenance?${nsq(ns)}&id=${encodeURIComponent(id)}`),
   connected: (ns: string, id: string): Promise<Connections> =>
     j(`/api/connected?${nsq(ns)}&id=${encodeURIComponent(id)}`),
+  path: (ns: string, from: string, to: string): Promise<PathResult> =>
+    j(`/api/path?${nsq(ns)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   scan: (path?: string): Promise<any> => j(`/api/scan${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   bundle: (ns: string): Promise<any> => j(`/api/bundle?${nsq(ns)}`),
   peers: (ns: string): Promise<{ peers: PeerPair[] }> => j(`/api/peers?${nsq(ns)}`),

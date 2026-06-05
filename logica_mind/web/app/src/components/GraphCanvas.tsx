@@ -29,6 +29,8 @@ interface Props {
   // fired when the hovered node changes (id=null on leave), with canvas-local
   // coords — powers the hover preview card.
   onHover?: (id: string | null, x: number, y: number) => void;
+  // ordered node ids of a path to spotlight (everything else dims) — Path mode.
+  pathIds?: string[];
 }
 
 // Live canvas force-simulation (Obsidian-style continuous physics):
@@ -36,7 +38,7 @@ interface Props {
 // interaction. Pan/zoom/drag with mouse AND touch (pinch-zoom). A click/tap on a
 // node calls onPick(name) so the parent can show its memories + relations.
 const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
-  { data, communities, colorFor, onPick, nodeTint, onHover }, ref,
+  { data, communities, colorFor, onPick, nodeTint, onHover, pathIds }, ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,11 +47,13 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   const pickRef = useRef(onPick);
   const tintRef = useRef(nodeTint);
   const hoverCbRef = useRef(onHover);
+  const pathRef = useRef(pathIds);
   commRef.current = communities;
   colorRef.current = colorFor;
   pickRef.current = onPick;
   tintRef.current = nodeTint;
   hoverCbRef.current = onHover;
+  pathRef.current = pathIds;
 
   const G = useRef<any>({ nodes: [], links: [], byId: {}, adj: {}, comp: {}, t: { x: 0, y: 0, k: 1 }, hover: null, drag: null, alpha: 0, raf: 0, W: 0, H: 0, dpr: 1, fitOnce: false });
 
@@ -109,6 +113,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const g = G.current, c = g.ctx; if (!c) return; const t = g.t;
     c.clearRect(0, 0, g.W, g.H); c.save(); c.translate(t.x, t.y); c.scale(t.k, t.k);
     const hi = g.hover, nbr = hi ? (g.adj[hi] || new Set()) : null;
+    // Path mode: spotlight an ordered path, dim everything else
+    const pids = pathRef.current || [];
+    const pathSet = pids.length ? new Set(pids) : null;
+    const pathEdges = pathSet ? new Set(pids.slice(0, -1).map((x, i) => [x, pids[i + 1]].sort().join(""))) : null;
     // theme-aware ink so labels/edges read on both the light and dark canvas
     const light = document.documentElement.getAttribute("data-theme") === "light";
     const edgeDead = light ? "rgba(120,130,150,.35)" : "rgba(90,100,120,.28)";
@@ -119,6 +127,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
                                                  : (light ? "rgba(40,55,90,.3)" : "rgba(10,13,20,.9)");
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
       const active = !hi || l.source === hi || l.target === hi;
+      const onPath = pathEdges ? pathEdges.has([l.source, l.target].sort().join("")) : false;
       const kind = l.kind || "relation";
       const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2 - Math.hypot(B.x - A.x, B.y - A.y) * 0.07;
       c.beginPath(); c.moveTo(A.x, A.y); c.quadraticCurveTo(mx, my, B.x, B.y);
@@ -139,6 +148,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
         rgb = PCLASS_RGB[l.pclass || "other"] || PCLASS_RGB.other;
         alpha = active ? 0.3 + 0.55 * conf : 0.12; width = 0.7 + 1.8 * conf; arrow = true;
       }
+      if (pathSet) {                                       // Path-mode spotlight
+        if (onPath) { rgb = "251,191,36"; alpha = 0.95; width = Math.max(width, 2.6); }
+        else { alpha *= 0.1; arrow = false; }
+      }
       c.strokeStyle = `rgba(${rgb},${alpha})`;
       c.lineWidth = width / Math.sqrt(t.k);
       if (dash) c.setLineDash(dash.map((d) => d / t.k));
@@ -155,13 +168,16 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       }
       if (t.k > 0.85 && active && l.label) { c.fillStyle = edgeLabel; c.font = `${10 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.fillText(l.label, mx, my - 3 / t.k); }
     });
-    g.nodes.forEach((n: any) => { const active = !hi || n.id === hi || (nbr && nbr.has(n.id));
+    g.nodes.forEach((n: any) => { const onP = pathSet ? pathSet.has(n.id) : null;
+      const active = (!hi || n.id === hi || (nbr && nbr.has(n.id))) && onP !== false;
+      const dim = onP === false;
       const col = nodeColor(n), rad = baseRad(n, n.id === hi);
       if (n.id === hi || (nbr && nbr.has(n.id))) { c.beginPath(); c.arc(n.x, n.y, rad + 7 / t.k, 0, 6.283); c.fillStyle = col + "33"; c.fill(); }
       c.beginPath(); c.arc(n.x, n.y, rad / Math.sqrt(t.k), 0, 6.283);
-      c.fillStyle = active ? col : col + "44"; c.fill();
+      c.fillStyle = dim ? col + "1f" : (active ? col : col + "44"); c.fill();
       c.lineWidth = (n.shared ? 2 : 1.4) / t.k; c.strokeStyle = nodeRing(!!n.shared); c.stroke();
-      if (t.k > 0.6 && active) { c.fillStyle = active ? labelFill : labelFillDim; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
+      if (onP) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(251,191,36,.95)"; c.stroke(); }
+      if (t.k > 0.6 && (active || onP)) { c.fillStyle = active || onP ? labelFill : labelFillDim; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
         c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.strokeText(n.id, n.x, n.y - (rad + 5) / t.k); c.fillText(n.id, n.x, n.y - (rad + 5) / t.k); }
     });
     c.restore();

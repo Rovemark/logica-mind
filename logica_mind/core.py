@@ -811,6 +811,44 @@ class LogicaMind:
                  "weight": c, "label": "", "valid": True}
                 for (a, b), c in pair_count.items() if c >= cooc_min]
 
+    def how_related(self, a: str, b: str, namespaces: Optional[List[str]] = None) -> Dict[str, Any]:
+        """"How is A related to B?" — the confidence-weighted shortest path between
+        two entities, returned as an ordered chain of typed hops
+        ('Andre -founded-> Acme -owns-> VitaAZ'). The question a note graph can't
+        answer because its links are untyped and hand-authored; here the path and
+        its predicates fall straight out of the temporal graph. Offline, no LLM."""
+        from .graph.analytics import build_adjacency, shortest_path
+        nss = namespaces or [self.namespace]
+        edges = []
+        for ns in nss:
+            edges.extend(TemporalGraph(self.store, ns, self.embedder).edges())
+        if not edges:
+            return {"from": a, "to": b, "found": False, "path": [], "hops": []}
+        names: Dict[str, str] = {}
+        for e in edges:
+            names.setdefault(e.subject.lower(), e.subject)
+            names.setdefault(e.object.lower(), e.object)
+        ca = names.get((a or "").lower(), a)
+        cb = names.get((b or "").lower(), b)
+        adj = build_adjacency((e.subject, e.object, e.confidence) for e in edges)
+        path = shortest_path(adj, ca, cb)
+        if not path:
+            return {"from": ca, "to": cb, "found": False, "path": [], "hops": []}
+        emap: Dict[tuple, Any] = {}
+        for e in edges:
+            emap.setdefault((e.subject.lower(), e.object.lower()), e)
+        hops = []
+        for i in range(len(path) - 1):
+            x, y = path[i], path[i + 1]
+            e = emap.get((x.lower(), y.lower()))
+            if e:
+                hops.append({"subject": x, "predicate": e.predicate, "object": y, "confidence": e.confidence})
+            else:
+                e = emap.get((y.lower(), x.lower()))
+                hops.append({"subject": (y if e else x), "predicate": (e.predicate if e else "related to"),
+                             "object": (x if e else y), "confidence": (e.confidence if e else 0.5)})
+        return {"from": ca, "to": cb, "found": True, "path": path, "hops": hops}
+
     def graph_communities(self, summarize: bool = False, include_history: bool = False):
         """Clusters of related entities in this namespace's graph. With
         summarize=True, each community gets an LLM-written summary."""
