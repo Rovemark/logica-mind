@@ -18,12 +18,14 @@ New here? Start with **[Installation](installation.md)** → **[Quickstart](quic
 - [Stores](stores.md) — the 7 storage backends and when to use each
 - [Embeddings & reranking](embeddings-and-reranking.md) — embedders and rerankers
 - [Knowledge graph](knowledge-graph.md) — the temporal graph, entities, point-in-time
+- [Fact categorization](categorization.md) — categories + the 34-dimension life/work taxonomy
+- [Connections](connections.md) — derived backlinks, no manual links to maintain
 - [Dreaming & lifecycle](dreaming.md) — consolidation, the forgetting curve, contested beliefs
 - [User model & peers](user-model-and-peers.md) — the dialectic model and directional peers
 - [Sessions & run records](sessions-and-records.md) — session scoping and structured runs
 
 ### Interfaces
-- [MCP server](mcp.md) — use Logica Mind as a Model Context Protocol server (27 tools)
+- [MCP server](mcp.md) — use Logica Mind as a Model Context Protocol server (29 tools)
 - [Auto-capture hooks](hooks.md) — capture memory automatically across a session
 - [Integrations & SDKs](integrations.md) — LangChain, LlamaIndex, the provider adapter, the TypeScript SDK
 - [Dashboard](dashboard.md) — the self-hosted web UI

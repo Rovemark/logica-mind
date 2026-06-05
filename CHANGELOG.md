@@ -3,6 +3,35 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [Unreleased]
+
+### Fact categorization
+- Every durable fact is tagged with a **category** (an open label the LLM coins)
+  and a **dimension** from a 34-dimension taxonomy across four groups — Personal
+  (mapped to Maslow's hierarchy), Projects, Organization, and Business & Finance.
+- `dimensions()` returns the full profile grouped by dimension + Maslow tier;
+  category/dimension ride on every memory (`recall`/`remember`, `/api/memories`,
+  ⌘K search) and the new `lm_dimensions` MCP tool.
+- **Zero-key option** — categorization auto-detects an `ANTHROPIC_API_KEY` /
+  `OPENAI_API_KEY`, or uses the local **Claude CLI** (`LOGICA_MIND_LLM=claude-cli`).
+
+### Connections — derived backlinks
+- `connections(id)` infers a memory's neighborhood with no manual `[[links]]`:
+  the entities it mentions (typed, life-area coloured), the relations touching
+  them, other memories that mention the same entities (auto-backlinks), and
+  siblings sharing its category/dimension. Exposed as the `lm_connected` MCP tool
+  and `/api/connected`. **MCP server is now 29 tools.**
+
+### Dashboard
+- Unified **Profile** view (cards + a clickable knowledge-map) tabbed by Person /
+  Projects / Organization / Business, with the dialectic user model folded in.
+- **Knowledge graph** gains colour-by-life-area + per-area filtering (entities
+  carry a `dimension` in `graph_viz`).
+- **Connected** panel in the note pane — walk note-to-note (with a back stack);
+  `[[wikilinks]]` and Markdown render in memory content.
+- Global ⌘K Spotlight, a Settings *page* with an Integrations panel, contextual
+  help on every page, paginated lists, and a categorized sidebar.
+
 ## [0.1.0] — 2026-06-04
 
 First complete release: a pluggable, multi-store memory library for AI agents
