@@ -201,6 +201,8 @@ It has two modes:
 - **Cards** — the dimension tree above, tabbed by Person / Projects / Organization / Business (the Person tab also holds the dialectic user model + an ask box).
 - **Knowledge map** — the same data as a clickable graph (group → dimension → category). Click a node to jump straight to its filtered memories.
 
+![Profile knowledge map — groups → dimensions → categories](img/dashboard-profile-map.png)
+
 ### Categorization in the knowledge graph
 
 The four groups carry a colour language — **Person** (purple), **Projects** (blue), **Organization** (cyan), **Business** (green) — and it extends to the entity graph. Toggle **life areas** on the Graph view to paint every entity by its dominant dimension (bridged from the categorized facts that mention it), then use the area chips to filter the graph down to one area. See [Knowledge graph](./knowledge-graph.md).

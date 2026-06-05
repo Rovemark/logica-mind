@@ -337,6 +337,8 @@ Programmatically, `mind.graph_viz(namespace=..., at=...)` returns the `{nodes, l
 
 Each node in the `graph_viz` payload also carries a `dimension` field when one can be inferred — the **dominant life/work dimension** of the entity, bridged from the [categorized facts](./categorization.md) that mention it. In the dashboard, toggle **life areas** to paint every entity by its group (Person / Projects / Organization / Business) and use the area chips to filter the graph down to a single area. Entities with no categorized facts stay neutral.
 
+![Knowledge graph coloured by life-area](img/dashboard-graph-areas.png)
+
 ### Walking connections
 
 Any entity (and any memory) exposes its neighborhood through [`mind.connections(id)`](./connections.md) — the relations touching it, the other memories that mention it, and siblings of the same category. It's the derived-backlink layer the dashboard's **Connected** panel renders.

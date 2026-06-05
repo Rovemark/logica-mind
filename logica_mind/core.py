@@ -899,6 +899,7 @@ class LogicaMind:
                     ents.add(e.subject)
                 if e.object:
                     ents.add(e.object)
+        from .extract.taxonomy import group_of
         out: Dict[str, str] = {}
         for ent in ents:
             name = ent.strip()
@@ -909,8 +910,18 @@ class LogicaMind:
             for content, dim in facts:
                 if pat.search(content):
                     votes[dim] += 1
-            if votes:
-                out[ent] = votes.most_common(1)[0][0]
+            if not votes:
+                continue
+            # pick the dominant life-AREA first (a group can hold several dimensions),
+            # then the busiest dimension inside it — so an entity that's mostly about
+            # business reads as business even when its business facts span dimensions.
+            group_votes: Counter = Counter()
+            for dim, n in votes.items():
+                group_votes[group_of(dim) or "personal"] += n
+            top_group = group_votes.most_common(1)[0][0]
+            best = max((d for d in votes if (group_of(d) or "personal") == top_group),
+                       key=lambda d: votes[d])
+            out[ent] = best
         return out
 
     # ---- observations ------------------------------------------------------
