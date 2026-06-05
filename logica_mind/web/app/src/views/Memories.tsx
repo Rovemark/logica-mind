@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { api, LAYERS, type Memory } from "../api";
 import MemoryCard from "../components/MemoryCard";
 import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
+import type { MemFilter } from "../navctx";
 
 const PAGE = 20;
 
-export default function Memories({ ns, focus, onChanged }: { ns: string; focus?: { id: string; n: number } | null; onChanged?: () => void; [k: string]: any }) {
+export default function Memories({ ns, focus, onChanged, filter }: { ns: string; focus?: { id: string; n: number } | null; onChanged?: () => void; filter?: MemFilter | null; [k: string]: any }) {
   const { t } = useI18n();
   const [layer, setLayer] = useState("");
   const [mems, setMems] = useState<Memory[]>([]);
   const [hl, setHl] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [memF, setMemF] = useState<MemFilter | null>(filter ?? null);
 
   async function del(m: Memory) {
     await api.forget(m.namespace, m.id);
@@ -20,9 +23,9 @@ export default function Memories({ ns, focus, onChanged }: { ns: string; focus?:
   }
 
   useEffect(() => {
-    api.memories(ns, layer || undefined).then((d) => setMems(d.memories)).catch(() => setMems([]));
+    api.memories(ns, layer || undefined, memF?.dimension, memF?.category).then((d) => setMems(d.memories)).catch(() => setMems([]));
     setPage(1);
-  }, [ns, layer]);
+  }, [ns, layer, memF]);
 
   // when sent here to open a specific memory, drop any layer filter so it shows
   useEffect(() => { if (focus) setLayer(""); /* eslint-disable-next-line */ }, [focus?.n, focus?.id]);
@@ -60,6 +63,12 @@ export default function Memories({ ns, focus, onChanged }: { ns: string; focus?:
               ${layer === k ? "bg-[var(--panel2)] text-[var(--txt)] border-[var(--line)]"
                             : "border-[var(--line)] text-[var(--dim)] hover:text-[var(--txt)]"}`}>{l}</button>
         ))}
+        {memF && (
+          <span className="flex items-center gap-1.5 px-[11px] py-1.5 rounded-[9px] text-[12.5px] font-medium bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/40">
+            {memF.label || memF.category || memF.dimension}
+            <button onClick={() => setMemF(null)} className="hover:opacity-70"><X size={13} /></button>
+          </span>
+        )}
       </div>
       {mems.length ? (<>
         {slice.map((m) => <MemoryCard key={m.id} m={m} highlight={hl === m.id} onDelete={() => del(m)} />)}
