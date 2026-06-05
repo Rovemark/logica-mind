@@ -21,6 +21,10 @@ The dashboard ships fully translated into **12 languages**, so the people using 
 
 Together these cover the large majority of the world's internet and developer population. Switch language (and theme) from **Settings**; the choice is remembered in the browser.
 
+![The dashboard in Simplified Chinese](img/i18n-zh.png)
+
+The same dashboard in 中文 — the whole UI, and the graph's relationship labels (工作于 = "works at"), are localized.
+
 ## What's translated
 
 - **Every UI string** — all ~420 keys, with full parity across all 12 languages (a missing key, if any, falls back to English).
@@ -31,6 +35,10 @@ Together these cover the large majority of the world's internet and developer po
 ## Right-to-left (Arabic)
 
 For Arabic the entire layout mirrors: `<html dir="rtl">` flips the chrome (the sidebar moves to the right, text right-aligns, reading order reverses) — exactly what a native Arabic speaker expects. The knowledge-graph canvas itself is spatial data, so it isn't mirrored. `<html lang>` is set for every language for accessibility and correct font shaping.
+
+![The dashboard in Arabic — right-to-left](img/i18n-ar-rtl.png)
+
+Arabic (`ar`): the sidebar moves to the right and the whole interface mirrors. Full RTL is the correct, expected behaviour — not a bug.
 
 ## How it works
 
