@@ -23,9 +23,10 @@ All notable changes to Logica Mind. Format loosely follows
   B?". Predicate labels localize (pt/es) with a graceful fallback.
 
 ### Internationalization & UX
-- **9 languages** — added 中文, हिन्दी, العربية (RTL), Français, 日本語 and Deutsch
-  to English / Português / Español, with full key parity (420 keys each). Even
-  the graph's relationship labels localize. Arabic flips the layout to RTL.
+- **12 languages** — added 中文, 日本語, हिन्दी, বাংলা, العربية (RTL), Français,
+  Deutsch, Русский and Bahasa Indonesia to English / Português / Español, with
+  full key parity (420 keys each). Even the graph's relationship labels localize.
+  Arabic flips the layout to RTL; first visit auto-matches the browser language.
 - **Clean URLs** — dropped the `#`: real history routing (`/graph/org:acme`),
   deep links and refresh work via the server's app-shell fallback.
 - Hover tooltips on every graph control.
