@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ALL, PALETTE, type NsItem, type Memory } from "./api";
 import { VIEWS, type ViewKey } from "./nav";
-import { LangCtx, makeT, getLang, saveLang, type Lang } from "./i18n";
+import { LangCtx, makeT, getLang, saveLang, loadLang, type Lang } from "./i18n";
 import { MemoryOpenCtx } from "./memctx";
 import { NavCtx, type MemFilter } from "./navctx";
 import MemoryDetail from "./components/MemoryDetail";
@@ -57,12 +57,17 @@ export default function App() {
   const [lang, setLangState] = useState<Lang>(getLang());
   const [openMem, setOpenMem] = useState<Memory | null>(null);
   const colorsRef = useRef<Record<string, string>>({});
-  const t = useMemo(() => makeT(lang), [lang]);
+  const [langRev, setLangRev] = useState(0);
+  const t = useMemo(() => makeT(lang), [lang, langRev]);
   const setLang = (l: Lang) => { saveLang(l); setLangState(l); };
-  // right-to-left for Arabic; also set <html lang> for a11y
+  // load the active language's chunk on demand, then re-render with it; also set
+  // RTL for Arabic and <html lang> for a11y
   useEffect(() => {
+    let live = true;
+    loadLang(lang).then(() => { if (live) setLangRev((r) => r + 1); });
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
     document.documentElement.lang = lang;
+    return () => { live = false; };
   }, [lang]);
 
   const loadNs = () => api.namespaces().then((d) => {
