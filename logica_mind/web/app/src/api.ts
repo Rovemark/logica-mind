@@ -1,0 +1,115 @@
+// Tiny typed client for the Python JSON API (same-origin; dev proxies /api).
+
+export type Layer = "episodic" | "semantic" | "graph" | "user";
+export const LAYERS: Layer[] = ["episodic", "semantic", "graph", "user"];
+
+export const PALETTE = [
+  "#7c9cff", "#4ade80", "#f59e0b", "#a78bfa", "#f472b6",
+  "#22d3ee", "#fb7185", "#a3e635", "#e879f9", "#38bdf8",
+];
+
+export interface Memory {
+  id: string; namespace: string; content: string; layer: Layer;
+  importance?: number; tags?: string[]; metadata?: Record<string, any>;
+  created_at?: string; access_count?: number;
+}
+export interface Stats { episodic: number; semantic: number; graph: number; user: number; total: number; }
+export interface NsItem { namespace: string; total: number; stats: Stats; }
+export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; }
+export interface GraphLink { source: string; target: string; label: string; confidence?: number; valid?: boolean; }
+export interface GraphData { nodes: GraphNode[]; links: GraphLink[]; }
+export interface Relation { source: string; target: string; label: string; confidence?: number; valid?: boolean; valid_from?: string; valid_to?: string; }
+export interface RecallHit { score: number; components?: Record<string, any>; memory: Memory; }
+export interface Community { nodes: string[]; size: number; facts: string[]; }
+
+const j = async (u: string) => {
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(`${r.status} ${u}`);
+  return r.json();
+};
+const nsq = (ns: string) => `namespace=${encodeURIComponent(ns)}`;
+
+export const api = {
+  namespaces: (): Promise<{ namespaces: NsItem[] }> => j(`/api/namespaces`),
+  stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),
+  recall: (ns: string, q: string, limit = 15): Promise<{ query: string; results: RecallHit[] }> =>
+    j(`/api/recall?${nsq(ns)}&q=${encodeURIComponent(q)}&limit=${limit}`),
+  memories: (ns: string, layer?: string): Promise<{ memories: Memory[] }> =>
+    j(`/api/memories?${nsq(ns)}${layer ? `&layer=${layer}` : ""}`),
+  graph: (ns: string, history: boolean, at?: string | null): Promise<GraphData> =>
+    j(`/api/graph?${nsq(ns)}&history=${history ? 1 : 0}${at ? `&at=${encodeURIComponent(at)}` : ""}`),
+  timerange: (ns: string): Promise<{ min: string | null; max: string | null }> => j(`/api/timerange?${nsq(ns)}`),
+  communities: (ns: string): Promise<{ namespace: string; communities: Community[] }> => j(`/api/communities?${nsq(ns)}`),
+  reflect: (ns: string): Promise<{ namespace: string; insight: string }> => j(`/api/reflect?${nsq(ns)}`),
+  user: (ns: string): Promise<{ namespace: string; profile: string }> => j(`/api/user?${nsq(ns)}`),
+  calendar: (ns: string): Promise<{ days: Record<string, Stats> }> => j(`/api/calendar?${nsq(ns)}`),
+  day: (ns: string, date: string): Promise<{ date: string; memories: Memory[] }> =>
+    j(`/api/day?${nsq(ns)}&date=${date}`),
+  node: (ns: string, name: string): Promise<{ name: string; type: string; aliases: string[]; connected: string[]; memories: Memory[] }> =>
+    j(`/api/node?${nsq(ns)}&name=${encodeURIComponent(name)}`),
+  sessions: (ns: string): Promise<{ sessions: SessionItem[] }> => j(`/api/sessions?${nsq(ns)}`),
+  sessionMemories: (ns: string, session: string): Promise<{ memories: Memory[] }> =>
+    j(`/api/memories?${nsq(ns)}&session=${encodeURIComponent(session)}`),
+  exportNs: (ns: string): Promise<{ namespace: string; count: number; memories: Memory[] }> => j(`/api/export?${nsq(ns)}`),
+  provenance: (ns: string, id: string): Promise<{ memory?: Memory; from: Memory[]; supersedes?: string }> =>
+    j(`/api/provenance?${nsq(ns)}&id=${encodeURIComponent(id)}`),
+  scan: (path?: string): Promise<any> => j(`/api/scan${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  bundle: (ns: string): Promise<any> => j(`/api/bundle?${nsq(ns)}`),
+  peers: (ns: string): Promise<{ peers: PeerPair[] }> => j(`/api/peers?${nsq(ns)}`),
+  peerCard: (ns: string, observer: string, observed: string): Promise<{ card: string }> =>
+    j(`/api/peer_card?${nsq(ns)}&observer=${encodeURIComponent(observer)}&observed=${encodeURIComponent(observed)}`),
+  contradictions: (ns: string): Promise<{ contradictions: Contradiction[] }> => j(`/api/contradictions?${nsq(ns)}`),
+  diff: (ns: string, since: string): Promise<{ diff: DiffItem[] }> => j(`/api/diff?${nsq(ns)}&since=${since}`),
+
+  dreams: (ns: string, limit = 50): Promise<{ dreams: DreamReport[] }> =>
+    j(`/api/dreams?${nsq(ns)}&limit=${limit}`),
+  contested: (ns: string): Promise<{ contested: ContestedPair[] }> => j(`/api/contested?${nsq(ns)}`),
+  surprises: (ns: string): Promise<{ surprises: SurpriseEvent[] }> => j(`/api/surprises?${nsq(ns)}`),
+  forgetCurve: (ns: string): Promise<{ curve: ForgetCurveEntry[] }> => j(`/api/forget_curve?${nsq(ns)}`),
+  forgetAbout: (ns: string, entity: string) => post("/api/forget_about", { namespace: wns(ns) || ns, entity }),
+  staleBeliefs: (ns: string, min_age_days = 30): Promise<{ stale: StaleBelief[] }> =>
+    j(`/api/stale?${nsq(ns)}&min_age_days=${min_age_days}`),
+  claudeImport: (): Promise<{ imported: number }> => j(`/api/sessions/claude-import`),
+  askAboutUser: (ns: string, question: string): Promise<{ answer?: string; insight?: string }> =>
+    j(`/api/ask_user?${nsq(ns)}&q=${encodeURIComponent(question)}`),
+
+  demoStatus: (): Promise<{ present: boolean; count: number }> => j(`/api/demo`),
+
+  // ---- writes (loopback-trusted, or bearer when remote) ----
+  seedDemo: () => post("/api/demo/seed", {}),
+  clearDemo: (): Promise<{ ok: boolean; deleted: number }> => post("/api/demo/clear", {}),
+  importBundle: (ns: string, bundle: any) => post("/api/import-bundle", { namespace: wns(ns) || ns, bundle }),
+  renameSession: (session_id: string, name: string) => post("/api/sessions/rename", { session_id, name }),
+  clearMemories: (ns: string, opts: { layer?: string; older_than_days?: number; purge_all?: boolean }): Promise<ClearResult> =>
+    post<ClearResult>("/api/clear", { namespace: wns(ns) || ns, ...opts }),
+  remember: (ns: string, text: string) => post("/api/remember", { namespace: wns(ns), text }),
+  observeUser: (ns: string, text: string) => post("/api/observe_user", { namespace: wns(ns), text }),
+  observePeer: (ns: string, observer: string, observed: string, text: string) =>
+    post("/api/observe_peer", { namespace: wns(ns), observer, observed, text }),
+  forget: (ns: string, id: string) => post("/api/forget", { namespace: wns(ns), id }),
+};
+
+export interface SessionParticipant { name: string; role?: string; metrics?: Record<string, any>; }
+export interface SessionRecordMeta { title?: string; status?: string; participants?: SessionParticipant[]; metrics?: Record<string, any>; links?: Record<string, string>; }
+export interface SessionItem { id: string; namespace: string; count: number; first: string | null; last: string | null; source?: string | null; name?: string; continuity?: number; record?: SessionRecordMeta | null; }
+export interface DreamReport { timestamp: string; namespace: string; episodic_processed: number; distilled: number; graph_edges: number; reinforced: number; forgotten: number; derived: number; inferred: number; user_synthesized: boolean; }
+export interface ContestedPair { current: Memory; superseded: Memory; confidence_new: number; confidence_old: number; surprise_score: number; }
+export interface SurpriseEvent extends Memory { surprise_score: number; }
+export interface ForgetCurveEntry { id: string; content: string; current_retention: number; current_strength: number; projected_strength_7d: number; days_since_recall: number; importance: number; layer: string; }
+export interface PeerPair { namespace: string; observer: string; observed: string; count: number; }
+export interface Contradiction { subject: string; predicate: string; history: { object: string; valid_from?: string; valid_to?: string; current: boolean }[]; }
+export interface DiffItem { content: string; layer: Layer; created_at: string; namespace?: string; }
+
+// when "all" is selected, a write has no single target → let the server use its
+// default namespace; otherwise scope to the selected agent.
+const wns = (ns: string) => (ns === ALL ? undefined : ns);
+const post = async <T = any>(path: string, body: any): Promise<T> => {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+};
+
+export interface StaleBelief { id: string; content: string; age_days: number; confidence: number; namespace?: string; }
+export interface ClearResult { ok: boolean; deleted: number; namespace: string; }
+
+export const tShort = (s?: string | null) => (s || "").replace("T", " ").replace("Z", "").slice(0, 16);
+export const ALL = "__all__";

@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+:root {
+  /* dark is the default (applies even before JS sets data-theme) */
+  --bg: #0a0d14; --bg2: #0d1119; --panel: #11161f; --panel2: #161c28; --line: #222a3a;
+  --txt: #e8eef7; --dim: #8a96a9; --dim2: #5a6477; --accent: #7c9cff; --accent2: #a78bfa;
+  --good: #4ade80; --gold: #fbbf24; --warn: #fb7185;
+  --episodic: #f59e0b; --semantic: #7c9cff; --graph: #a78bfa; --user: #4ade80;
+  --shadow: 0 10px 40px rgba(0, 0, 0, .45);
+  --graph-bg: radial-gradient(circle at 50% 35%, #121a2e 0, #0a0d14 72%);
+  --glass-bg: #0b0e14ee;
+}
+:root[data-theme="light"] {
+  --bg: #f6f8fc; --bg2: #ffffff; --panel: #ffffff; --panel2: #eef1f7; --line: #e1e6f0;
+  --txt: #182032; --dim: #5b647a; --dim2: #95a0b5; --accent: #4f6bff; --accent2: #8b5cf6;
+  --good: #16a34a; --gold: #c2740a; --warn: #e11d48;
+  --episodic: #c2740a; --semantic: #4f6bff; --graph: #8b5cf6; --user: #16a34a;
+  --shadow: 0 10px 38px rgba(30, 41, 71, .12);
+  --graph-bg: radial-gradient(circle at 50% 30%, #ffffff 0, #e9eef7 78%);
+  --glass-bg: #ffffffe8;
+}
+
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--txt); overflow: hidden; -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #222b3d; border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* layer accents reused as utility-ish classes */
+.lyr-episodic { color: var(--episodic); }
+.lyr-semantic { color: var(--semantic); }
+.lyr-graph { color: var(--graph); }
+.lyr-user { color: var(--user); }
+.bg-episodic { background: rgba(245, 158, 11, .15); color: var(--episodic); }
+.bg-semantic { background: rgba(124, 156, 255, .15); color: var(--semantic); }
+.bg-graph { background: rgba(167, 139, 250, .15); color: var(--graph); }
+.bg-user { background: rgba(74, 222, 128, .15); color: var(--user); }
+
+.card-surface { background: var(--panel); border: 1px solid var(--line); border-radius: 13px; }
+/* subtle theme-aware panel gradient (insight/peer cards) — dark in dark, light in light */
+.panel-grad { background: linear-gradient(135deg, var(--panel2), var(--panel)); border: 1px solid var(--line); }
+/* glass overlays (graph controls, node panel, scrubber, mobile tab bar) follow
+   the theme — light translucent in light, dark translucent in dark */
+.glass { background: var(--glass-bg); backdrop-filter: blur(12px); }
+.fadein { animation: fadein .25s ease; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+input { font: inherit; }
+button { font: inherit; cursor: pointer; }

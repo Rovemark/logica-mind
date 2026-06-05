@@ -1,0 +1,21 @@
+Logica Mind
+Copyright 2026 Rovemark
+
+This product is licensed under the Apache License, Version 2.0 (the "License");
+you may not use this software except in compliance with the License. A copy of
+the License is included in the LICENSE file at the root of this repository.
+
+---
+
+Logica Mind unifies design ideas from several independent, third-party projects
+for the purpose of feature parity and interoperability. These projects are NOT
+bundled with, endorsed by, or affiliated with this project. All trademarks and
+copyrights belong to their respective owners:
+
+  - Honcho            (Plastic Labs)
+  - Zep / Graphiti    (Zep)
+  - Voyage AI         (Voyage AI)
+  - Mem0              (Mem0)
+
+References to these projects in documentation describe interoperability and
+comparison only.

@@ -1,0 +1,45 @@
+name: CI
+
+# Runs the offline test suite and builds the dashboard. The suite needs no API
+# keys (SQLite + hashing embedder); the production backends (Supabase/Postgres/
+# Redis/Voyage/OpenAI) are exercised by stubbed/mocked tests, not live services.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (editable, no extras needed for the offline suite)
+        run: pip install -e .
+      - name: Run tests
+        run: pip install pytest && pytest -q
+
+  ui-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build the dashboard
+        working-directory: logica_mind/web/app
+        run: |
+          npm ci || npm install
+          npm run build
+      - name: Fail if the committed dist is stale
+        run: |
+          if ! git diff --quiet -- logica_mind/web/dist; then
+            echo "::error::logica_mind/web/dist is out of date — run 'npm run build' and commit it."
+            git --no-pager diff --stat -- logica_mind/web/dist
+            exit 1
+          fi

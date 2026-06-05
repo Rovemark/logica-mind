@@ -1,0 +1,137 @@
+"""MultiStore — write to several backends, merge on read.
+
+This is the "multi-armazém" switch: turn on SQLite + Obsidian + Supabase at once.
+Writes fan out to every store. Reads query each store, merge by id, and keep the
+best score. The first store is treated as primary for get()/delete() fast paths,
+but delete() is attempted on all so nothing is orphaned.
+"""
+from __future__ import annotations
+
+import sys
+
+from typing import Dict, List, Optional
+
+from ..types import Memory, SearchResult
+from .base import Store
+
+
+class MultiStore(Store):
+    name = "multi"
+
+    def __init__(self, stores: List[Store]):
+        if not stores:
+            raise ValueError("MultiStore needs at least one store.")
+        self.stores = stores
+
+    def add(self, memories: List[Memory]) -> None:
+        for s in self.stores:
+            try:
+                s.add(memories)
+            except Exception as e:  # one backend down shouldn't lose the write
+                print(f"[logica-mind] MultiStore.add: {s.name} failed: {e}", file=sys.stderr)
+
+    def search(self, namespace, query_embedding, query_text, layers=None, limit=20, metadata_filter=None) -> List[SearchResult]:
+        merged: Dict[str, SearchResult] = {}
+        emb_by_id: Dict[str, list] = {}
+        for s in self.stores:
+            try:
+                for r in s.search(namespace, query_embedding, query_text, layers, limit, metadata_filter):
+                    mid = r.memory.id
+                    if r.memory.embedding and mid not in emb_by_id:
+                        emb_by_id[mid] = r.memory.embedding
+                    prev = merged.get(mid)
+                    if prev is None or r.score > prev.score:
+                        merged[mid] = r
+            except Exception as e:
+                print(f"[logica-mind] MultiStore.search: {s.name} failed: {e}", file=sys.stderr)
+        results = sorted(merged.values(), key=lambda r: r.score, reverse=True)[:limit]
+
+        # A winner can come from a vector-less store (e.g. Obsidian's lexical hit
+        # outscoring the vector store). Back-fill its embedding so downstream
+        # rerankers (MMR) don't silently drop it for lacking a vector.
+        for r in results:
+            if r.memory.embedding:
+                continue
+            emb = emb_by_id.get(r.memory.id)
+            if emb is None:
+                for s in self.stores:
+                    try:
+                        m = s.get(namespace, r.memory.id)
+                    except Exception:
+                        m = None
+                    if m and m.embedding:
+                        emb = m.embedding
+                        break
+            if emb:
+                r.memory.embedding = emb
+        return results
+
+    def get(self, namespace: str, memory_id: str) -> Optional[Memory]:
+        for s in self.stores:
+            m = s.get(namespace, memory_id)
+            if m:
+                return m
+        return None
+
+    def delete(self, namespace: str, memory_id: str) -> bool:
+        deleted = False
+        for s in self.stores:
+            try:
+                deleted = s.delete(namespace, memory_id) or deleted
+            except Exception as e:
+                print(f"[logica-mind] MultiStore.delete: {s.name} failed: {e}", file=sys.stderr)
+        return deleted
+
+    def all(self, namespace, layers=None) -> List[Memory]:
+        seen: Dict[str, Memory] = {}
+        for s in self.stores:
+            for m in s.all(namespace, layers):
+                seen.setdefault(m.id, m)
+        return list(seen.values())
+
+    def namespaces(self) -> List[str]:
+        out = set()
+        for s in self.stores:
+            try:
+                out.update(s.namespaces())
+            except Exception:
+                pass
+        return sorted(out)
+
+    def timerange(self, namespace, layers=None):
+        # fold each child's cheap MIN/MAX instead of materializing rows via all()
+        lo = hi = None
+        for s in self.stores:
+            try:
+                a, b = s.timerange(namespace, layers)
+            except Exception:
+                continue
+            if a and (lo is None or a < lo):
+                lo = a
+            if b and (hi is None or b > hi):
+                hi = b
+        return (lo, hi)
+
+    def delete_layers(self, namespace, layers=None) -> int:
+        # delete from every backend; report the max removed by any one of them
+        # (they hold the same logical set, so summing would double-count)
+        counts = []
+        for s in self.stores:
+            try:
+                counts.append(s.delete_layers(namespace, layers))
+            except Exception as e:
+                print(f"[logica-mind] MultiStore.delete_layers: {s.name} failed: {e}", file=sys.stderr)
+        return max(counts) if counts else 0
+
+    def touch(self, namespace: str, ids: List[str]) -> None:
+        # each child's touch is update-only, so this never inserts into a backend
+        # that didn't already hold the memory (no write amplification / leakage)
+        for s in self.stores:
+            try:
+                s.touch(namespace, ids)
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        for s in self.stores:
+            s.close()

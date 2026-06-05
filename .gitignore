@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+/build/
+/dist/                 # python sdist/wheel build (root-anchored, so it does NOT
+                       # match logica_mind/web/dist — the BUILT dashboard ships)
+.pytest_cache/
+.venv/
+venv/
+.env
+
+# local SQLite stores / demo databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# runtime sidecars written next to the store (regenerated; may contain local data)
+*_session_names.json
+*_dream_journal.json
+
+# node / vite UI dev tree (the build output lives in logica_mind/web/dist, tracked)
+node_modules/
+logica_mind/web/app/dist/
+logica_mind/web/app/.vite/
+
+# misc
+.DS_Store
+*.log
+
+# internal-only docs (kept locally, never published)
+/FEATURES.md
+/ROADMAP.md
+/ARCHITECTURE.md
