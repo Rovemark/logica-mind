@@ -4,7 +4,7 @@ A self-hosted web dashboard for browsing, searching, and curating everything in 
 
 The dashboard is a single-page app served by Python's standard-library `http.server`, backed by a live `LogicaMind` instance and its store. There is nothing to deploy and no cloud account to create: it reads the same SQLite file your app writes to, so by default (SQLite store + hashing embedder) it runs fully offline and zero-key.
 
-![Overview](./img/dashboard-overview.png)
+![Overview](./img/overview-home.png)
 
 ## Running it
 

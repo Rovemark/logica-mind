@@ -257,7 +257,7 @@ Português / Español.
   </tr>
   <tr>
     <td width="50%"><img src="docs/img/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
-    <td width="50%"><img src="docs/img/dashboard-overview.png" alt="Overview — layer counts and insights"><br><sub><b>Overview</b> — per-layer counts, recent activity and synthesized insights.</sub></td>
+    <td width="50%"><img src="docs/img/overview-home.png" alt="Overview — layer counts and insights"><br><sub><b>Overview</b> — per-layer counts, recent activity and synthesized insights.</sub></td>
   </tr>
 </table>
 
