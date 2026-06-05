@@ -174,6 +174,11 @@ def _is_internal(m) -> bool:
     return "alias" in (m.tags or [])
 
 
+# in-process API metrics for the Analytics view — the dashboard's server
+# self-measures the requests it serves (count, latency, errors). Reset per process.
+_OPS = {"requests": 0, "errors": 0, "total_ms": 0.0}
+
+
 class _Http400(Exception):
     """A client-input error → 400, kept distinct from a server-side 500 so a bad
     query param (e.g. limit=abc) returns a clean 400 instead of leaking a 500."""
@@ -240,6 +245,16 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
 
         def _json(self, obj, code=200):
             self._send(code, json.dumps(obj).encode("utf-8"), "application/json")
+            # self-measure API ops (request count, latency, errors) for the
+            # Analytics view — counted once per request, /api/ only
+            t0 = getattr(self, "_t0", None)
+            if t0 is not None and self.path.startswith("/api/"):
+                import time as _t
+                _OPS["requests"] += 1
+                _OPS["total_ms"] += (_t.time() - t0) * 1000.0
+                if code >= 400:
+                    _OPS["errors"] += 1
+                self._t0 = None
 
         def _body(self) -> dict:
             try:
@@ -251,6 +266,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 return {}
 
         def do_POST(self):
+            import time as _t
+            self._t0 = _t.time()
             parsed = urlparse(self.path)
             path = parsed.path
             if not allow_writes:
@@ -375,6 +392,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 self._json({"error": str(e)}, 500)
 
         def do_GET(self):
+            import time as _t
+            self._t0 = _t.time()
             parsed = urlparse(self.path)
             path, qs = parsed.path, parse_qs(parsed.query)
             ns = first(qs, "namespace")
@@ -784,6 +803,85 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 elif path == "/api/health":
                     self._json({"ok": True, "store": getattr(mind.store, "name", "?"),
                                 "namespaces": len(mind.store.namespaces())})
+
+                elif path == "/api/analytics":
+                    # everything the Analytics view needs, in one call (all real data)
+                    import datetime as _dt
+                    names = mind.store.namespaces() if is_all else [ns]
+                    by_layer = {l.value: 0 for l in MemoryLayer}
+                    by_source, by_day, sessions, ns_rows = {}, {}, set(), {}
+                    entities_total = relations_total = contradictions_total = 0
+                    for nm in names:
+                        ent = facts = rel = 0
+                        last = None
+                        day_spark = {}
+                        for m in mind.store.all(nm):
+                            if _is_internal(m):
+                                continue
+                            md = m.metadata or {}
+                            lv = m.layer.value
+                            by_layer[lv] = by_layer.get(lv, 0) + 1
+                            src = md.get("source")
+                            if src:
+                                by_source[src] = by_source.get(src, 0) + 1
+                            d = (m.created_at or "")[:10]
+                            if d:
+                                by_day[d] = by_day.get(d, 0) + 1
+                                day_spark[d] = day_spark.get(d, 0) + 1
+                            if md.get("session"):
+                                sessions.add((nm, md["session"]))
+                            c = m.created_at or ""
+                            if c and (last is None or c > last):
+                                last = c
+                            if m.layer == MemoryLayer.GRAPH and md.get("subject"):
+                                rel += 1
+                            elif lv in ("semantic", "user"):
+                                facts += 1
+                        # entities + contradictions via the graph
+                        try:
+                            sub = mind.for_namespace(nm)
+                            ent = len(sub.graph_nodes())
+                            relations_total += rel
+                            entities_total += ent
+                            contradictions_total += len(sub.contradictions())
+                        except Exception:
+                            pass
+                        total_ns = sum(1 for m in mind.store.all(nm) if not _is_internal(m))
+                        # last-7-day sparkline for the Context-Lake-style row
+                        spark = []
+                        base = _dt.datetime.now(_dt.timezone.utc)
+                        for i in range(13, -1, -1):
+                            dd = (base - _dt.timedelta(days=i)).strftime("%Y-%m-%d")
+                            spark.append(day_spark.get(dd, 0))
+                        ns_rows[nm] = {"namespace": nm, "total": total_ns, "entities": ent,
+                                       "facts": facts, "relations": rel, "last": last, "spark": spark}
+                    # 30-day timeseries (fill gaps with 0)
+                    series = []
+                    base = _dt.datetime.now(_dt.timezone.utc)
+                    for i in range(29, -1, -1):
+                        dd = (base - _dt.timedelta(days=i)).strftime("%Y-%m-%d")
+                        series.append({"date": dd, "count": by_day.get(dd, 0)})
+                    reqs = _OPS["requests"]
+                    self._json({
+                        "totals": {
+                            "memories": sum(by_layer.values()),
+                            **by_layer,
+                            "namespaces": len(names),
+                            "entities": entities_total,
+                            "relations": relations_total,
+                            "sessions": len(sessions),
+                            "contradictions": contradictions_total,
+                        },
+                        "timeseries": series,
+                        "by_source": sorted(({"source": k, "count": v} for k, v in by_source.items()),
+                                            key=lambda x: x["count"], reverse=True),
+                        "by_namespace": sorted(ns_rows.values(), key=lambda x: x["total"], reverse=True),
+                        "ops": {
+                            "requests": reqs,
+                            "avg_latency_ms": round(_OPS["total_ms"] / reqs, 1) if reqs else 0,
+                            "error_rate": round(_OPS["errors"] / reqs * 100, 2) if reqs else 0,
+                        },
+                    })
 
                 elif path == "/api/metrics":
                     agg = {l.value: 0 for l in MemoryLayer}

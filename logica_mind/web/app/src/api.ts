@@ -21,6 +21,14 @@ export interface GraphData { nodes: GraphNode[]; links: GraphLink[]; }
 export interface Relation { source: string; target: string; label: string; confidence?: number; valid?: boolean; valid_from?: string; valid_to?: string; }
 export interface RecallHit { score: number; components?: Record<string, any>; memory: Memory; }
 export interface Community { nodes: string[]; size: number; facts: string[]; }
+export interface AnalyticsLakeRow { namespace: string; total: number; entities: number; facts: number; relations: number; last: string | null; spark: number[]; }
+export interface AnalyticsData {
+  totals: Record<string, number>;
+  timeseries: { date: string; count: number }[];
+  by_source: { source: string; count: number }[];
+  by_namespace: AnalyticsLakeRow[];
+  ops: { requests: number; avg_latency_ms: number; error_rate: number };
+}
 
 const j = async (u: string) => {
   const r = await fetch(u);
@@ -32,6 +40,7 @@ const nsq = (ns: string) => `namespace=${encodeURIComponent(ns)}`;
 export const api = {
   namespaces: (): Promise<{ namespaces: NsItem[] }> => j(`/api/namespaces`),
   stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),
+  analytics: (ns: string): Promise<AnalyticsData> => j(`/api/analytics?${nsq(ns)}`),
   recall: (ns: string, q: string, limit = 15): Promise<{ query: string; results: RecallHit[] }> =>
     j(`/api/recall?${nsq(ns)}&q=${encodeURIComponent(q)}&limit=${limit}`),
   memories: (ns: string, layer?: string): Promise<{ memories: Memory[] }> =>

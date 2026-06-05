@@ -196,11 +196,17 @@ logica-mind mcp        # run as an MCP server over stdio
 logica-mind ui         # -> http://127.0.0.1:8420
 ```
 
-A self-hosted, single-page dashboard (zero external services) with **11 views**:
-Overview · Graph · Memories · Calendar (activity heatmap) · Sessions · User model ·
-Peers · Changes (contradictions + changelog) · Insights · Workspace (codebase DNA) ·
-Dreams (forgetting curve, contested beliefs, dream journal). Dark / light themes,
-English / Português / Español.
+A self-hosted, single-page dashboard (zero external services) with **12 views**:
+Overview · **Analytics** · Graph · Memories · Calendar (activity heatmap) ·
+Sessions · User model · Peers · Changes (contradictions + changelog) · Insights ·
+Workspace (codebase DNA) · Dreams (forgetting curve, contested beliefs, dream
+journal). Dark / light themes, English / Português / Español.
+
+<div align="center">
+  <img src="docs/dashboard-analytics.png" alt="Logica Mind dashboard — analytics" width="100%">
+  <br>
+  <em>The Analytics view: usage, activity and reliability — added-over-time, distribution by layer / source / agent, and a per-agent memory table with live sparklines.</em>
+</div>
 
 <table>
   <tr>

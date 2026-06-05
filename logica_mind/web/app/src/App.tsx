@@ -12,6 +12,7 @@ import MemoryCard from "./components/MemoryCard";
 import Composer from "./components/Composer";
 import Settings from "./components/Settings";
 import Overview from "./views/Overview";
+import Analytics from "./views/Analytics";
 import GraphView from "./views/GraphView";
 import Memories from "./views/Memories";
 import Calendar from "./views/Calendar";
@@ -88,7 +89,7 @@ export default function App() {
   const onView = (v: ViewKey) => { setView(v); setQ(""); closeDrawer(); writeHash(v, ns); };
   const onNs = (n: string) => { setNs(n); closeDrawer(); writeHash(view, n); };
 
-  const View = { overview: Overview, graph: GraphView, memories: Memories, calendar: Calendar, sessions: Sessions, user: UserModel, peers: Peers, changes: Changes, insights: Insights, workspace: Workspace, dreams: Dreams }[view];
+  const View = { overview: Overview, analytics: Analytics, graph: GraphView, memories: Memories, calendar: Calendar, sessions: Sessions, user: UserModel, peers: Peers, changes: Changes, insights: Insights, workspace: Workspace, dreams: Dreams }[view];
 
   return (
     <LangCtx.Provider value={{ lang, setLang, t }}>
