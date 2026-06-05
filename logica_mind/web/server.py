@@ -216,6 +216,20 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
         """The namespaces a read should span: all of them in __all__ mode, else one."""
         return mind.store.namespaces() if is_all else [ns]
 
+    def _user_ns(ns, is_all):
+        """The dialectic user model is about ONE namespace. In __all__ mode pick the
+        namespace that actually HAS a profile (the richest one) — and resolve it the
+        SAME way for both the displayed profile and the ask box, so they never point
+        at different users (the bug where the shown profile and the answer disagreed)."""
+        if not is_all:
+            return ns
+        best, best_len = mind.namespace, -1
+        for n in mind.store.namespaces():
+            p = mind.for_namespace(n).user_profile() or ""
+            if len(p) > best_len:
+                best, best_len = n, len(p)
+        return best
+
     # GET endpoints that expose memory CONTENT (or spend LLM $) require auth on a
     # non-loopback caller — loopback stays trusted so the local dashboard works
     # with zero config. Only the namespace list (counts, no content) is anonymous;
@@ -771,19 +785,13 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                 "insight": mind.for_namespace(tgt).reflect(window=12, store_result=False)})
 
                 elif path == "/api/user":
-                    target = ns
-                    if is_all:
-                        names = [n["namespace"] for n in mind.list_namespaces()]
-                        target = names[0] if names else mind.namespace
+                    target = _user_ns(ns, is_all)
                     self._json({"namespace": target, "profile": mind.for_namespace(target).user_profile()})
 
                 elif path == "/api/ask_user":
-                    # dialectic query is about ONE user; in __all__ mode fall back to
-                    # the first real namespace (mind.namespace is the empty default)
-                    tgt = ns
-                    if is_all:
-                        nss = mind.store.namespaces()
-                        tgt = nss[0] if nss else mind.namespace
+                    # dialectic query is about ONE user; in __all__ mode resolve to the
+                    # SAME namespace the profile is shown from (the richest one)
+                    tgt = _user_ns(ns, is_all)
                     q = first(qs, "q")
                     if not q:
                         return self._json({"error": "q required"}, 400)
