@@ -51,3 +51,15 @@ body {
 
 input { font: inherit; }
 button { font: inherit; cursor: pointer; }
+
+/* RTL (Arabic): the whole layout mirrors via <html dir="rtl">. Flip the few
+   DIRECTIONAL icons so arrows point the reading way; symmetric icons are left
+   alone. Lucide renders class="lucide lucide-<name>". */
+[dir="rtl"] .lucide-arrow-right,
+[dir="rtl"] .lucide-arrow-left,
+[dir="rtl"] .lucide-corner-up-left,
+[dir="rtl"] .lucide-chevron-right,
+[dir="rtl"] .lucide-chevron-left,
+[dir="rtl"] .lucide-send,
+[dir="rtl"] .lucide-move-right,
+[dir="rtl"] .lucide-log-in { transform: scaleX(-1); }

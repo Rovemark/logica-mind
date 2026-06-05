@@ -33,10 +33,16 @@ function sections(block: string): { title: string; body: string; tokens: number 
 export default function ContextBlock({ ns }: { ns: string }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("launch timeline, priorities and who is involved");
-  const [budget, setBudget] = useState(1200);
+  // remember the chosen budget across reloads (was resetting to the default)
+  const [budget, setBudget] = useState(() => {
+    const s = Number(localStorage.getItem("lm-ctx-budget"));
+    return s && s > 0 ? s : 1200;
+  });
   const [data, setData] = useState<ContextResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => { localStorage.setItem("lm-ctx-budget", String(budget)); }, [budget]);
 
   useEffect(() => {
     let live = true;
