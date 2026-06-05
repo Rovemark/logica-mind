@@ -2,18 +2,11 @@ import { useEffect, useState } from "react";
 import { Brain, Check, Database, Link2, RefreshCw, Search, Sparkles, UserRound } from "lucide-react";
 import type { AddResult } from "../api";
 import { useI18n } from "../i18n";
+import { dimColor } from "../lifearea";
 
 const LAYER_COLOR: Record<string, string> = {
   episodic: "#7c9cff", semantic: "#4ade80", graph: "#f59e0b", user: "#a78bfa",
 };
-// colour a fact by the group of its life/work dimension
-function dimColor(dim?: string | null): string {
-  if (!dim) return "var(--accent2)";
-  if (dim.startsWith("biz_")) return "#4ade80";
-  if (dim.startsWith("project_")) return "#7c9cff";
-  if (dim.startsWith("org_")) return "#22d3ee";
-  return "#a78bfa";
-}
 
 // The "learn" animation: after you add text, show exactly what the engine did
 // with it — extracted facts revealed one by one (a live "memory n/n" counter),
