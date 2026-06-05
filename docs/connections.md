@@ -27,6 +27,8 @@ Nothing here is hand-authored. Add a fact that happens to mention an entity anot
 
 ## In the dashboard
 
+![The Connected panel — derived backlinks for a memory](img/dashboard-connected.png)
+
 Open any memory (click a card) and the note pane shows a **Connected** panel beneath the content:
 
 - **Mentions** — entity chips, coloured by life-area; click one to open it in the graph.

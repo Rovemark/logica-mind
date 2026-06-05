@@ -172,6 +172,12 @@ bundle = mind.export_bundle(secret=k)  # HMAC-signed, portable memory you can mo
 - **Danger-zone controls** — scoped erasure from the dashboard: clear by layer, clear stale (old & untouched), or reset a namespace — all behind a typed confirmation.
 - **A demo you control** — ship empty, load a rich fictional dataset to explore, then clear it with one click (it only removes the demo, never your data).
 
+<div align="center">
+  <img src="docs/img/dashboard-connected.png" alt="The Connected panel — auto-derived backlinks for a memory: mentions, typed relations, and other notes that link here" width="100%">
+  <br>
+  <em>Open any memory and the <b>Connected</b> panel derives its neighborhood — the entities it mentions, the typed relations among them, and the other notes that link here — with no hand-typed links. Click any of them to walk note-to-note.</em>
+</div>
+
 ### 🧰 More than memory — a coding-context server too
 
 The *same package* is also a Logica-Context-class devtools server: a sandboxed
