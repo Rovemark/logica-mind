@@ -30,6 +30,7 @@ New here? Start with **[Installation](installation.md)** → **[Quickstart](quic
 - [Auto-capture hooks](hooks.md) — capture memory automatically across a session
 - [Integrations & SDKs](integrations.md) — LangChain, LlamaIndex, the provider adapter, the TypeScript SDK
 - [Dashboard](dashboard.md) — the self-hosted web UI
+- [Internationalization](internationalization.md) — the 12 UI languages (incl. RTL Arabic)
 - [CLI](cli.md) — the `logica-mind` command line
 
 ### Operations

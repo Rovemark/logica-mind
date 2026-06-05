@@ -136,6 +136,29 @@ mind.dimensions()   # the whole profile, grouped by dimension + Maslow tier
 - **Everywhere** — category + dimension ride on every memory: the Profile view (cards **and** a clickable knowledge-map), the colour-by-area knowledge graph, the `lm_dimensions` MCP tool, `recall`/`remember`, `/api/memories?dimension=`, and the ⌘K search. Full guide: **[Fact categorization](docs/categorization.md)**.
 - **Zero-key option** — categorization needs an LLM; it auto-detects an `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or uses your **local Claude CLI** with no API key at all (`LOGICA_MIND_LLM=claude-cli`). See **[LLM providers & auto-detection](docs/providers.md)**.
 
+### 🕸️ A graph that reasons about itself
+
+A note app's graph is a *picture* of links you typed by hand. Because Logica Mind has a real memory engine underneath — typed predicates, confidence, provenance, temporal validity — its graph is an **instrument**.
+
+```python
+mind.how_related("the billing service", "Priya Nair")
+# the billing service —part_of→ Acme Inc —works_at→ Priya Nair   (a typed, narrated path)
+mind.bridges()            # load-bearing connectors — entities whose removal fragments the graph
+mind.suggested_links()    # predict the missing edge: pairs with a strong shared neighbourhood, no link yet
+```
+
+- **"How is A related to B?"** — a confidence-weighted shortest path as an ordered chain of *typed* hops. The dashboard traces it and spotlights it on the canvas. A hand-linked note graph can't answer this — its links are untyped.
+- **Bridges** — articulation points; the brokers between clusters, often low-degree nodes pure centrality misses.
+- **Suggested links** — Adamic-Adar link prediction proposes the edges you're *missing*. Note tools make you author every link; here the graph proposes them.
+- **Emergent + semantic layers** — beyond explicit edges: **co-mentions** (entities named together) and opt-in **semantic affinity** (similar memory-neighbourhoods), each a toggle.
+- **A professional canvas** — edges hued by relation type with arrows + confidence-weighted width, nodes sized by **PageRank centrality**, a local/ego graph with a depth slider, hover previews, and a top filter bar (colour-by, layers, search-focus, min-confidence, per-relation-type). Full guide: **[Graph intelligence](docs/graph-intelligence.md)**.
+
+<div align="center">
+  <img src="docs/img/dashboard-graph-path.png" alt="Path mode — how is A related to B?, traced and spotlighted on the graph" width="100%">
+  <br>
+  <em>Path mode answers "how is A related to B?" — a typed, narrated chain, spotlighted on the canvas while the rest dims.</em>
+</div>
+
 ### 🤝 Multi-agent native
 
 ```python
@@ -277,7 +300,8 @@ Full guides live in [`docs/`](docs/):
 | [Knowledge graph](docs/knowledge-graph.md) | [Graph intelligence](docs/graph-intelligence.md) | |
 | [Dreaming & lifecycle](docs/dreaming.md) | [User model & peers](docs/user-model-and-peers.md) | [Sessions & run records](docs/sessions-and-records.md) |
 | [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
-| [Dashboard](docs/dashboard.md) | [Portability & privacy](docs/portability-and-privacy.md) | [CLI](docs/cli.md) |
+| [Dashboard](docs/dashboard.md) | [Internationalization](docs/internationalization.md) | [Portability & privacy](docs/portability-and-privacy.md) |
+| [CLI](docs/cli.md) | [Graph intelligence](docs/graph-intelligence.md) | [Connections](docs/connections.md) |
 | [API reference](docs/api-reference.md) | | |
 
 ---
