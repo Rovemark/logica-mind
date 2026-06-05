@@ -287,6 +287,42 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 if path == "/api/remember":
                     created = target.remember(str(body.get("text", "")), session=body.get("session"))
                     self._json({"stored": [c.content for c in created], "count": len(created)})
+                elif path == "/api/add":
+                    # rich "learning" add — runs extraction + dedup + (with an LLM)
+                    # graph linking, then returns exactly what the engine learned so
+                    # the UI can animate it: each created fact (new vs updated), any
+                    # belief it superseded, new graph edges, and dedup/no-op.
+                    text = str(body.get("text", "")).strip()
+                    kind = str(body.get("kind") or "memory")
+                    if not text:
+                        return self._json({"error": "text required"}, 400)
+                    has_llm = bool(getattr(target.llm, "available", False))
+                    if kind == "observation":
+                        mem = target.observe_user(text)
+                        items = ([{"content": mem.content, "layer": "user", "op": "new",
+                                   "superseded": None, "category": None}] if mem else [])
+                        self._json({"ok": True, "namespace": ns, "kind": kind, "llm": has_llm,
+                                    "created": items, "graph_edges": 0,
+                                    "user_updated": bool(mem), "deduped": not bool(mem)})
+                    else:
+                        before = len(target.graph.edges()) if has_llm else 0
+                        created = target.remember(text, build_graph=has_llm, session=body.get("session"))
+                        after = len(target.graph.edges()) if has_llm else 0
+                        items = []
+                        for mm in created:
+                            layer = str(getattr(mm.layer, "value", mm.layer))
+                            if layer == "graph":
+                                continue
+                            md = mm.metadata or {}
+                            items.append({
+                                "content": mm.content, "layer": layer,
+                                "op": "updated" if md.get("supersedes") else "new",
+                                "superseded": (md.get("superseded_belief") or {}).get("content"),
+                                "category": md.get("category"),
+                            })
+                        self._json({"ok": True, "namespace": ns, "kind": kind, "llm": has_llm,
+                                    "created": items, "graph_edges": max(0, after - before),
+                                    "user_updated": False, "deduped": len(items) == 0})
                 elif path == "/api/log":
                     m = target.log(str(body.get("text", "")), role=body.get("role"), session=body.get("session"))
                     self._json({"ok": bool(m), "id": m.id if m else None})

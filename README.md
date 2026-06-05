@@ -78,6 +78,36 @@ mind.serve()                                    # -> http://127.0.0.1:8420
 
 ---
 
+## ✨ How it works — Add. Learn. Retrieve.
+
+You don't write to a database. You hand Logica Mind raw text and it **learns** —
+it extracts the durable facts, reconciles them against what it already knows, and
+only then stores. The dashboard shows you exactly what it learned, live.
+
+<div align="center">
+  <img src="docs/dashboard-learn.png" alt="Logica Mind — watch it learn from a single message" width="100%">
+  <br>
+  <em>Add a message; watch it become memory. Each extracted fact is revealed as it lands, tagged <b>new</b> or <b>updated</b> — and an update strikes through the belief it replaced.</em>
+</div>
+
+When you add `"I usually work from cafés on Fridays, prefer strong flat whites, and start deep-work around 10 AM."`:
+
+| Stage | What happens |
+| --- | --- |
+| **Add** | Raw text in — no schema, no config, one call: `mind.remember(text)`. |
+| **Learn** | With an LLM configured, the message is **decomposed** into atomic durable facts (a café habit, a coffee preference, a working hour). Each is reconciled against existing memory: a genuinely new fact is **added**, a changed one **updates and supersedes** the prior belief, an unchanged one is a **no-op** (deduped). Zero-config (no LLM), the text is captured as one durable memory and still deduped by embedding similarity. |
+| **Retrieve** | On the next question, `recall()` / `context()` return only the relevant memories — ranked, fitted to a token budget. |
+
+This is the difference between a memory that **stores** and one that **learns**: it
+doesn't keep five copies of a fact that drifted — it keeps the current truth and
+the trail of how it got there. Full walkthrough: **[How memory is learned](docs/memory-extraction.md)**.
+
+> Zero-config runs fully offline. Drop an `OPENAI_API_KEY` (or any supported
+> provider) in the environment and Logica Mind **auto-detects it** — fact
+> decomposition and conflict-resolution turn on automatically, no code change.
+
+---
+
 ## ⭐ What no other memory library does
 
 This is the heart of Logica Mind. Everything below is **shipped and tested**.

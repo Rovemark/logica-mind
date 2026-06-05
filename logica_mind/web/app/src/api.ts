@@ -23,6 +23,8 @@ export interface RecallHit { score: number; components?: Record<string, any>; me
 export interface ContextCandidate { score: number; components?: Record<string, any>; included: boolean; memory: Memory; }
 export interface ContextResult { namespace: string; query: string; budget: number; tokens: number; block: string; candidates: ContextCandidate[]; }
 export interface Observation { kind: "hub" | "co_occurrence"; entities: string[]; count: number; shared: string[]; text: string; namespace?: string; }
+export interface AddResultItem { content: string; layer: string; op: "new" | "updated"; superseded?: string | null; category?: string | null; }
+export interface AddResult { ok: boolean; namespace: string; kind: string; llm: boolean; created: AddResultItem[]; graph_edges: number; user_updated: boolean; deduped: boolean; }
 export interface Community { nodes: string[]; size: number; facts: string[]; }
 export interface AnalyticsLakeRow { namespace: string; total: number; entities: number; facts: number; relations: number; last: string | null; spark: number[]; }
 export interface AnalyticsData {
@@ -98,6 +100,8 @@ export const api = {
   clearMemories: (ns: string, opts: { layer?: string; older_than_days?: number; purge_all?: boolean }): Promise<ClearResult> =>
     post<ClearResult>("/api/clear", { namespace: wns(ns) || ns, ...opts }),
   remember: (ns: string, text: string) => post("/api/remember", { namespace: wns(ns), text }),
+  add: (ns: string, text: string, kind: "memory" | "observation"): Promise<AddResult> =>
+    post<AddResult>("/api/add", { namespace: wns(ns), text, kind }),
   observeUser: (ns: string, text: string) => post("/api/observe_user", { namespace: wns(ns), text }),
   observePeer: (ns: string, observer: string, observed: string, text: string) =>
     post("/api/observe_peer", { namespace: wns(ns), observer, observed, text }),
