@@ -1459,6 +1459,74 @@ class LogicaMind:
             "supersedes": (m.metadata or {}).get("supersedes"),
         }
 
+    def connections(self, memory_id: str, limit: int = 8) -> Dict[str, Any]:
+        """Backlinks, but DERIVED — no manual [[wikilinks]] to maintain. For one
+        memory we surface, automatically: (a) the graph entities it mentions, each
+        typed and carrying its life-area; (b) the relations touching those
+        entities; (c) other memories that mention the same entities (the auto-
+        backlink); and (d) sibling facts sharing its category/dimension. Obsidian
+        makes you author links by hand — here the connective tissue is inferred."""
+        import re as _re
+        m = self.store.get(self.namespace, memory_id)
+        if not m:
+            return {}
+        md = m.metadata or {}
+        low = (m.content or "").lower()
+        g = self.graph
+        nodes = g.nodes()                                   # [{name, degree, type}]
+        deg_by = {nd["name"].lower(): nd for nd in nodes}
+
+        # (a) entities this memory mentions — an edge names them directly; a fact
+        # is matched on a word boundary so short names don't over-match.
+        mentioned: List[str] = []
+        if "edge" in (m.tags or []) and (md.get("subject") or md.get("object")):
+            for nm in (md.get("subject"), md.get("object")):
+                if nm and nm not in mentioned:
+                    mentioned.append(nm)
+        else:
+            for nd in nodes:
+                nm = nd["name"]
+                if len(nm) >= 2 and _re.search(r"\b" + _re.escape(nm.lower()) + r"\b", low):
+                    mentioned.append(nm)
+        mentioned = mentioned[:12]
+        ment_low = {nm.lower() for nm in mentioned}
+        edim = self._entity_dimensions([self.namespace]) if mentioned else {}
+        entities = [{
+            "name": nm, "degree": deg_by.get(nm.lower(), {}).get("degree", 0),
+            "type": deg_by.get(nm.lower(), {}).get("type", ""), "dimension": edim.get(nm),
+        } for nm in mentioned]
+
+        # (b) typed relations touching those entities
+        relations: List[Dict[str, Any]] = []
+        if ment_low:
+            for e in g.edges():
+                if e.subject.lower() in ment_low or e.object.lower() in ment_low:
+                    relations.append({"subject": e.subject, "predicate": e.predicate,
+                                      "object": e.object, "valid": e.is_valid, "id": e.id})
+        relations = relations[:limit]
+
+        # (c) auto-backlinks + (d) siblings — single pass over the namespace
+        cat, dim = md.get("category"), md.get("dimension")
+        mentions: List[Memory] = []
+        siblings: List[Memory] = []
+        for other in self.store.all(self.namespace):
+            if other.id == m.id or "edge" in (other.tags or []) or "alias" in (other.tags or []):
+                continue
+            ol = (other.content or "").lower()
+            if ment_low and any(_re.search(r"\b" + _re.escape(e) + r"\b", ol) for e in ment_low):
+                mentions.append(other)
+                continue
+            omd = other.metadata or {}
+            if (cat and omd.get("category") == cat) or (dim and omd.get("dimension") == dim):
+                siblings.append(other)
+
+        def trim(lst: List[Memory]):
+            lst.sort(key=lambda x: x.created_at or "", reverse=True)
+            return [_strip_embedding(x.to_dict()) for x in lst[:limit]]
+
+        return {"entities": entities, "relations": relations,
+                "mentions": trim(mentions), "siblings": trim(siblings)}
+
     def state_at(self, at: str, layers: Optional[List[MemoryLayer]] = None) -> List[Dict[str, Any]]:
         """Memory replay: everything the agent knew at a past instant — what it
         believed when it made a decision. Filters by created_at and, for graph

@@ -46,6 +46,7 @@ export default function App() {
   const [view, setView] = useState<ViewKey>(init.view);
   const [palette, setPalette] = useState(false);
   const [memFilter, setMemFilter] = useState<MemFilter | null>(null);
+  const [graphFocus, setGraphFocus] = useState<{ name: string; n: number } | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [rev, setRev] = useState(0);
   const [lang, setLangState] = useState<Lang>(getLang());
@@ -94,7 +95,9 @@ export default function App() {
 
   return (
     <LangCtx.Provider value={{ lang, setLang, t }}>
-    <NavCtx.Provider value={{ onView, onNs, onMemories: (n, f) => { setMemFilter(f || null); setNs(n); setView("memories"); closeDrawer(); writeHash("memories", n); } }}>
+    <NavCtx.Provider value={{ onView, onNs,
+      onMemories: (n, f) => { setMemFilter(f || null); setNs(n); setView("memories"); closeDrawer(); writeHash("memories", n); },
+      onEntity: (n, name) => { setNs(n); setView("graph"); setGraphFocus({ name, n: Date.now() }); setOpenMem(null); closeDrawer(); writeHash("graph", n); } }}>
     <MemoryOpenCtx.Provider value={openMemory}>
     <div className="grid h-screen grid-cols-[256px_1fr] max-[820px]:grid-cols-[1fr]">
       <Sidebar view={view} ns={ns} namespaces={namespaces} colors={colorsRef.current}
@@ -104,7 +107,7 @@ export default function App() {
         <Topbar view={view} ns={ns} total={total} onOpen={() => setPalette(true)} action={<Composer ns={ns} onDone={bump} />} />
         <DemoBanner onChange={bump} />
         <div className="flex-1 min-h-0 overflow-auto px-6 pt-[22px] pb-[30px] max-[820px]:px-3.5 max-[820px]:pb-[92px]">
-          <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} filter={memFilter} />
+          <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} filter={memFilter} focusEntity={graphFocus} />
         </div>
       </main>
 

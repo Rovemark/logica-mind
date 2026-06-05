@@ -151,6 +151,15 @@ TOOLS = [
         "description": "The categorization profile: facts grouped by life/work dimension and Maslow tier, with the open categories under each.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "lm_connected",
+        "description": "Derived backlinks for a memory — entities it mentions, the relations among them, and other memories that touch the same entities or category. No manual links needed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"id": {"type": "string", "description": "the memory id"}},
+            "required": ["id"],
+        },
+    },
     # ---- coding-context devtools ----
     {
         "name": "lm_execute",
@@ -395,6 +404,8 @@ class MCPServer:
                      "dimension": (h.memory.metadata or {}).get("dimension")} for h in hits]
         if name == "lm_dimensions":
             return m.dimensions()
+        if name == "lm_connected":
+            return m.connections(args["id"])
         if name == "lm_context":
             return m.context(args["query"], token_budget=int(args.get("token_budget", 1500)))
         if name == "lm_ask_about_user":
