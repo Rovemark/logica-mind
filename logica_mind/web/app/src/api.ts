@@ -23,7 +23,10 @@ export interface RecallHit { score: number; components?: Record<string, any>; me
 export interface ContextCandidate { score: number; components?: Record<string, any>; included: boolean; memory: Memory; }
 export interface ContextResult { namespace: string; query: string; budget: number; tokens: number; block: string; candidates: ContextCandidate[]; }
 export interface Observation { kind: "hub" | "co_occurrence"; entities: string[]; count: number; shared: string[]; text: string; namespace?: string; }
-export interface AddResultItem { content: string; layer: string; op: "new" | "updated"; superseded?: string | null; category?: string | null; }
+export interface AddResultItem { content: string; layer: string; op: "new" | "updated"; superseded?: string | null; category?: string | null; dimension?: string | null; }
+export interface DimCategory { name: string; count: number; }
+export interface DimensionEntry { id: string; label: string; group: string; maslow: string | null; count: number; categories: DimCategory[]; }
+export interface DimensionsData { dimensions: DimensionEntry[]; uncategorized: number; maslow: string[]; }
 export interface AddResult { ok: boolean; namespace: string; kind: string; llm: boolean; created: AddResultItem[]; graph_edges: number; user_updated: boolean; deduped: boolean; }
 export interface SearchEntity { name: string; namespace: string; degree: number; type?: string; }
 export interface SearchResults { memories: { score: number; memory: Memory }[]; entities: SearchEntity[]; namespaces: string[]; }
@@ -59,14 +62,15 @@ export const api = {
   stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),
   analytics: (ns: string, range = 30): Promise<AnalyticsData> => j(`/api/analytics?${nsq(ns)}&range=${range}`),
   integrations: (): Promise<IntegrationsData> => j(`/api/integrations`),
+  dimensions: (ns: string): Promise<DimensionsData> => j(`/api/dimensions?${nsq(ns)}`),
   search: (q: string, limit = 6): Promise<SearchResults> => j(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   context: (ns: string, q: string, budget = 1200): Promise<ContextResult> =>
     j(`/api/context?${nsq(ns)}&q=${encodeURIComponent(q)}&budget=${budget}`),
   observations: (ns: string): Promise<{ observations: Observation[] }> => j(`/api/observations?${nsq(ns)}`),
   recall: (ns: string, q: string, limit = 15): Promise<{ query: string; results: RecallHit[] }> =>
     j(`/api/recall?${nsq(ns)}&q=${encodeURIComponent(q)}&limit=${limit}`),
-  memories: (ns: string, layer?: string): Promise<{ memories: Memory[] }> =>
-    j(`/api/memories?${nsq(ns)}${layer ? `&layer=${layer}` : ""}`),
+  memories: (ns: string, layer?: string, dimension?: string): Promise<{ memories: Memory[] }> =>
+    j(`/api/memories?${nsq(ns)}${layer ? `&layer=${layer}` : ""}${dimension ? `&dimension=${encodeURIComponent(dimension)}` : ""}`),
   graph: (ns: string, history: boolean, at?: string | null): Promise<GraphData> =>
     j(`/api/graph?${nsq(ns)}&history=${history ? 1 : 0}${at ? `&at=${encodeURIComponent(at)}` : ""}`),
   timerange: (ns: string): Promise<{ min: string | null; max: string | null }> => j(`/api/timerange?${nsq(ns)}`),

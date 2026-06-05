@@ -291,6 +291,12 @@ class LogicaMind:
                     continue  # already known
 
             meta = dict(base_meta)
+            # carry the extractor's life-dimension categorization onto every row,
+            # so categories/dimensions are queryable system-wide (search, Profile)
+            if getattr(fact, "category", None) and "category" not in meta:
+                meta["category"] = fact.category
+            if getattr(fact, "dimension", None):
+                meta["dimension"] = fact.dimension
             if supersedes:
                 meta["supersedes"] = supersedes  # provenance without a dangling source_id
             if superseded_snapshot:
@@ -906,6 +912,34 @@ class LogicaMind:
                     })
         cooc.sort(key=lambda x: x["count"], reverse=True)
         return (hubs + cooc)[:limit]
+
+    # ---- dimension profile -------------------------------------------------
+    def dimensions(self) -> Dict[str, Any]:
+        """The categorization profile for this namespace: every fact grouped by
+        its life/work `dimension` and Maslow tier, with the open categories under
+        each. Powers the dashboard Profile view and the lm_dimensions MCP tool."""
+        from .extract.taxonomy import DIMENSIONS, MASLOW
+        agg: Dict[str, Dict[str, Any]] = {}
+        uncategorized = 0
+        for m in self.store.all(self.namespace):
+            md = m.metadata or {}
+            dim = md.get("dimension")
+            if not dim:
+                uncategorized += 1
+                continue
+            e = agg.setdefault(dim, {"count": 0, "cats": {}})
+            e["count"] += 1
+            cat = md.get("category")
+            if cat:
+                e["cats"][cat] = e["cats"].get(cat, 0) + 1
+        out = []
+        for d in DIMENSIONS:
+            info = agg.get(d["id"], {"count": 0, "cats": {}})
+            cats = sorted(info["cats"].items(), key=lambda x: -x[1])
+            out.append({"id": d["id"], "label": d["label"], "group": d["group"],
+                        "maslow": d["maslow"], "count": info["count"],
+                        "categories": [{"name": c, "count": n} for c, n in cats]})
+        return {"dimensions": out, "uncategorized": uncategorized, "maslow": MASLOW}
 
     # ---- context assembly --------------------------------------------------
     @staticmethod

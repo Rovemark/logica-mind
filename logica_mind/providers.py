@@ -25,17 +25,56 @@ def _has(module: str) -> bool:
         return False
 
 
-def auto_llm() -> Optional[Any]:
-    """The LLM already present in the environment, or None.
+def _claude_bin() -> str:
+    return os.environ.get("LOGICA_MIND_CLAUDE_BIN", "claude")
 
-    Zero-config: when a provider key is set we use it, so a single ``remember()``
-    decomposes a message into atomic facts and reconciles them in place."""
+
+def _claude_cli_present() -> bool:
+    import shutil
+    return shutil.which(_claude_bin()) is not None
+
+
+def _build_llm(provider: str) -> Optional[Any]:
+    """Construct one provider if its prerequisites are present, else None. Never raises."""
+    env = os.environ
     try:
-        if os.environ.get("OPENAI_API_KEY") and _has("openai"):
+        if provider == "anthropic" and env.get("ANTHROPIC_API_KEY") and _has("anthropic"):
+            from .llm.anthropic import AnthropicLLM
+            return AnthropicLLM()
+        if provider == "openai" and env.get("OPENAI_API_KEY") and _has("openai"):
             from .llm.openai import OpenAILLM
             return OpenAILLM()
+        if provider == "claude-cli" and _claude_cli_present():
+            from .llm.claude_cli import ClaudeCLILLM
+            llm = ClaudeCLILLM(binary=_claude_bin())
+            return llm if llm.available else None
     except Exception:
-        pass
+        return None
+    return None
+
+
+# API keys are explicit intent → auto-used. The local Claude CLI is detected and
+# surfaced, but only ENABLED on request (LOGICA_MIND_LLM=claude-cli): merely
+# having Claude Code installed shouldn't silently change a library's behavior or
+# spawn subprocesses. This keeps `LogicaMind()` deterministic by default.
+_LLM_AUTO_ORDER = ["anthropic", "openai"]
+_LLM_ALL = ["anthropic", "openai", "claude-cli"]
+
+
+def auto_llm() -> Optional[Any]:
+    """The best LLM to use on this machine, or None.
+
+    With ``LOGICA_MIND_LLM`` set (``anthropic`` / ``openai`` / ``claude-cli``),
+    that provider is used. Otherwise auto-detects from explicit API keys only
+    (Anthropic → OpenAI). When a provider is active, a single ``remember()``
+    decomposes a message into atomic facts, categorizes them across life/work
+    dimensions, and reconciles them in place."""
+    forced = os.environ.get("LOGICA_MIND_LLM", "").strip().lower()
+    order = [forced] if forced in _LLM_ALL else _LLM_AUTO_ORDER
+    for provider in order:
+        llm = _build_llm(provider)
+        if llm is not None and getattr(llm, "available", True):
+            return llm
     return None
 
 
@@ -60,8 +99,12 @@ def detect() -> Dict[str, List[Dict[str, Any]]]:
     environment and whether its package is installed. Pure inspection."""
     env = os.environ
     llm = [
+        {"id": "anthropic", "label": "Anthropic · Claude", "model": "claude-haiku-4-5",
+         "env": "ANTHROPIC_API_KEY", "detected": bool(env.get("ANTHROPIC_API_KEY")), "installed": _has("anthropic")},
         {"id": "openai", "label": "OpenAI", "model": "gpt-4o-mini",
          "env": "OPENAI_API_KEY", "detected": bool(env.get("OPENAI_API_KEY")), "installed": _has("openai")},
+        {"id": "claude-cli", "label": "Claude CLI · local", "model": "your Claude Code, no API key",
+         "env": None, "detected": _claude_cli_present(), "installed": _claude_cli_present()},
     ]
     embedders = [
         {"id": "voyage", "label": "Voyage", "model": "voyage-3-lite",

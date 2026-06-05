@@ -21,6 +21,7 @@ import Memories from "./views/Memories";
 import Calendar from "./views/Calendar";
 import Sessions from "./views/Sessions";
 import UserModel from "./views/UserModel";
+import Profile from "./views/Profile";
 import Peers from "./views/Peers";
 import Changes from "./views/Changes";
 import Insights from "./views/Insights";
@@ -88,7 +89,7 @@ export default function App() {
   const onView = (v: ViewKey) => { setView(v); closeDrawer(); writeHash(v, ns); };
   const onNs = (n: string) => { setNs(n); closeDrawer(); writeHash(view, n); };
 
-  const View = { overview: Overview, analytics: Analytics, context: ContextBlock, graph: GraphView, memories: Memories, calendar: Calendar, sessions: Sessions, user: UserModel, peers: Peers, observations: Observations, changes: Changes, insights: Insights, workspace: Workspace, dreams: Dreams, settings: Settings }[view];
+  const View = { overview: Overview, analytics: Analytics, context: ContextBlock, graph: GraphView, memories: Memories, calendar: Calendar, sessions: Sessions, user: UserModel, profile: Profile, peers: Peers, observations: Observations, changes: Changes, insights: Insights, workspace: Workspace, dreams: Dreams, settings: Settings }[view];
 
   return (
     <LangCtx.Provider value={{ lang, setLang, t }}>

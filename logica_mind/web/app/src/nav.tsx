@@ -1,7 +1,7 @@
-import { LayoutGrid, BarChart3, Layers, Network, List, CalendarDays, MessagesSquare, UserRound, Sparkles, Telescope, Users, History, FolderGit2, Moon } from "lucide-react";
+import { LayoutGrid, BarChart3, Layers, Network, List, CalendarDays, MessagesSquare, UserRound, Sparkles, Telescope, Users, History, FolderGit2, Moon, Boxes } from "lucide-react";
 import type { ComponentType } from "react";
 
-export type ViewKey = "overview" | "analytics" | "context" | "graph" | "memories" | "calendar" | "sessions" | "user" | "peers" | "observations" | "changes" | "insights" | "workspace" | "dreams" | "settings";
+export type ViewKey = "overview" | "analytics" | "context" | "graph" | "memories" | "calendar" | "sessions" | "user" | "profile" | "peers" | "observations" | "changes" | "insights" | "workspace" | "dreams" | "settings";
 export type CatKey = "explore" | "memory" | "intelligence" | "system";
 
 export interface ViewDef { key: ViewKey; label: string; Icon: ComponentType<{ size?: number; strokeWidth?: number }>; cat: CatKey; }
@@ -18,6 +18,7 @@ export const VIEWS: ViewDef[] = [
   { key: "sessions", label: "Sessions", Icon: MessagesSquare, cat: "memory" },
   { key: "changes", label: "Changes", Icon: History, cat: "memory" },
   // intelligence
+  { key: "profile", label: "Profile", Icon: Boxes, cat: "intelligence" },
   { key: "observations", label: "Observations", Icon: Telescope, cat: "intelligence" },
   { key: "insights", label: "Insights", Icon: Sparkles, cat: "intelligence" },
   { key: "user", label: "User", Icon: UserRound, cat: "intelligence" },
