@@ -78,36 +78,6 @@ mind.serve()                                    # -> http://127.0.0.1:8420
 
 ---
 
-## ✨ How it works — Add. Learn. Retrieve.
-
-You don't write to a database. You hand Logica Mind raw text and it **learns** —
-it extracts the durable facts, reconciles them against what it already knows, and
-only then stores. The dashboard shows you exactly what it learned, live.
-
-<div align="center">
-  <img src="docs/img/dashboard-learn.png" alt="Logica Mind — watch it learn from a single message" width="100%">
-  <br>
-  <em>Add a message; watch it become memory. Each extracted fact is revealed as it lands, tagged <b>new</b> or <b>updated</b> — and an update strikes through the belief it replaced.</em>
-</div>
-
-When you add `"I usually work from cafés on Fridays, prefer strong flat whites, and start deep-work around 10 AM."`:
-
-| Stage | What happens |
-| --- | --- |
-| **Add** | Raw text in — no schema, no config, one call: `mind.remember(text)`. |
-| **Learn** | With an LLM configured, the message is **decomposed** into atomic durable facts (a café habit, a coffee preference, a working hour). Each is reconciled against existing memory: a genuinely new fact is **added**, a changed one **updates and supersedes** the prior belief, an unchanged one is a **no-op** (deduped). Zero-config (no LLM), the text is captured as one durable memory and still deduped by embedding similarity. |
-| **Retrieve** | On the next question, `recall()` / `context()` return only the relevant memories — ranked, fitted to a token budget. |
-
-This is the difference between a memory that **stores** and one that **learns**: it
-doesn't keep five copies of a fact that drifted — it keeps the current truth and
-the trail of how it got there. Full walkthrough: **[How memory is learned](docs/memory-extraction.md)**.
-
-> Zero-config runs fully offline. Drop an `OPENAI_API_KEY` (or any supported
-> provider) in the environment and Logica Mind **auto-detects it** — fact
-> decomposition and conflict-resolution turn on automatically, no code change.
-
----
-
 ## ⭐ What no other memory library does
 
 This is the heart of Logica Mind. Everything below is **shipped and tested**.
@@ -140,6 +110,31 @@ mind.stale_beliefs()                   # epistemic self-doubt: "I'm not sure abo
 - **Epistemic self-doubt** — surfaces old, never-recalled, low-confidence beliefs the agent should re-verify. No other memory system exposes its own uncertainty.
 - **Contested beliefs & surprise score** — when a new high-confidence belief overturns an old one, both are surfaced as *contested* and scored by how much the worldview shifted.
 - **Dream journal** — every consolidation cycle is recorded (distilled / reinforced / forgotten / inferred) so you can *watch the memory think over time*.
+
+### 🗂️ It learns what each fact *is*
+
+Hand it raw text and it doesn't just store — it **decomposes** the message into
+atomic facts and tags each with a **category** (an open label it coins) and a
+**dimension** from a 34-dimension taxonomy across four groups: **Personal**
+(mapped to Maslow's hierarchy), **Projects**, **Organization**, and
+**Business & Finance**.
+
+```python
+mind.remember("I'm a Scorpio who loves flat whites; we hit $45k MRR and the launch is blocked on a payments bug.")
+# → Identity·"Zodiac sign", Preference·"Coffee preference",
+#   Business·"MRR", Project·"Launch blocker"  — four facts, four dimensions
+mind.dimensions()   # the whole profile, grouped by dimension + Maslow tier
+```
+
+<div align="center">
+  <img src="docs/img/dashboard-profile.png" alt="Profile — every fact categorized by life & work dimension, mapped to Maslow" width="100%">
+  <br>
+  <em>The Profile view: a person <b>and</b> their work, organized — personal facts up Maslow's pyramid, plus Projects, Organization, and Business & Finance. The same animation shows it learning each categorized fact live.</em>
+</div>
+
+- **Person *and* work** — the taxonomy models a human (identity, health, spirituality, ambitions) and the work (project blockers, OKRs, MRR, runway) in one place.
+- **Everywhere** — category + dimension ride on every memory: the Profile view, the `lm_dimensions` MCP tool, `recall`/`remember`, `/api/memories?dimension=`, and the ⌘K search. Full guide: **[Fact categorization](docs/categorization.md)**.
+- **Zero-key option** — categorization needs an LLM; it auto-detects an `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or uses your **local Claude CLI** with no API key at all (`LOGICA_MIND_LLM=claude-cli`). See **[LLM providers & auto-detection](docs/providers.md)**.
 
 ### 🤝 Multi-agent native
 
@@ -270,6 +265,7 @@ Full guides live in [`docs/`](docs/):
 | | | |
 |---|---|---|
 | [Installation](docs/installation.md) | [Quickstart](docs/quickstart.md) | [Core concepts](docs/concepts.md) |
+| [Fact categorization](docs/categorization.md) | [LLM providers & auto-detection](docs/providers.md) | [How memory is learned](docs/memory-extraction.md) |
 | [Stores](docs/stores.md) | [Embeddings & reranking](docs/embeddings-and-reranking.md) | [Knowledge graph](docs/knowledge-graph.md) |
 | [Dreaming & lifecycle](docs/dreaming.md) | [User model & peers](docs/user-model-and-peers.md) | [Sessions & run records](docs/sessions-and-records.md) |
 | [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
