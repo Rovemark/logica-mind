@@ -6,7 +6,7 @@ import NodeDetail from "../components/NodeDetail";
 import { useI18n } from "../i18n";
 import { AREAS, dimArea, dimColor, type Area } from "../lifearea";
 
-export default function GraphView({ ns, colorFor, onOpenMemory }: { ns: string; colorFor: (n: string) => string; onOpenMemory?: (m: any) => void }) {
+export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: { ns: string; colorFor: (n: string) => string; onOpenMemory?: (m: any) => void; focusEntity?: { name: string; n: number } | null }) {
   const { t } = useI18n();
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
   const [history, setHistory] = useState(true);
@@ -26,6 +26,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory }: { ns: string; 
 
   // reset detail/scrubber when switching namespace
   useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); }, [ns]);
+
+  // open an entity's detail when navigated here from a backlink (Connected panel)
+  useEffect(() => { if (focusEntity?.name) setPicked(focusEntity.name); }, [focusEntity?.n, focusEntity?.name]);
 
   // which life-areas actually appear on the graph (to show only useful chips)
   const areasPresent = useMemo(() => {

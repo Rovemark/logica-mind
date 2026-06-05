@@ -10,7 +10,8 @@ export const NavCtx = createContext<{
   onView: (v: ViewKey) => void;
   onNs: (ns: string) => void;
   onMemories: (ns: string, filter?: MemFilter) => void;
+  onEntity: (ns: string, name: string) => void;   // open an entity in the graph
 }>({
-  onView: () => {}, onNs: () => {}, onMemories: () => {},
+  onView: () => {}, onNs: () => {}, onMemories: () => {}, onEntity: () => {},
 });
 export const useNav = () => useContext(NavCtx);

@@ -40,6 +40,9 @@ export interface IntegrationsData {
   };
   available: { llm: IntegrationOption[]; embedders: IntegrationOption[]; rerankers: IntegrationOption[]; stores: IntegrationOption[] };
 }
+export interface ConnEntity { name: string; degree: number; type?: string; dimension?: string | null; }
+export interface ConnRelation { subject: string; predicate: string; object: string; valid: boolean; id: string; }
+export interface Connections { entities: ConnEntity[]; relations: ConnRelation[]; mentions: Memory[]; siblings: Memory[]; }
 export interface Community { nodes: string[]; size: number; facts: string[]; }
 export interface AnalyticsLakeRow { namespace: string; total: number; entities: number; facts: number; relations: number; last: string | null; spark: number[]; }
 export interface AnalyticsData {
@@ -88,6 +91,8 @@ export const api = {
   exportNs: (ns: string): Promise<{ namespace: string; count: number; memories: Memory[] }> => j(`/api/export?${nsq(ns)}`),
   provenance: (ns: string, id: string): Promise<{ memory?: Memory; from: Memory[]; supersedes?: string }> =>
     j(`/api/provenance?${nsq(ns)}&id=${encodeURIComponent(id)}`),
+  connected: (ns: string, id: string): Promise<Connections> =>
+    j(`/api/connected?${nsq(ns)}&id=${encodeURIComponent(id)}`),
   scan: (path?: string): Promise<any> => j(`/api/scan${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   bundle: (ns: string): Promise<any> => j(`/api/bundle?${nsq(ns)}`),
   peers: (ns: string): Promise<{ peers: PeerPair[] }> => j(`/api/peers?${nsq(ns)}`),

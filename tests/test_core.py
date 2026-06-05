@@ -105,6 +105,46 @@ def test_namespaces_and_aggregate_graph():
     assert maya["shared"] is True  # Maya appears in both agents
 
 
+def _seed_categorized(m):
+    """Plant categorized facts + a couple of graph edges (no LLM needed)."""
+    def fact(content, dim, cat):
+        m.store.add([Memory(content=content, namespace=m.namespace, layer=MemoryLayer.SEMANTIC,
+                            metadata={"dimension": dim, "category": cat})])
+    fact("Andre founded Acme Corp in 2021", "biz_revenue", "company")
+    fact("Acme Corp raised a seed round led by Maya", "biz_funding", "fundraising")
+    fact("Andre prefers dark roast coffee", "preference", "food")
+    m.graph.ingest("Andre", "founded", "Acme Corp")
+    m.graph.ingest("Maya", "invested_in", "Acme Corp")
+
+
+def test_graph_viz_annotates_entities_with_life_area():
+    m = mk()
+    _seed_categorized(m)
+    nodes = {n["id"]: n for n in m.graph_viz(namespace="t")["nodes"]}
+    # Acme Corp is named only by business-group facts → a business dimension
+    assert nodes["Acme Corp"].get("dimension", "").startswith("biz_")
+    # Andre is named by a personal fact too → resolves to a personal dimension
+    assert nodes["Andre"].get("dimension") in ("preference", "biz_revenue")
+
+
+def test_connections_derives_backlinks_without_manual_links():
+    m = mk()
+    _seed_categorized(m)
+    target = [x for x in m.store.all("t")
+              if "founded Acme" in x.content and "edge" not in (x.tags or [])][0]
+    conn = m.connections(target.id)
+    ents = {e["name"] for e in conn["entities"]}
+    assert {"Andre", "Acme Corp"} <= ents
+    # typed relations touching those entities are surfaced
+    preds = {(r["subject"], r["predicate"], r["object"]) for r in conn["relations"]}
+    assert ("Maya", "invested_in", "Acme Corp") in preds
+    # auto-backlink: another fact mentioning Acme Corp is linked, with no [[wikilink]]
+    linked = {mm["content"] for mm in conn["mentions"]}
+    assert any("seed round" in c for c in linked)
+    # the target itself is never listed as its own connection
+    assert all(mm["id"] != target.id for mm in conn["mentions"] + conn["siblings"])
+
+
 def test_dreaming_reinforces_recalled_memories():
     m = mk()
     m.remember("important fact about the product roadmap")
