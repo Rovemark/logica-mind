@@ -25,7 +25,7 @@ New here? Start with **[Installation](installation.md)** → **[Quickstart](quic
 - [Sessions & run records](sessions-and-records.md) — session scoping and structured runs
 
 ### Interfaces
-- [MCP server](mcp.md) — use Logica Mind as a Model Context Protocol server (29 tools)
+- [MCP server](mcp.md) — use Logica Mind as a Model Context Protocol server (32 tools)
 - [Auto-capture hooks](hooks.md) — capture memory automatically across a session
 - [Integrations & SDKs](integrations.md) — LangChain, LlamaIndex, the provider adapter, the TypeScript SDK
 - [Dashboard](dashboard.md) — the self-hosted web UI

@@ -2,7 +2,7 @@
 
 Run Logica Mind as a Model Context Protocol (MCP) server so any MCP client — Claude Code, Cursor, Windsurf — can use it as durable, queryable memory.
 
-Logica Mind ships a full MCP server that exposes its memory verbs as **29 tools**. It speaks JSON-RPC 2.0 over stdio (newline-delimited) using only the Python standard library — no extra dependencies, no network service. Point an MCP client at it and your assistant gets long-term memory, a temporal knowledge graph, peer modeling, sleep-time consolidation and structured run history.
+Logica Mind ships a full MCP server that exposes its memory verbs as **32 tools**. It speaks JSON-RPC 2.0 over stdio (newline-delimited) using only the Python standard library — no extra dependencies, no network service. Point an MCP client at it and your assistant gets long-term memory, a temporal knowledge graph, peer modeling, sleep-time consolidation and structured run history.
 
 Like the rest of the library, the default setup is offline and zero-key: a SQLite store plus the built-in hashing embedder, no API keys required. See [Installation](./installation.md) for the dependency-free install.
 
@@ -61,7 +61,7 @@ Cursor uses the same shape. To pin a specific database and namespace, pass them 
 }
 ```
 
-After the client connects, the 29 tools below appear in its tool list. Both clients speak protocol version `2024-11-05`, which the server supports; if a client requests a version the server doesn't implement, the server advertises its own latest version and lets the client decide.
+After the client connects, the 32 tools below appear in its tool list. Both clients speak protocol version `2024-11-05`, which the server supports; if a client requests a version the server doesn't implement, the server advertises its own latest version and lets the client decide.
 
 ## Source attribution
 
@@ -83,7 +83,7 @@ If a client omits `clientInfo.name`, the source falls back to the generic `mcp`,
 }
 ```
 
-## The 29 tools
+## The 32 tools
 
 All tools are namespaced with the `lm_` prefix. Required arguments are noted; everything else is optional with sensible defaults.
 
@@ -112,6 +112,16 @@ The life/work dimension profile, and the derived backlinks built on top of it an
 |---|---|
 | `lm_dimensions` | The categorization profile: facts grouped by life/work dimension and Maslow tier, with the open categories under each. |
 | `lm_connected` | Derived backlinks for a memory — entities it mentions, the relations among them, and other memories that touch the same entities or category. No manual links needed. |
+
+### Graph intelligence
+
+Make the temporal graph EXPLAIN and PREDICT its own structure. See [Knowledge graph](./knowledge-graph.md).
+
+| Tool | Purpose |
+|---|---|
+| `lm_how_related` | How is entity A related to entity B? The confidence-weighted shortest path, as an ordered chain of typed relationships. |
+| `lm_bridges` | Load-bearing connectors — entities whose removal would fragment the graph (articulation points), the brokers between otherwise-separate clusters. |
+| `lm_suggested_links` | Predict the missing edge — entity pairs with no direct relation but a strong shared neighbourhood (Adamic-Adar). The links you probably should have but never authored. |
 
 ### User model & peers
 
