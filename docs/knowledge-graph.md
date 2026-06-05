@@ -333,10 +333,20 @@ python -m logica_mind ui
 
 Programmatically, `mind.graph_viz(namespace=..., at=...)` returns the `{nodes, links}` payload the dashboard renders, including a *general* graph across all namespaces with shared entities flagged.
 
+### Colour by life-area
+
+Each node in the `graph_viz` payload also carries a `dimension` field when one can be inferred — the **dominant life/work dimension** of the entity, bridged from the [categorized facts](./categorization.md) that mention it. In the dashboard, toggle **life areas** to paint every entity by its group (Person / Projects / Organization / Business) and use the area chips to filter the graph down to a single area. Entities with no categorized facts stay neutral.
+
+### Walking connections
+
+Any entity (and any memory) exposes its neighborhood through [`mind.connections(id)`](./connections.md) — the relations touching it, the other memories that mention it, and siblings of the same category. It's the derived-backlink layer the dashboard's **Connected** panel renders.
+
 ---
 
 ## See also
 
+- [Connections](./connections.md) — derived backlinks built on the graph + categorization.
+- [Fact categorization](./categorization.md) — the dimensions that colour graph nodes.
 - [Quickstart](./quickstart.md) — the 30-second, zero-key tour.
 - [Installation](./installation.md) — install and optional extras.
 - [Concepts](./concepts.md) — memory layers, the temporal model, and how graph edges fit in.

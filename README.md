@@ -8,8 +8,8 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-180%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
-[![MCP](https://img.shields.io/badge/MCP-27%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
+[![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
+[![MCP](https://img.shields.io/badge/MCP-29%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-orange.svg)](CONTRIBUTING.md)
 
 </div>
@@ -34,7 +34,7 @@ mind.contradictions()            # every belief that changed value — and exact
 ```
 
 It runs fully offline on the standard library — **zero dependencies, no API key
-to start** — and is covered by **180 tests**, so you can verify every claim on
+to start** — and is covered by **182 tests**, so you can verify every claim on
 this page in five minutes. It then lights up Voyage, OpenAI, Supabase, Postgres
 or Redis whenever you want them.
 
@@ -133,7 +133,7 @@ mind.dimensions()   # the whole profile, grouped by dimension + Maslow tier
 </div>
 
 - **Person *and* work** — the taxonomy models a human (identity, health, spirituality, ambitions) and the work (project blockers, OKRs, MRR, runway) in one place.
-- **Everywhere** — category + dimension ride on every memory: the Profile view, the `lm_dimensions` MCP tool, `recall`/`remember`, `/api/memories?dimension=`, and the ⌘K search. Full guide: **[Fact categorization](docs/categorization.md)**.
+- **Everywhere** — category + dimension ride on every memory: the Profile view (cards **and** a clickable knowledge-map), the colour-by-area knowledge graph, the `lm_dimensions` MCP tool, `recall`/`remember`, `/api/memories?dimension=`, and the ⌘K search. Full guide: **[Fact categorization](docs/categorization.md)**.
 - **Zero-key option** — categorization needs an LLM; it auto-detects an `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or uses your **local Claude CLI** with no API key at all (`LOGICA_MIND_LLM=claude-cli`). See **[LLM providers & auto-detection](docs/providers.md)**.
 
 ### 🤝 Multi-agent native
@@ -165,8 +165,8 @@ bundle = mind.export_bundle(secret=k)  # HMAC-signed, portable memory you can mo
 
 ### 🖥️ Built to be lived in
 
-- **A live, animated graph explorer** — Obsidian-style canvas physics, community coloring, confidence-weighted edges, entity drill-down, and a **time-scrubber** that replays the graph at any date. Served by the standard library — no Node required for end users.
-- **Obsidian-style note pane** — click any memory to open it as a document with a Properties panel and its provenance; entities are first-class (alias resolution collapses *"OpenAI" = "Open AI"*).
+- **A live, animated graph explorer** — Obsidian-style canvas physics, community coloring, confidence-weighted edges, entity drill-down, and a **time-scrubber** that replays the graph at any date. Toggle **colour-by-life-area** to paint every entity by its dominant dimension (Person / Projects / Organization / Business) and filter the graph down to one area. Served by the standard library — no Node required for end users.
+- **Backlinks that write themselves** — Obsidian makes you *type* `[[links]]`; here the connective tissue is **inferred**. Open any memory and the **Connected** panel shows the entities it mentions, the relations among them, other notes that touch the same entities, and siblings sharing its category — all derived from the graph, nothing to maintain. Click to walk note-to-note; `[[wikilinks]]` in content are clickable too. Exposed as `mind.connections(id)` and the `lm_connected` MCP tool.
 - **Context survives compaction** — a `PreCompact` hook distills the conversation into durable memory *right before the host truncates the window*, then brings the relevant slice back on the next session. The fix for "it compacted and we lost everything."
 - **Sessions that follow you across machines** — sessions auto-name from their first message, can be renamed and exported, and import directly from your local assistant history. Take your session index anywhere.
 - **Danger-zone controls** — scoped erasure from the dashboard: clear by layer, clear stale (old & untouched), or reset a namespace — all behind a typed confirmation.
@@ -199,7 +199,7 @@ assistant's context layer.
 
 ## 🔌 Model Context Protocol (MCP)
 
-Logica Mind is a full MCP server — **27 tools** covering memory, recall, the
+Logica Mind is a full MCP server — **29 tools** covering memory, recall, the
 temporal graph, peers, dreaming, contested beliefs, the forgetting curve, GDPR
 erase and structured session records. Point any MCP client (Claude Code, Cursor,
 …) at it and your assistant gets durable, queryable memory:
@@ -265,8 +265,9 @@ Full guides live in [`docs/`](docs/):
 | | | |
 |---|---|---|
 | [Installation](docs/installation.md) | [Quickstart](docs/quickstart.md) | [Core concepts](docs/concepts.md) |
-| [Fact categorization](docs/categorization.md) | [LLM providers & auto-detection](docs/providers.md) | [How memory is learned](docs/memory-extraction.md) |
-| [Stores](docs/stores.md) | [Embeddings & reranking](docs/embeddings-and-reranking.md) | [Knowledge graph](docs/knowledge-graph.md) |
+| [Fact categorization](docs/categorization.md) | [Connections (derived backlinks)](docs/connections.md) | [LLM providers & auto-detection](docs/providers.md) |
+| [How memory is learned](docs/memory-extraction.md) | [Stores](docs/stores.md) | [Embeddings & reranking](docs/embeddings-and-reranking.md) |
+| [Knowledge graph](docs/knowledge-graph.md) | | |
 | [Dreaming & lifecycle](docs/dreaming.md) | [User model & peers](docs/user-model-and-peers.md) | [Sessions & run records](docs/sessions-and-records.md) |
 | [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
 | [Dashboard](docs/dashboard.md) | [Portability & privacy](docs/portability-and-privacy.md) | [CLI](docs/cli.md) |
@@ -279,7 +280,7 @@ Full guides live in [`docs/`](docs/):
 ```bash
 git clone https://github.com/Rovemark/logica-mind.git
 cd logica-mind
-pip install -e ".[dev]" && pytest -q          # 180 tests, fully offline
+pip install -e ".[dev]" && pytest -q          # 182 tests, fully offline
 
 # rebuild the dashboard (only if you change the UI)
 cd logica_mind/web/app && npm ci && npm run build
@@ -291,7 +292,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ## 📦 Status
 
-**v0.1.0 — Beta.** The full feature set above is shipped and covered by 180 tests.
+**v0.1.0 — Beta.** The full feature set above is shipped and covered by 182 tests.
 Episodic, semantic, temporal-graph and dialectic user memory; automatic
 extraction; embeddings + reranking; a temporal knowledge graph; sleep-time
 consolidation; an MCP server and a self-hosted dashboard — one cohesive library,
