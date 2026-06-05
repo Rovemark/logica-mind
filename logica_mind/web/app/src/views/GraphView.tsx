@@ -146,8 +146,8 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   }
   const pathIds = pathRes?.found ? pathRes.path : undefined;
 
-  const Btn = ({ on, onClick, icon: Icon, children }: any) => (
-    <button onClick={onClick}
+  const Btn = ({ on, onClick, icon: Icon, children, title }: any) => (
+    <button onClick={onClick} title={title}
       className={`glass border rounded-[9px] px-3 py-[7px] text-[12px] inline-flex items-center gap-1.5
         ${on ? "text-[var(--gold)] border-[var(--gold)]" : "text-[var(--dim)] border-[var(--line)] hover:text-[var(--txt)]"}`}>
       <Icon size={13} /> {children}
@@ -192,14 +192,14 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
         {/* ── top filter bar ── */}
         <div className="absolute top-3 right-3 flex gap-1.5 z-[4] flex-wrap justify-end max-w-[78%]">
           {/* search / focus */}
-          <div className="glass border border-[var(--line)] rounded-[9px] px-2 flex items-center gap-1.5 text-[12px]">
+          <div className="glass border border-[var(--line)] rounded-[9px] px-2 flex items-center gap-1.5 text-[12px]" title={t("tip_search")}>
             <Search size={12} className="text-[var(--dim2)]" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runSearch(query)}
               placeholder={t("graph_search")} className="bg-transparent outline-none w-[120px] py-[7px] text-[var(--txt)]" />
           </div>
           {/* colour-by */}
           <div className="relative">
-            <Btn on={colorMenu || colorBy !== "namespace"} onClick={() => setColorMenu((v) => !v)} icon={Palette}>
+            <Btn on={colorMenu || colorBy !== "namespace"} onClick={() => setColorMenu((v) => !v)} icon={Palette} title={t("tip_colour")}>
               {t(("graph_color_" + colorBy) as any)}
             </Btn>
             {colorMenu && (
@@ -216,12 +216,12 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
             )}
           </div>
           {/* connection layers */}
-          <Btn on={coMention} onClick={() => setCoMention((v) => !v)} icon={Hexagon}>{t("glayer_comention")}</Btn>
-          <Btn on={semantic} onClick={() => setSemantic((v) => !v)} icon={Spline}>{t("glayer_semantic")}</Btn>
-          <Btn on={suggest} onClick={() => setSuggest((v) => !v)} icon={Lightbulb}>{t("glayer_suggested")}</Btn>
+          <Btn on={coMention} onClick={() => setCoMention((v) => !v)} icon={Hexagon} title={t("tip_comention")}>{t("glayer_comention")}</Btn>
+          <Btn on={semantic} onClick={() => setSemantic((v) => !v)} icon={Spline} title={t("tip_semantic")}>{t("glayer_semantic")}</Btn>
+          <Btn on={suggest} onClick={() => setSuggest((v) => !v)} icon={Lightbulb} title={t("tip_suggested")}>{t("glayer_suggested")}</Btn>
           {/* filters popover */}
           <div className="relative">
-            <Btn on={filtersOpen || nFilters > 0} onClick={() => setFiltersOpen((v) => !v)} icon={SlidersHorizontal}>
+            <Btn on={filtersOpen || nFilters > 0} onClick={() => setFiltersOpen((v) => !v)} icon={SlidersHorizontal} title={t("tip_filters")}>
               {t("graph_filters")}{nFilters > 0 ? ` ·${nFilters}` : ""}
             </Btn>
             {filtersOpen && (
@@ -255,11 +255,11 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
               </div>
             )}
           </div>
-          <Btn on={pathOpen || !!pathIds} onClick={() => { setPathOpen((v) => !v); if (pathOpen) setPathRes(null); }} icon={Route}>{t("graph_path")}</Btn>
-          <Btn on={history} onClick={() => setHistory((v) => !v)} icon={Clock}>{t("graph_history")}</Btn>
-          <Btn on={scrub} onClick={toggleScrub} icon={Timer}>{t("graph_time")}</Btn>
-          <Btn onClick={() => gref.current?.reheat()} icon={RotateCw}>{t("graph_shake")}</Btn>
-          <Btn onClick={() => gref.current?.fit()} icon={Maximize2}>{t("graph_fit")}</Btn>
+          <Btn on={pathOpen || !!pathIds} onClick={() => { setPathOpen((v) => !v); if (pathOpen) setPathRes(null); }} icon={Route} title={t("tip_path")}>{t("graph_path")}</Btn>
+          <Btn on={history} onClick={() => setHistory((v) => !v)} icon={Clock} title={t("tip_history")}>{t("graph_history")}</Btn>
+          <Btn on={scrub} onClick={toggleScrub} icon={Timer} title={t("tip_time")}>{t("graph_time")}</Btn>
+          <Btn onClick={() => gref.current?.reheat()} icon={RotateCw} title={t("tip_shake")}>{t("graph_shake")}</Btn>
+          <Btn onClick={() => gref.current?.fit()} icon={Maximize2} title={t("tip_fit")}>{t("graph_fit")}</Btn>
         </div>
 
         {/* Path mode — "how is A related to B?" */}
