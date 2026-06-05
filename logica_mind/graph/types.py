@@ -39,7 +39,7 @@ class Edge:
     fact: str = ""                       # natural-language statement of the edge
     valid_from: str = field(default_factory=now_iso)
     valid_to: Optional[str] = None       # None = still valid
-    confidence: float = 1.0              # fact rating in [0, 1] (Zep-style)
+    confidence: float = 1.0              # fact rating in [0, 1]
     subject_type: str = ""               # optional typed ontology (e.g. "Person")
     object_type: str = ""                # e.g. "Organization"
     source_ids: List[str] = field(default_factory=list)  # provenance: episode ids

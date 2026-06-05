@@ -1,4 +1,4 @@
-"""LLM extractor (Mem0-style): atomic facts + add/update/noop reconciliation.
+"""LLM extractor: atomic facts + add/update/noop reconciliation.
 
 Given a message and the most relevant existing memories, the LLM returns a list
 of facts, each tagged ADD (new), UPDATE (supersedes an existing memory by id) or

@@ -1,4 +1,4 @@
-"""Graph-aware rerankers (Zep-style).
+"""Graph-aware rerankers.
 
 NodeDistanceReranker  — lift memories that mention entities close (in the
                         knowledge graph) to entities named in the query.

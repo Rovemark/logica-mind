@@ -6,13 +6,13 @@ All notable changes to Logica Mind. Format loosely follows
 ## [0.1.0] — 2026-06-04
 
 First complete release: a pluggable, multi-store memory library for AI agents
-that unifies the best ideas of Honcho, Zep/Graphiti, Voyage and Mem0.
+with episodic, semantic, temporal-graph and dialectic user memory in one library.
 
 ### Memory engine
 - Four layers: episodic, semantic, temporal **graph**, and a dialectic **user model**.
 - Hybrid recall (vector ⊕ lexical) with importance/recency blending, dedup, and
   optional rerankers (MMR, Voyage, NodeDistance, EpisodeMention, **RRF**).
-- Mem0-style extraction (add/update/delete/noop) with dedup and custom categories.
+- Automatic extraction (add/update/delete/noop) with dedup and custom categories.
 - **Conversation ingestion** — `ingest_conversation(messages=[{role, content}…])`
   logs turns, extracts facts seeing the whole exchange, and derives observations.
 - **Deriver** — `derive()` infers user observations from recent turns; runs eagerly
@@ -25,7 +25,7 @@ that unifies the best ideas of Honcho, Zep/Graphiti, Voyage and Mem0.
 - Moats: `contradictions()` (time-machine), `diff()` (memory changelog),
   `transfer_to()` (cross-agent), `forget_about()`/`purge()` (GDPR erase).
 
-### Multi-perspective (Honcho-style peers)
+### Multi-perspective peers
 - `observe_peer` / `peer_card` / `peer_query` — directional theory-of-mind.
 
 ### Stores & embedders

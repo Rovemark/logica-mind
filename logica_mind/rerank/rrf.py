@@ -1,4 +1,4 @@
-"""Reciprocal Rank Fusion reranker (Zep's default fusion).
+"""Reciprocal Rank Fusion (RRF) reranker.
 
 Combines multiple ranking signals (similarity, importance, recency) by summing
 1 / (k + rank) across each — robust to scale differences between signals.

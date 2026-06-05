@@ -2,7 +2,7 @@
 
 Public verbs: remember / log / recall / forget / observe_user / dream / serve.
 Defaults are fully offline (SQLite + hashing embedder + no LLM); pass real
-providers to light up semantic search, Mem0-style extraction and the dialectic
+providers to light up semantic search, automatic extraction and the dialectic
 user model.
 """
 from __future__ import annotations
@@ -213,7 +213,7 @@ class LogicaMind:
         build_graph: bool = False,
         category: Optional[str] = None,
     ) -> List[Memory]:
-        """Store a durable fact/note. Runs extraction (Mem0-style: add/update/
+        """Store a durable fact/note. Runs extraction (add/update/
         delete/noop) + dedup, then persists. `session` scopes the memory (it is
         stored in metadata and can be filtered on at recall). With
         `build_graph=True` (and an LLM), entity/relationship triples are also
@@ -494,7 +494,7 @@ class LogicaMind:
         """Retrieve the most relevant memories. Pipeline: embed query → hybrid
         store search (optionally metadata/session/category-filtered) → blend
         similarity · importance · recency → dedup → optional reranker.
-        `min_importance` is a Zep-style fact-rating threshold (drop low-rated)."""
+        `min_importance` is a fact-rating threshold (drop low-rated)."""
         query = (query or "").strip()
         if not query:
             return []
@@ -521,7 +521,7 @@ class LogicaMind:
         self._check_dim(q_emb, raw)
 
         # entity-boosted retrieval: graph entities mentioned in the query lift
-        # memories that also mention them (Mem0-style entity linking)
+        # memories that also mention them (entity linking)
         boost_ents = self._query_entities(query) if self.entity_boost > 0 else set()
 
         reranked: List[SearchResult] = []
@@ -537,7 +537,7 @@ class LogicaMind:
                     final += self.entity_boost
                     comps["entity_boost"] = self.entity_boost
             if min_importance and imp < min_importance:
-                continue                          # Zep-style fact-rating threshold
+                continue                          # fact-rating threshold
             reranked.append(SearchResult(memory=r.memory, score=final, components=comps))
         reranked.sort(key=lambda x: x.score, reverse=True)
 
@@ -730,7 +730,7 @@ class LogicaMind:
     def ingest_conversation(self, messages: List[Dict[str, Any]], session: Optional[str] = None,
                             extract: bool = True, derive: bool = True,
                             source: Optional[str] = None) -> Dict[str, int]:
-        """Mem0/Honcho-style conversation ingestion. `messages` is a list of
+        """conversation ingestion. `messages` is a list of
         {"role"/"speaker", "content"} dicts. Each turn is logged (episodic); with
         an LLM, durable facts are extracted seeing the WHOLE exchange (so a reply
         like 'sim, pode' resolves against its question), and user observations are
@@ -766,7 +766,7 @@ class LogicaMind:
 
     def derive(self, transcript: Optional[str] = None, session: Optional[str] = None,
                window: int = 20) -> int:
-        """Honcho-style deriver: infer durable observations about the USER from the
+        """deriver: infer durable observations about the USER from the
         conversation and feed the dialectic model. No-op offline (it needs the LLM
         to reason). Runs eagerly from ingest_conversation and lazily from dream().
         Returns the count of NEW (non-duplicate) observations stored."""
@@ -818,7 +818,7 @@ class LogicaMind:
         return self.user.profile()
 
     def ask_about_user(self, question: str, k: int = 8) -> str:
-        """Dialectic query (Honcho-style): answer a question ABOUT the user,
+        """Dialectic query: answer a question ABOUT the user,
         reasoning over the profile + relevant observations."""
         return self.user.query(question, k=k)
 
@@ -862,7 +862,7 @@ class LogicaMind:
         include_user: bool = True,
     ) -> str:
         """Assemble a ready-to-inject context block for `query`, fitted to a
-        token budget (Honcho-style Context endpoint): user model first, then the
+        token budget (Context endpoint): user model first, then the
         most relevant memories until the budget is spent."""
         budget = max(0, token_budget)
         blocks: List[str] = []
@@ -987,7 +987,7 @@ class LogicaMind:
     def ingest_json(self, obj, session: Optional[str] = None,
                     tags: Optional[List[str]] = None, max_items: int = 200) -> List[Memory]:
         """Flatten a JSON object/array into `path = value` facts and store them
-        (Zep-style business-data ingestion). Dedups on EXACT normalized string —
+        (business-data ingestion). Dedups on EXACT normalized string —
         not embedding cosine — so distinct short/numeric values (ids, codes) are
         never collapsed and never accidentally kept twice. Returns created."""
         norm = lambda s: " ".join(s.lower().split())
@@ -1165,7 +1165,7 @@ class LogicaMind:
             dst_store.add(mems)
         return len(mems)
 
-    # ---- peers / multi-perspective (Honcho-style) --------------------------
+    # ---- peers / multi-perspective --------------------------
     def observe_peer(self, observer: str, observed: str, text: str, importance: float = 0.6) -> Optional[Memory]:
         """Record what `observer` learned about `observed` — a directional
         (observer→observed) observation, so each peer builds its own theory of

@@ -10,7 +10,7 @@ interface Props {
   onPick: (name: string) => void;
 }
 
-// Live canvas force-simulation (Obsidian/Zep-style continuous physics):
+// Live canvas force-simulation (Obsidian-style continuous physics):
 // repulsion + spring + gravity with damping + alpha cooling; reheats on
 // interaction. Pan/zoom/drag with mouse AND touch (pinch-zoom). A click/tap on a
 // node calls onPick(name) so the parent can show its memories + relations.

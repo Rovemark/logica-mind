@@ -130,7 +130,7 @@ class Dreamer:
         if self.do_prune:
             self._prune(report)
         # derive observations from recent turns BEFORE synthesizing, so the profile
-        # reflects them (Honcho-style: deriver feeds the dialectic model)
+        # reflects them (the deriver feeds the dialectic model)
         if self.do_derive:
             report.derived = self.mind.derive()
         if self.do_infer:

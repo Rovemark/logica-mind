@@ -1,4 +1,4 @@
-"""Multimodal embedder — text + images in one vector space (Voyage / Zep-style).
+"""Multimodal embedder — text + images in one vector space (Voyage).
 
 Requires `logica-mind[voyage]` + VOYAGE_API_KEY. `embed(texts)` works like any
 text embedder (so it drops into the normal pipeline); `embed_multimodal(inputs)`

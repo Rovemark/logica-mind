@@ -1,6 +1,6 @@
 """Extractor interface — turns raw text into atomic, de-duplicated facts.
 
-This is the Mem0-style layer: instead of storing whole paragraphs, an extractor
+This is the extraction layer: instead of storing whole paragraphs, an extractor
 decides what discrete facts a message contains and whether each one is new,
 updates an existing memory, or is redundant.
 """

@@ -1,8 +1,8 @@
 """LLM interface — powers extraction and the dialectic user model.
 
 The core never requires an LLM: the default `NullLLM` makes the higher layers
-fall back to non-LLM behavior. Provide a real one to unlock Mem0-style extraction
-and Honcho-style user modeling.
+fall back to non-LLM behavior. Provide a real one to unlock automatic extraction
+and dialectic user modeling.
 """
 from __future__ import annotations
 

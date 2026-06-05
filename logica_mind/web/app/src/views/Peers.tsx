@@ -3,7 +3,7 @@ import { ArrowRight, Users } from "lucide-react";
 import { api, type PeerPair } from "../api";
 import { useI18n } from "../i18n";
 
-// Honcho-style multi-perspective: what one peer believes about another (directional).
+// Multi-perspective: what one peer believes about another (directional).
 export default function Peers({ ns }: { ns: string }) {
   const { t } = useI18n();
   const [pairs, setPairs] = useState<PeerPair[]>([]);

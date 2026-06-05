@@ -20,4 +20,4 @@ What you'd like to happen. API sketch welcome:
 Other approaches you thought about.
 
 **Additional context**
-Links, prior art (Honcho / Zep / Mem0 / Voyage), or anything else relevant.
+Links, prior art, or anything else relevant.

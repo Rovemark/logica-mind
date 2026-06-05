@@ -1,4 +1,4 @@
-"""Temporal knowledge graph (Zep-style)."""
+"""Temporal knowledge graph."""
 from .types import Edge
 from .temporal import TemporalGraph
 from .extractor import GraphExtractor, Triple

@@ -276,7 +276,7 @@ async function renderInsights(){
   $("view").innerHTML=html;
 }
 
-/* ---- graph: live canvas force-sim (Obsidian/Zep-style animation) ---- */
+/* ---- graph: live canvas force-sim (Obsidian-style animation) ---- */
 let G={nodes:[],links:[],byId:{},adj:{},t:{x:0,y:0,k:1},comp:{},
        hover:null,drag:null,alpha:0,raf:0,W:0,H:0,dpr:1};
 async function renderGraph(){

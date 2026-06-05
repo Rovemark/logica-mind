@@ -143,7 +143,7 @@ def seed(mind: "LogicaMind", *, rng_seed: int = 7, days: int = 75) -> int:
     edge("the launch", "scheduled_for", "March 15", ns="engineering")
     edge("the launch", "scheduled_for", "May 1", ns="engineering")
 
-    # ---- peers: directional observations (Honcho-style) ----
+    # ---- peers: directional observations ----
     for obr, obd in [("product", "engineering"), ("marketing", "research"),
                      ("finance", "product")]:
         m = mind.for_namespace(obr).observe_peer(

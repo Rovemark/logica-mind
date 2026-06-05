@@ -153,7 +153,7 @@ assistant's context layer.
 | **7 stores** | SQLite (default) · In-memory · Obsidian (markdown vault) · MultiStore (write to many at once) · Supabase (pgvector) · Postgres · Redis |
 | **6 embedders** | Hashing (offline default) · Voyage · OpenAI · Local (sentence-transformers) · Batched · Voyage-multimodal |
 | **5 rerankers** | MMR (diversity) · Voyage cross-encoder · RRF · node-distance · episode-mention |
-| **Extraction** | Mem0-style ADD / UPDATE / DELETE / NOOP with dedup and conflict resolution |
+| **Extraction** | Automatic ADD / UPDATE / DELETE / NOOP with dedup and conflict resolution |
 | **Auto-capture hooks** | `SessionStart` / `UserPromptSubmit` / `Stop` / `PreCompact` — memory that survives context compaction |
 | **Adapters & SDKs** | LangChain · LlamaIndex · a [provider adapter](examples/provider_adapter.py) for any host · a [TypeScript SDK](sdk-ts/) |
 
@@ -189,9 +189,31 @@ Peers · Changes (contradictions + changelog) · Insights · Workspace (codebase
 Dreams (forgetting curve, contested beliefs, dream journal). Dark / light themes,
 English / Português / Español.
 
-<div align="center">
-  <img src="docs/dashboard-overview.png" alt="Logica Mind dashboard — overview" width="100%">
-</div>
+<table>
+  <tr>
+    <td width="50%"><img src="docs/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
+    <td width="50%"><img src="docs/dashboard-changes.png" alt="Changes — contradictions and a memory changelog"><br><sub><b>Changes</b> — what changed over time: contradictions and a first-class memory changelog.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/dashboard-calendar.png" alt="Calendar — activity heatmap"><br><sub><b>Calendar</b> — an Obsidian-style heatmap of memory activity, day by day.</sub></td>
+    <td width="50%"><img src="docs/dashboard-overview.png" alt="Overview — layer counts and insights"><br><sub><b>Overview</b> — per-layer counts, recent activity and synthesized insights.</sub></td>
+  </tr>
+</table>
+
+---
+
+## 📚 Documentation
+
+Full guides live in [`docs/`](docs/):
+
+| | | |
+|---|---|---|
+| [Installation](docs/installation.md) | [Quickstart](docs/quickstart.md) | [Core concepts](docs/concepts.md) |
+| [Stores](docs/stores.md) | [Embeddings & reranking](docs/embeddings-and-reranking.md) | [Knowledge graph](docs/knowledge-graph.md) |
+| [Dreaming & lifecycle](docs/dreaming.md) | [User model & peers](docs/user-model-and-peers.md) | [Sessions & run records](docs/sessions-and-records.md) |
+| [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
+| [Dashboard](docs/dashboard.md) | [Portability & privacy](docs/portability-and-privacy.md) | [CLI](docs/cli.md) |
+| [API reference](docs/api-reference.md) | | |
 
 ---
 
@@ -213,9 +235,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 ## 📦 Status
 
 **v0.1.0 — Beta.** The full feature set above is shipped and covered by 180 tests.
-Logica Mind unifies design ideas from Honcho (dialectic user modeling), Zep /
-Graphiti (temporal graph), Voyage AI (embeddings + reranking) and Mem0
-(extraction) into one library — see [NOTICE](NOTICE).
+Episodic, semantic, temporal-graph and dialectic user memory; automatic
+extraction; embeddings + reranking; a temporal knowledge graph; sleep-time
+consolidation; an MCP server and a self-hosted dashboard — one cohesive library,
+offline by default.
 
 ## 📄 License
 

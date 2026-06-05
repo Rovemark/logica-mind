@@ -326,7 +326,7 @@ class TemporalGraph:
 
     def bfs(self, start: str, depth: int = 2, include_history: bool = False) -> dict:
         """Breadth-first traversal from `start`. Returns {nodes, edges, levels}
-        for everything reachable within `depth` hops (Zep-style neighborhood)."""
+        for everything reachable within `depth` hops (graph neighborhood)."""
         all_edges = self.edges(include_history)
         adj: dict = {}
         for e in all_edges:

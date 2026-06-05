@@ -57,7 +57,7 @@ export class LogicaMind {
     return res.json() as Promise<T>;
   }
 
-  /** Store a durable fact/note (Mem0-style extraction + dedup happens server-side). */
+  /** Store a durable fact/note (automatic extraction + dedup happen server-side). */
   remember(text: string, session?: string): Promise<{ stored: string[]; count: number }> {
     return this.post("/api/remember", { text, session });
   }

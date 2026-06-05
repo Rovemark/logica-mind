@@ -1,6 +1,6 @@
 """LLM graph extraction — turn prose into (subject, predicate, object) triples.
 
-This is what lets the GRAPH layer build itself (Zep/Mem0 style) instead of
+This is what lets the GRAPH layer build itself automatically instead of
 requiring manual graph.ingest() calls. Needs an LLM; with none it returns nothing
 (the graph simply stays manual). Feed the triples to TemporalGraph.ingest so they
 get temporal validity + invalidation like any other edge.

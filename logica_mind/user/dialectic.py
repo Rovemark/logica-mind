@@ -1,4 +1,4 @@
-"""Dialectic user model (Honcho-style).
+"""Dialectic user model.
 
 Keeps a living "theory of the user": raw observations accumulate, and a
 synthesis step reconciles them into one concise profile. With an LLM the
@@ -122,7 +122,7 @@ class DialecticUserModel:
         return text
 
     def query(self, question: str, k: int = 8) -> str:
-        """Dialectic query (Honcho-style): answer a question ABOUT the user,
+        """Dialectic query: answer a question ABOUT the user,
         reasoning over the profile + relevant observations. With an LLM it
         reasons; without one it returns the most relevant facts."""
         question = (question or "").strip()
