@@ -5,6 +5,7 @@ import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
 import NodeDetail from "../components/NodeDetail";
 import { useI18n } from "../i18n";
 import { AREAS, dimArea, dimColor, type Area } from "../lifearea";
+import { predLabel } from "../predlabel";
 
 type ColorBy = "namespace" | "community" | "area" | "centrality";
 
@@ -75,8 +76,10 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
       if (predOff.size && l.pclass && predOff.has(l.pclass)) return false;
       return true;
     });
+    // localize the predicate shown on each edge (display-only; pclass logic uses the raw value)
+    links = links.map((l) => (l.label ? { ...l, label: predLabel(l.label, t) } : l));
     return { nodes, links };
-  }, [data, colorBy, areaFilter, minConf, predOff]);
+  }, [data, colorBy, areaFilter, minConf, predOff, t]);
 
   const tint = colorBy === "area" ? (n: any) => (n.dimension ? dimColor(n.dimension) : "var(--dim2)")
     : colorBy === "centrality" ? (n: any) => centColor(n.centrality || 0)
@@ -180,7 +183,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                         <button key={p} onClick={() => setPredOff((s) => { const n = new Set(s); off ? n.delete(p) : n.add(p); return n; })}
                           className="text-[11px] px-2 py-1 rounded-full border inline-flex items-center gap-1.5"
                           style={{ borderColor: off ? "var(--line)" : PCLASS_HEX[p], color: off ? "var(--dim2)" : PCLASS_HEX[p], opacity: off ? 0.5 : 1 }}>
-                          <span className="w-2 h-2 rounded-full" style={{ background: PCLASS_HEX[p] }} />{p}
+                          <span className="w-2 h-2 rounded-full" style={{ background: PCLASS_HEX[p] }} />{t(("pclass_" + p) as any)}
                         </button>
                       );
                     })}
@@ -237,7 +240,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                   <div className="flex flex-col gap-1.5">
                     <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("colored_by_centrality")}</div>
                     <div className="h-2 rounded-full" style={{ background: "linear-gradient(90deg, hsl(210,72%,55%), hsl(120,72%,55%), hsl(40,72%,55%), hsl(0,72%,55%))" }} />
-                    <div className="flex justify-between text-[10px] text-[var(--dim2)]"><span>low</span><span>hub</span></div>
+                    <div className="flex justify-between text-[10px] text-[var(--dim2)]"><span>{t("cent_low")}</span><span>{t("cent_hub")}</span></div>
                   </div>
                 ) : colorBy === "area" ? (
                   <div className="flex flex-col gap-1.5">
@@ -263,7 +266,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                 <div className="border-t border-[var(--line)] mt-2.5 pt-2 flex flex-col gap-1">
                   <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_predicates")}</div>
                   {predsPresent.map((p) => (
-                    <span key={p} className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-3 border-t-2 flex-none" style={{ borderColor: PCLASS_HEX[p] }} />{p}</span>
+                    <span key={p} className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-3 border-t-2 flex-none" style={{ borderColor: PCLASS_HEX[p] }} />{t(("pclass_" + p) as any)}</span>
                   ))}
                   {coMention && <span className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-3 border-t border-dashed flex-none" style={{ borderColor: "#7888aa" }} />{t("glayer_comention")}</span>}
                   <span className="inline-flex items-center gap-2 text-[var(--dim)]"><span className="w-3 border-t border-dashed border-[var(--dim2)] flex-none" />{t("superseded")}</span>

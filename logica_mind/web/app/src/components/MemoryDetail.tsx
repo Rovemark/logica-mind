@@ -4,6 +4,7 @@ import { api, tShort, type Memory, type Connections } from "../api";
 import { LayerPill, SourceBadge } from "./MemoryCard";
 import Markdown from "./Markdown";
 import { dimColor } from "../lifearea";
+import { predLabel } from "../predlabel";
 import { useNav } from "../navctx";
 import { useI18n } from "../i18n";
 
@@ -98,7 +99,7 @@ export default function MemoryDetail({ memory, onClose }: { memory: Memory; onCl
               <Prop icon={Tag} k={t("prop_tags")}>{cur.tags.map((tg) => <span key={tg} className="inline-block text-[var(--accent2)] bg-[var(--panel2)] border border-[var(--line)] px-1.5 rounded mr-1 text-[11.5px]">#{tg}</span>)}</Prop>
             )}
             {(md.subject || md.predicate) && (
-              <Prop icon={GitBranch} k={t("prop_relation")}><span className="text-[var(--accent2)]">{md.subject} {md.predicate} {md.object}</span></Prop>
+              <Prop icon={GitBranch} k={t("prop_relation")}><span className="text-[var(--accent2)]">{md.subject} {predLabel(md.predicate, t)} {md.object}</span></Prop>
             )}
             <Prop icon={Hash} k={t("prop_id")}><span className="text-[var(--dim2)] text-[11px] font-mono">{cur.id}</span></Prop>
           </div>
@@ -141,7 +142,7 @@ export default function MemoryDetail({ memory, onClose }: { memory: Memory; onCl
                     {conn.relations.map((r, i) => (
                       <div key={r.id || i} className={`text-[12.5px] flex items-center gap-1.5 flex-wrap ${r.valid ? "" : "opacity-55 line-through decoration-[var(--dim2)]"}`}>
                         <button onClick={() => goEntity(r.subject)} className="text-[var(--accent2)] hover:underline">{r.subject}</button>
-                        <span className="text-[var(--dim)]">{r.predicate}</span>
+                        <span className="text-[var(--dim)]">{predLabel(r.predicate, t)}</span>
                         <button onClick={() => goEntity(r.object)} className="text-[var(--accent2)] hover:underline">{r.object}</button>
                       </div>
                     ))}
