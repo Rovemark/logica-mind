@@ -96,8 +96,13 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   function tick() {
     const g = G.current, N = g.nodes.length; if (!N) return;
     const K = Math.max(48, 230 / Math.sqrt(N)), a = g.alpha;
+    const CUT = (K * 12) * (K * 12);   // skip repulsion between far-apart nodes —
+    // their force is negligible and the pair-loop is the O(N²) cost that freezes
+    // big graphs. Keeps layout quality while making the tick effectively O(N·k).
     for (let i = 0; i < N; i++) { const A = g.nodes[i]; for (let k = i + 1; k < N; k++) { const B = g.nodes[k];
-      let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy || 0.01, dist = Math.sqrt(d2), rep = (K * K) / d2 * a * 0.9, ux = dx / dist, uy = dy / dist;
+      let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy || 0.01;
+      if (d2 > CUT) continue;
+      let dist = Math.sqrt(d2), rep = (K * K) / d2 * a * 0.9, ux = dx / dist, uy = dy / dist;
       A.vx += ux * rep; A.vy += uy * rep; B.vx -= ux * rep; B.vy -= uy * rep; } }
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
       let dx = B.x - A.x, dy = B.y - A.y, dist = Math.hypot(dx, dy) || 0.01, f = (dist - K) * 0.04 * a, ux = dx / dist, uy = dy / dist;
@@ -180,7 +185,11 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       c.lineWidth = (n.shared ? 2 : 1.4) / t.k; c.strokeStyle = nodeRing(!!n.shared); c.stroke();
       if (onP) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(251,191,36,.95)"; c.stroke(); }
       else if (n.bridge && !dim) { c.beginPath(); c.arc(n.x, n.y, (rad + 2.5) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 1.4 / t.k; c.setLineDash([2 / t.k, 2 / t.k]); c.strokeStyle = "rgba(245,158,11,.85)"; c.stroke(); c.setLineDash([]); }
-      if (t.k > 0.6 && (active || onP)) { c.fillStyle = active || onP ? labelFill : labelFillDim; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
+      // labels are the expensive part (stroke+fill text per node) — skip them
+      // WHILE the layout is still settling (alpha high) so the animation stays
+      // smooth; they snap in once it settles, or immediately for the hovered node.
+      if (t.k > 0.6 && (active || onP) && (g.alpha < 0.08 || n.id === hi || onP)) {
+        c.fillStyle = active || onP ? labelFill : labelFillDim; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
         c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.strokeText(n.id, n.x, n.y - (rad + 5) / t.k); c.fillText(n.id, n.x, n.y - (rad + 5) / t.k); }
     });
     c.restore();
@@ -217,9 +226,17 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // so pan/zoom/drag still work.
     const anim = localStorage.getItem("lm-anim") !== "off";
     g.alpha = 1;
-    if (!anim) { for (let k = 0; k < 400; k++) tick(); g.alpha = 0; }
+    if (!anim) {
+      for (let k = 0; k < 400; k++) tick(); g.alpha = 0;
+    } else {
+      // pre-settle OFF-SCREEN so the visible animation starts mostly organized and
+      // is short + smooth (instead of a long jittery O(N²) settle on screen).
+      for (let k = 0; k < 140; k++) tick();
+    }
     if (!g.fitOnce) { fitGraph(false); g.fitOnce = true; }
-    const loop = () => { tick(); draw(); g.raf = requestAnimationFrame(loop); }; loop();
+    // skip the physics tick once settled (alpha→0) — keep redrawing so hover/pan/
+    // zoom/drag stay responsive, but stop burning CPU on a converged layout.
+    const loop = () => { if (g.alpha > 0) tick(); draw(); g.raf = requestAnimationFrame(loop); }; loop();
 
     // ---- interaction (mouse) ----
     let mode: string | null = null, last: any = null, downPos: any = null, downNode: any = null;
