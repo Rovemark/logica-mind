@@ -193,7 +193,8 @@ class Store(ABC):
         ...
 
     @abstractmethod
-    def all(self, namespace: str, layers: Optional[List[MemoryLayer]] = None) -> List[Memory]:
+    def all(self, namespace: str, layers: Optional[List[MemoryLayer]] = None,
+            with_embeddings: bool = True) -> List[Memory]:
         ...
 
     @abstractmethod

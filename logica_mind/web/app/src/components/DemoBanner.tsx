@@ -10,10 +10,14 @@ import { useI18n } from "../i18n";
 export default function DemoBanner({ onChange }: { onChange?: () => void }) {
   const { t } = useI18n();
   const [present, setPresent] = useState<boolean | null>(null);
+  const [total, setTotal] = useState<number | null>(null);   // real store size
   const [busy, setBusy] = useState(false);
   const [kept, setKept] = useState(() => localStorage.getItem("lm-demo-kept") === "1");
 
-  const refresh = () => api.demoStatus().then((d) => setPresent(d.present)).catch(() => setPresent(null));
+  const refresh = () => Promise.all([
+    api.demoStatus().then((d) => setPresent(d.present)).catch(() => setPresent(false)),
+    api.stats("__all__").then((s) => setTotal(s.stats?.total ?? 0)).catch(() => setTotal(0)),
+  ]);
   useEffect(() => { refresh(); }, []);
 
   async function load() {
@@ -29,10 +33,14 @@ export default function DemoBanner({ onChange }: { onChange?: () => void }) {
   }
   function keep() { setKept(true); localStorage.setItem("lm-demo-kept", "1"); }
 
-  if (present === null) return null;
+  // wait until BOTH the demo status and the real store size are known — never
+  // flash the "empty" banner while data is still loading.
+  if (present === null || total === null) return null;
 
-  // empty store → offer to load the demo
-  if (!present) {
+  // offer the demo ONLY when the store is GENUINELY empty (no real memories) —
+  // "no demo loaded" is NOT the same as "empty": a store full of the user's own
+  // memories must never be told it's empty.
+  if (!present && total === 0) {
     return (
       <div className="mx-6 mt-3 max-[820px]:mx-3.5 flex items-center gap-3 rounded-[11px] border border-[var(--line)] bg-[var(--panel2)] px-4 py-2.5">
         <Sparkles size={15} className="text-[var(--accent2)] flex-none" />

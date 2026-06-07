@@ -20,6 +20,7 @@ const centColor = (c: number) => `hsl(${Math.round(210 - 210 * Math.min(1, Math.
 export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: { ns: string; colorFor: (n: string) => string; onOpenMemory?: (m: any) => void; focusEntity?: { name: string; n: number } | null }) {
   const { t } = useI18n();
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
+  const [loaded, setLoaded] = useState(false);
   const [history, setHistory] = useState(true);
   const [colorBy, setColorBy] = useState<ColorBy>("namespace");
   const [coMention, setCoMention] = useState(true);
@@ -52,7 +53,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
 
   useEffect(() => {
     const layers = ["relation", coMention && "co_mention", semantic && "semantic"].filter(Boolean) as string[];
-    api.graph(ns, history, at, { layers, focus: focusNode || undefined, depth }).then(setData).catch(() => setData({ nodes: [], links: [] }));
+    setLoaded(false);
+    api.graph(ns, history, at, { layers, focus: focusNode || undefined, depth })
+      .then(setData).catch(() => setData({ nodes: [], links: [] })).finally(() => setLoaded(true));
   }, [ns, history, at, coMention, semantic, focusNode, depth]);
 
   // reset transient view state when switching namespace
@@ -307,7 +310,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           </div>
         )}
 
-        {shown.nodes.length === 0 ? (
+        {!loaded ? (
+          <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("loading")}</div>
+        ) : shown.nodes.length === 0 ? (
           <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("graph_empty")}</div>
         ) : (
           <GraphCanvas ref={gref} data={shown} communities={communities} colorFor={colorFor} onPick={setPicked} nodeTint={tint}
