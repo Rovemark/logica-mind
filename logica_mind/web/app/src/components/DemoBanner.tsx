@@ -53,6 +53,11 @@ export default function DemoBanner({ onChange }: { onChange?: () => void }) {
     );
   }
 
+  // no demo dataset present → nothing to offer or clear. (The empty-store case
+  // was handled above; here the store has the user's REAL data and no demo, so
+  // the banner must stay silent — never tell them they're seeing demo data.)
+  if (!present) return null;
+
   // demo loaded and the user already chose to keep it → stay quiet
   if (kept) return null;
 
