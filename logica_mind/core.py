@@ -652,7 +652,20 @@ class LogicaMind:
         return child
 
     def list_namespaces(self) -> List[Dict[str, Any]]:
-        """Every namespace in the store with per-layer counts (for the sidebar)."""
+        """Every namespace in the store with per-layer counts (for the sidebar).
+
+        Fast path: one GROUP BY via the store's bucket_counts() (no row/embedding
+        materialization). Falls back to per-layer COUNT only if the store lacks it."""
+        layer_keys = [l.value for l in MemoryLayer]
+        bucket = getattr(self.store, "bucket_counts", None)
+        if callable(bucket):
+            counts = bucket()
+            out = []
+            for ns, by_layer in counts.items():
+                stats = {k: int(by_layer.get(k, 0)) for k in layer_keys}
+                out.append({"namespace": ns, "total": sum(stats.values()), "stats": stats})
+            out.sort(key=lambda x: (-x["total"], x["namespace"]))
+            return out
         out: List[Dict[str, Any]] = []
         for ns in self.store.namespaces():
             stats, total = {}, 0
@@ -682,7 +695,7 @@ class LogicaMind:
 
     def graph_viz(self, namespace: Optional[str] = None, include_history: bool = True,
                   at: Optional[str] = None, layers: Optional[List[str]] = None,
-                  focus: Optional[str] = None, depth: int = 1) -> Dict[str, Any]:
+                  focus: Optional[str] = None, depth: int = 1, limit: int = 0) -> Dict[str, Any]:
         """Graph payload for the UI. A single namespace, or the *general* graph
         across all of them with shared entities flagged.
 
@@ -703,13 +716,23 @@ class LogicaMind:
                     n["dimension"] = edim[n["id"]]
             for l in viz["links"]:
                 l["namespace"] = namespace
-            node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth)
+            node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth, limit)
             return {"nodes": node_list, "links": links, "namespaces": [namespace],
                     "focus": focus, "depth": depth}
 
         nodes: Dict[str, set] = {}
         links: List[Dict[str, Any]] = []
         all_ns = self.store.namespaces()
+        # __all__ is dominated by opening a TemporalGraph + querying edges for EVERY
+        # namespace — but only namespaces with graph-layer memories have edges. Skip
+        # the empty ones (co_mention also only links already-present nodes, so it's
+        # safe). Turns an 86-namespace sweep into the 1-2 that actually have a graph.
+        _bc = getattr(self.store, "bucket_counts", None)
+        if callable(_bc):
+            _counts = _bc()
+            _withgraph = [n for n in all_ns if _counts.get(n, {}).get("graph", 0) > 0]
+            if _withgraph:
+                all_ns = _withgraph
         for ns in all_ns:
             g = TemporalGraph(self.store, ns, self.embedder)
             for e in g.edges(include_history, at=at):
@@ -727,14 +750,16 @@ class LogicaMind:
             if name in edim:
                 n["dimension"] = edim[name]
             node_list.append(n)
-        node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth)
+        node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth, limit)
         return {"nodes": node_list, "links": links, "namespaces": all_ns,
                 "focus": focus, "depth": depth}
 
-    def _finish_viz(self, node_list, links, ns_scope, want, focus, depth):
+    def _finish_viz(self, node_list, links, ns_scope, want, focus, depth, limit: int = 0):
         """Shared graph augmentation: tag relation links (kind/weight/direction/
         predicate-class), fold in the requested emergent layers, compute degree +
-        PageRank centrality, and (optionally) clip to a focus node's local graph."""
+        PageRank centrality, (optionally) clip to a focus node's local graph, and
+        (optionally) cap to the `limit` most-central nodes so a huge graph stays
+        renderable in the browser."""
         from .graph.analytics import pagerank, predicate_class, build_adjacency, ego_nodes, articulation_points
         for l in links:
             l.setdefault("kind", "relation")
@@ -776,6 +801,23 @@ class LogicaMind:
             keep = ego_nodes(build_adjacency(weighted), focus, max(1, int(depth or 1)))
             node_list = [n for n in node_list if n["id"] in keep]
             links = [l for l in links if l["source"] in keep and l["target"] in keep]
+        # cap to the most-central nodes so a huge graph (e.g. __all__ across every
+        # namespace, thousands of edges) stays renderable in the browser. Keeps the
+        # meaningful core; edges restricted to kept nodes. No cap when focused.
+        elif limit and len(node_list) > limit:
+            top = sorted(node_list, key=lambda n: n.get("centrality", 0.0), reverse=True)[:limit]
+            keep = {n["id"] for n in top}
+            node_list = top
+            links = [l for l in links if l["source"] in keep and l["target"] in keep]
+        # cap LINKS too — the force canvas is link-bound, and the co_mention layer
+        # can pack thousands of edges among even a few nodes. Keep the most useful:
+        # typed relations first, then strongest weight. ~4x the node budget.
+        if limit:
+            link_cap = max(limit * 4, 400)
+            if len(links) > link_cap:
+                _rank = {"relation": 0, "semantic": 1, "co_mention": 2, "suggested": 3}
+                links = sorted(links, key=lambda l: (_rank.get(l.get("kind", "relation"), 9),
+                                                     -float(l.get("weight", 1.0))))[:link_cap]
         return node_list, links
 
     def _co_mention_links(self, namespaces, cooc_min: int = 2, cap_per_mem: int = 8):
@@ -2002,7 +2044,7 @@ class LogicaMind:
         to a live `store.get(supersedes)` for older data written before snapshots.
         """
         out: List[Dict[str, Any]] = []
-        for m in self.store.all(self.namespace, [MemoryLayer.SEMANTIC]):
+        for m in self.store.all(self.namespace, [MemoryLayer.SEMANTIC], with_embeddings=False):
             if m.importance < confidence_threshold:
                 continue
             md = m.metadata or {}

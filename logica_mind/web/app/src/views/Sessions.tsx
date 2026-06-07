@@ -94,18 +94,21 @@ function RenameInline({ session, onDone }: { session: SessionItem; onDone: (name
 export default function Sessions({ ns }: { ns: string }) {
   const { t } = useI18n();
   const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [sel, setSel] = useState<SessionItem | null>(null);
   const [mems, setMems] = useState<Memory[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [page, setPage] = useState(1);
 
-  const load = () =>
-    api.sessions(ns).then((d) => {
+  const load = () => {
+    setLoaded(false);
+    return api.sessions(ns).then((d) => {
       const list = d.sessions || [];
       setSessions(list);
       setSel(prev => prev ? (list.find(s => s.id === prev.id && s.namespace === prev.namespace) || list[0] || null) : list[0] || null);
-    }).catch(() => setSessions([]));
+    }).catch(() => setSessions([])).finally(() => setLoaded(true));
+  };
 
   useEffect(() => { load(); setPage(1); }, [ns]);
   const spg = paginate(sessions, page, 12);
@@ -149,7 +152,8 @@ export default function Sessions({ ns }: { ns: string }) {
             {importing ? t("importing") : "↓ Claude"}
           </button>
         </div>
-        {sessions.length ? (<>{spg.slice.map((s, i) => {
+        {!loaded ? <div className="text-[var(--dim)] card-surface text-center py-10">{t("loading")}</div>
+          : sessions.length ? (<>{spg.slice.map((s, i) => {
           const on = sel && sel.id === s.id && sel.namespace === s.namespace;
           const isEditing = editing === s.id;
           return (

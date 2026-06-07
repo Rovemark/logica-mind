@@ -82,10 +82,14 @@ class MultiStore(Store):
                 print(f"[logica-mind] MultiStore.delete: {s.name} failed: {e}", file=sys.stderr)
         return deleted
 
-    def all(self, namespace, layers=None) -> List[Memory]:
+    def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         seen: Dict[str, Memory] = {}
         for s in self.stores:
-            for m in s.all(namespace, layers):
+            try:
+                rows = s.all(namespace, layers, with_embeddings=with_embeddings)
+            except TypeError:
+                rows = s.all(namespace, layers)   # store predates the kwarg
+            for m in rows:
                 seen.setdefault(m.id, m)
         return list(seen.values())
 
@@ -131,6 +135,31 @@ class MultiStore(Store):
                 s.touch(namespace, ids)
             except Exception:
                 pass
+
+    # Fast read aggregations — delegate to the PRIMARY store that supports them
+    # (the children hold the same logical set; summing would double-count). The
+    # primary is SQLite, which answers these with one SQL query instead of
+    # materializing rows in every backend.
+    def bucket_counts(self):
+        for s in self.stores:
+            if hasattr(s, "bucket_counts"):
+                return s.bucket_counts()
+        out = {}
+        for ns in self.namespaces():
+            out[ns] = {m.layer.value: 0 for m in []}
+        return out
+
+    def day_counts(self, namespace=None, exclude_layers=None):
+        for s in self.stores:
+            if hasattr(s, "day_counts"):
+                return s.day_counts(namespace, exclude_layers)
+        return {}
+
+    def page(self, namespace, layers=None, limit=100, offset=0):
+        for s in self.stores:
+            if hasattr(s, "page"):
+                return s.page(namespace, layers, limit, offset)
+        return self.all(namespace, layers)[offset:offset + limit]
 
     def close(self) -> None:
         for s in self.stores:

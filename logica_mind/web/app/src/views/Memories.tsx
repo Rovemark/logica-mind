@@ -12,6 +12,7 @@ export default function Memories({ ns, focus, onChanged, filter }: { ns: string;
   const { t } = useI18n();
   const [layer, setLayer] = useState("");
   const [mems, setMems] = useState<Memory[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [hl, setHl] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [memF, setMemF] = useState<MemFilter | null>(filter ?? null);
@@ -23,7 +24,10 @@ export default function Memories({ ns, focus, onChanged, filter }: { ns: string;
   }
 
   useEffect(() => {
-    api.memories(ns, layer || undefined, memF?.dimension, memF?.category).then((d) => setMems(d.memories)).catch(() => setMems([]));
+    setLoaded(false);
+    api.memories(ns, layer || undefined, memF?.dimension, memF?.category)
+      .then((d) => setMems(d.memories)).catch(() => setMems([]))
+      .finally(() => setLoaded(true));
     setPage(1);
   }, [ns, layer, memF]);
 
@@ -70,7 +74,8 @@ export default function Memories({ ns, focus, onChanged, filter }: { ns: string;
           </span>
         )}
       </div>
-      {mems.length ? (<>
+      {!loaded ? <div className="text-[var(--dim)] text-center py-12">{t("loading")}</div>
+        : mems.length ? (<>
         {slice.map((m) => <MemoryCard key={m.id} m={m} highlight={hl === m.id} onDelete={() => del(m)} />)}
         <Pager page={cp} pages={pages} onPage={setPage} />
       </>) : <div className="text-[var(--dim)] text-center py-12">{t("nothing_here")}</div>}

@@ -9,11 +9,13 @@ export default function Overview({ ns }: { ns: string }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [insight, setInsight] = useState("");
   const [recent, setRecent] = useState<Memory[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    setLoaded(false);
     api.stats(ns).then((d) => setStats(d.stats)).catch(() => setStats(null));
     api.reflect(ns).then((d) => setInsight(d.insight || "")).catch(() => setInsight(""));
-    api.memories(ns).then((d) => setRecent(d.memories.slice(0, 8))).catch(() => setRecent([]));
+    api.memories(ns).then((d) => setRecent(d.memories.slice(0, 8))).catch(() => setRecent([])).finally(() => setLoaded(true));
   }, [ns]);
 
   return (
@@ -30,7 +32,8 @@ export default function Overview({ ns }: { ns: string }) {
         </>
       )}
       <div className="text-[var(--dim2)] text-[12px] uppercase tracking-[.7px] mb-2.5">{t("recent_activity")}</div>
-      {recent.length ? recent.map((m) => <MemoryCard key={m.id} m={m} />)
+      {!loaded ? <div className="text-[var(--dim)] text-center py-10">{t("loading")}</div>
+        : recent.length ? recent.map((m) => <MemoryCard key={m.id} m={m} />)
         : <div className="text-[var(--dim)] text-center py-10">{t("no_memories_yet")}</div>}
     </div>
   );

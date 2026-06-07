@@ -92,14 +92,14 @@ class SQLiteStore(Store):
 
     # ---- (de)serialization -------------------------------------------------
     @staticmethod
-    def _row_to_memory(row: sqlite3.Row) -> Memory:
+    def _row_to_memory(row: sqlite3.Row, with_embeddings: bool = True) -> Memory:
         keys = row.keys()
         m = Memory(
             id=row["id"],
             namespace=row["namespace"],
             content=row["content"],
             layer=MemoryLayer(row["layer"]),
-            embedding=json.loads(row["embedding"]) if row["embedding"] else None,
+            embedding=(json.loads(row["embedding"]) if with_embeddings and "embedding" in keys and row["embedding"] else None),
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             importance=row["importance"] if row["importance"] is not None else 0.5,
             tags=json.loads(row["tags"]) if row["tags"] else [],
@@ -140,7 +140,8 @@ class SQLiteStore(Store):
         self._conn.commit()
 
     def _candidates(self, namespace: str, layers: Optional[List[MemoryLayer]],
-                    metadata_filter: Optional[dict] = None) -> List[Memory]:
+                    metadata_filter: Optional[dict] = None,
+                    with_embeddings: bool = True) -> List[Memory]:
         sql = "SELECT * FROM memories WHERE namespace = ?"
         params: list = [namespace]
         if layers:
@@ -169,7 +170,7 @@ class SQLiteStore(Store):
         sql += " ORDER BY created_at DESC, seq DESC, rowid DESC LIMIT ?"
         params.append(self.max_candidates)
         cur = self._conn.execute(sql, params)
-        return [self._row_to_memory(r) for r in cur.fetchall()]
+        return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
 
     @_locked
     def search(self, namespace, query_embedding, query_text, layers=None, limit=20, metadata_filter=None) -> List[SearchResult]:
@@ -217,8 +218,11 @@ class SQLiteStore(Store):
         return cur.rowcount
 
     @_locked
-    def all(self, namespace, layers=None) -> List[Memory]:
-        return self._candidates(namespace, layers)
+    def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
+        # with_embeddings=False skips parsing the 384-float vector per row — a big
+        # win for enumeration/aggregation endpoints (sessions, dimensions, analytics)
+        # that only read content/metadata, never similarity.
+        return self._candidates(namespace, layers, with_embeddings=with_embeddings)
 
     @_locked
     def namespaces(self) -> List[str]:
@@ -249,6 +253,60 @@ class SQLiteStore(Store):
             sql += f" AND layer IN ({placeholders})"
             params += [l.value for l in layers]
         return self._conn.execute(sql, params).fetchone()["n"]
+
+    @_locked
+    def bucket_counts(self):
+        """All per-namespace, per-layer counts in ONE SQL query — no row/embedding
+        materialization. Powers the sidebar + stats without loading thousands of
+        Memory objects. Returns {namespace: {layer: n}}."""
+        out: dict = {}
+        for r in self._conn.execute(
+                "SELECT namespace, layer, COUNT(*) AS n FROM memories GROUP BY namespace, layer"):
+            out.setdefault(r["namespace"], {})[r["layer"]] = r["n"]
+        return out
+
+    @_locked
+    def day_counts(self, namespace=None, exclude_layers=None):
+        """Per-day, per-layer counts in ONE SQL query — powers the calendar heatmap
+        without materializing rows. namespace None = every namespace; exclude_layers
+        drops layers (e.g. 'graph') from the buckets. Returns {day: {total, <layer>}}."""
+        sql = "SELECT substr(created_at,1,10) AS d, layer, COUNT(*) AS n FROM memories WHERE created_at <> ''"
+        params: list = []
+        if namespace:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        if exclude_layers:
+            ph = ",".join("?" for _ in exclude_layers)
+            sql += f" AND layer NOT IN ({ph})"
+            params += list(exclude_layers)
+        sql += " GROUP BY d, layer"
+        out: dict = {}
+        for r in self._conn.execute(sql, params):
+            e = out.setdefault(r["d"], {"total": 0, "episodic": 0, "semantic": 0, "graph": 0, "user": 0})
+            e[r["layer"]] = e.get(r["layer"], 0) + r["n"]
+            e["total"] += r["n"]
+        return out
+
+    @_locked
+    def page(self, namespace=None, layers=None, limit=100, offset=0):
+        """A bounded page of memories (newest first) — LIMIT/OFFSET in SQL so a list
+        view materializes ~100 rows instead of every row. namespace=None pages
+        GLOBALLY across all namespaces (for the __all__ view)."""
+        sql = "SELECT * FROM memories"
+        params: list = []
+        where = []
+        if namespace:
+            where.append("namespace = ?")
+            params.append(namespace)
+        if layers:
+            ph = ",".join("?" for _ in layers)
+            where.append(f"layer IN ({ph})")
+            params += [l.value for l in layers]
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params += [int(limit), int(offset)]
+        return [self._row_to_memory(r) for r in self._conn.execute(sql, params).fetchall()]
 
     def close(self) -> None:
         with self._lock:

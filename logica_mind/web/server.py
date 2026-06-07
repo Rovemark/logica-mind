@@ -57,7 +57,7 @@ def _save_session_names(store, names: dict) -> None:
 
 def _auto_name_session(mind, namespace: str, session_id: str) -> str:
     """Generate an auto-name from the session's first user message."""
-    for m in sorted(mind.store.all(namespace), key=lambda x: x.created_at or ""):
+    for m in sorted(mind.store.all(namespace, with_embeddings=False), key=lambda x: x.created_at or ""):
         md = m.metadata or {}
         if md.get("session") != session_id:
             continue
@@ -250,12 +250,33 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             auth = self.headers.get("Authorization", "")
             return auth.startswith("Bearer ") and hmac.compare_digest(auth[7:], token)
 
+        def _cors(self):
+            # the server binds loopback only, so a permissive ACAO is safe and lets
+            # a same-host dashboard (e.g. http://localhost:3001) fetch /api/* and
+            # embed the UI without cross-origin breakage.
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
         def _send(self, code, body: bytes, ctype):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
+            # never let the browser serve a STALE /api response (e.g. an old empty
+            # graph cached before the backfill) — API data must always be fresh.
+            if self.path.startswith("/api/"):
+                self.send_header("Cache-Control", "no-store")
+            self._cors()
             self.end_headers()
             self.wfile.write(body)
+
+        def do_OPTIONS(self):
+            # CORS preflight — browsers send this before a cross-origin POST/custom
+            # request. Answer 204 with the CORS headers so the real call proceeds.
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self._cors()
+            self.end_headers()
 
         def _json(self, obj, code=200):
             self._send(code, json.dumps(obj).encode("utf-8"), "application/json")
@@ -417,7 +438,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         except (ValueError, TypeError):
                             return self._json({"error": "older_than_days must be a number"}, 400)
                         layers = [MemoryLayer(layer_str)] if layer_str else None
-                        to_del = [m for m in mind.store.all(tgt_ns, layers)
+                        to_del = [m for m in mind.store.all(tgt_ns, layers, with_embeddings=False)
                                   if m.created_at and
                                   _time.mktime(_time.strptime(m.created_at[:19], "%Y-%m-%dT%H:%M:%S")) < cutoff_ts]
                         for m in to_del:
@@ -529,7 +550,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         # categories: distinct fact categories matching the query
                         catc = {}
                         for nm in mind.store.namespaces():
-                            for m in mind.store.all(nm):
+                            for m in mind.store.all(nm, with_embeddings=False):
                                 c = (m.metadata or {}).get("category")
                                 if c and ql in c.lower():
                                     catc[c] = catc.get(c, 0) + 1
@@ -597,7 +618,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     agg = {}
                     uncategorized = 0
                     for nm in names:
-                        for m in mind.store.all(nm):
+                        for m in mind.store.all(nm, with_embeddings=False):
                             if _is_internal(m):
                                 continue
                             md = m.metadata or {}
@@ -644,22 +665,32 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     session = first(qs, "session")     # optional: scope to one session
                     dim = first(qs, "dimension")       # optional: a life-dimension filter
                     category = first(qs, "category")   # optional: an exact-category filter
-                    names = [n["namespace"] for n in mind.list_namespaces()] if is_all else [ns]
-                    mems = []
-                    for name in names:
-                        for m in mind.store.all(name, layers):
-                            if _is_internal(m):
-                                continue
-                            md = m.metadata or {}
-                            if session and md.get("session") != session:
-                                continue
-                            if dim and md.get("dimension") != dim:
-                                continue
-                            if category and md.get("category") != category:
-                                continue
-                            mems.append(m)
-                    mems.sort(key=lambda m: m.created_at or "", reverse=True)
-                    self._json({"memories": [_strip(m.to_dict()) for m in mems[:500]]})
+                    lim = int(first(qs, "limit", "200") or 200)
+                    off = int(first(qs, "offset", "0") or 0)
+                    pager = getattr(mind.store, "page", None)
+                    # Fast path: no metadata filters → SQL LIMIT/OFFSET (newest first),
+                    # materializing ~200 rows instead of every row in every namespace.
+                    if callable(pager) and not (session or dim or category):
+                        mems = [m for m in pager(None if is_all else ns, layers, lim, off)
+                                if not _is_internal(m)]
+                        self._json({"memories": [_strip(m.to_dict()) for m in mems]})
+                    else:
+                        names = mind.store.namespaces() if is_all else [ns]
+                        mems = []
+                        for name in names:
+                            for m in mind.store.all(name, layers, with_embeddings=False):
+                                if _is_internal(m):
+                                    continue
+                                md = m.metadata or {}
+                                if session and md.get("session") != session:
+                                    continue
+                                if dim and md.get("dimension") != dim:
+                                    continue
+                                if category and md.get("category") != category:
+                                    continue
+                                mems.append(m)
+                        mems.sort(key=lambda m: m.created_at or "", reverse=True)
+                        self._json({"memories": [_strip(m.to_dict()) for m in mems[off:off + lim]]})
 
                 elif path == "/api/sessions":
                     # distinct sessions with counts + time span + names
@@ -667,7 +698,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     names_list = mind.store.namespaces() if is_all else [ns]
                     sess = {}
                     for name in names_list:
-                        for m in mind.store.all(name):
+                        for m in mind.store.all(name, with_embeddings=False):
                             md = m.metadata or {}
                             sid = md.get("session")
                             if not sid:
@@ -731,7 +762,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     names = mind.store.namespaces() if is_all else [ns]
                     mems = []
                     for name in names:
-                        mems.extend(mind.store.all(name))
+                        mems.extend(mind.store.all(name, with_embeddings=False))
                     mems.sort(key=lambda m: m.created_at or "")
                     self._json({"namespace": "__all__" if is_all else ns,
                                 "count": len(mems), "memories": [m.to_dict() for m in mems]})
@@ -743,9 +774,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     layers = [s for s in lyr.split(",") if s] if lyr else None
                     foc = first(qs, "focus") or None
                     dep = int(first(qs, "depth", "1") or 1)
+                    # cap the rendered graph to the most-central nodes (0 = no cap).
+                    # Keeps __all__ / huge namespaces from freezing the browser canvas.
+                    lim = int(first(qs, "limit", "250") or 250)
                     self._json(mind.graph_viz(namespace=None if is_all else ns,
                                               include_history=hist, at=at,
-                                              layers=layers, focus=foc, depth=dep))
+                                              layers=layers, focus=foc, depth=dep, limit=lim))
 
                 elif path == "/api/timerange":
                     # true min/max created_at via a cheap data-layer MIN/MAX (no row
@@ -804,20 +838,27 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     self._json({"namespace": tgt, "question": q, "answer": answer})
 
                 elif path == "/api/calendar":
-                    # per-day memory counts (+ per layer) for the Obsidian-style heatmap
-                    names = mind.store.namespaces() if is_all else [ns]
-                    days = {}
-                    for name in names:
-                        for m in mind.store.all(name):
-                            if _is_internal(m):
-                                continue
-                            d = (m.created_at or "")[:10]
-                            if not d:
-                                continue
-                            e = days.setdefault(d, {"total": 0, "episodic": 0,
-                                                    "semantic": 0, "graph": 0, "user": 0})
-                            e["total"] += 1
-                            e[m.layer.value] = e.get(m.layer.value, 0) + 1
+                    # per-day memory counts (+ per layer) for the Obsidian-style heatmap.
+                    # Fast path: one GROUP BY via store.day_counts() (no row materialization).
+                    # GRAPH excluded — its created_at is the extraction time, not a real
+                    # event, so it'd pile onto a single day and swamp the heatmap.
+                    dc = getattr(mind.store, "day_counts", None)
+                    if callable(dc):
+                        days = dc(None if is_all else ns, exclude_layers=["graph"])
+                    else:
+                        names = mind.store.namespaces() if is_all else [ns]
+                        days = {}
+                        for name in names:
+                            for m in mind.store.all(name, with_embeddings=False):
+                                if _is_internal(m) or m.layer == MemoryLayer.GRAPH:
+                                    continue
+                                d = (m.created_at or "")[:10]
+                                if not d:
+                                    continue
+                                e = days.setdefault(d, {"total": 0, "episodic": 0,
+                                                        "semantic": 0, "graph": 0, "user": 0})
+                                e["total"] += 1
+                                e[m.layer.value] = e.get(m.layer.value, 0) + 1
                     self._json({"days": days})
 
                 elif path == "/api/day":
@@ -826,7 +867,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     names = mind.store.namespaces() if is_all else [ns]
                     mems = []
                     for name in names:
-                        for m in mind.store.all(name, layers):
+                        for m in mind.store.all(name, layers, with_embeddings=False):
                             if _is_internal(m):
                                 continue
                             if date and (m.created_at or "").startswith(date):
@@ -848,7 +889,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     scan = mind.store.namespaces() if is_all else [ns]
                     mems, connected = [], {}
                     for nm in scan:
-                        for m in mind.store.all(nm):
+                        for m in mind.store.all(nm, with_embeddings=False):
                             if _is_internal(m):
                                 continue
                             md = m.metadata or {}
@@ -1030,13 +1071,17 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     by_layer = {l.value: 0 for l in MemoryLayer}
                     by_source, by_day, sessions, ns_rows = {}, {}, set(), {}
                     entities_total = relations_total = contradictions_total = 0
+                    _bc = getattr(mind.store, "bucket_counts", None)
+                    _gcounts = _bc() if callable(_bc) else {}
                     for nm in names:
                         ent = facts = rel = 0
                         last = None
                         day_spark = {}
-                        for m in mind.store.all(nm):
+                        total_ns = 0
+                        for m in mind.store.all(nm, with_embeddings=False):
                             if _is_internal(m):
                                 continue
+                            total_ns += 1
                             md = m.metadata or {}
                             lv = m.layer.value
                             by_layer[lv] = by_layer.get(lv, 0) + 1
@@ -1056,16 +1101,17 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                 rel += 1
                             elif lv in ("semantic", "user"):
                                 facts += 1
-                        # entities + contradictions via the graph
-                        try:
-                            sub = mind.for_namespace(nm)
-                            ent = len(sub.graph_nodes())
-                            relations_total += rel
-                            entities_total += ent
-                            contradictions_total += len(sub.contradictions())
-                        except Exception:
-                            pass
-                        total_ns = sum(1 for m in mind.store.all(nm) if not _is_internal(m))
+                        # entities + contradictions via the graph — only for namespaces
+                        # that actually HAVE a graph (skip the empty ones; most are).
+                        if _gcounts.get(nm, {}).get("graph", 0) > 0:
+                            try:
+                                sub = mind.for_namespace(nm)
+                                ent = len(sub.graph_nodes())
+                                relations_total += rel
+                                entities_total += ent
+                                contradictions_total += len(sub.contradictions())
+                            except Exception:
+                                pass
                         # last-7-day sparkline for the Context-Lake-style row
                         spark = []
                         base = _dt.datetime.now(_dt.timezone.utc)
