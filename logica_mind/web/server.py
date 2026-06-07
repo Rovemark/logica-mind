@@ -262,9 +262,11 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
-            # never let the browser serve a STALE /api response (e.g. an old empty
-            # graph cached before the backfill) — API data must always be fresh.
-            if self.path.startswith("/api/"):
+            # never let the browser serve a STALE /api response, nor a stale app
+            # shell (index.html) that would reference an old JS bundle — both must
+            # always be fresh. The hashed JS/CSS assets can cache forever (their
+            # name changes on rebuild), so only /api and HTML get no-store.
+            if self.path.startswith("/api/") or "text/html" in ctype:
                 self.send_header("Cache-Control", "no-store")
             self._cors()
             self.end_headers()
