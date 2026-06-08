@@ -893,15 +893,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 elif path == "/api/day":
                     date = first(qs, "date")            # YYYY-MM-DD
                     layers = layers_of(qs)
-                    names = mind.store.namespaces() if is_all else [ns]
-                    mems = []
-                    for name in names:
-                        for m in mind.store.all(name, layers, with_embeddings=False):
-                            if _is_internal(m):
-                                continue
-                            if date and (m.created_at or "").startswith(date):
-                                mems.append(m)
-                    mems.sort(key=lambda m: m.created_at or "", reverse=True)
+                    # use store.day() — the date filter runs in SQL (substr(created_at)),
+                    # so it is NOT capped by the 5000 _candidates window (the old all()
+                    # path only saw the newest 5000 rows → old days showed empty).
+                    mems = [m for m in mind.store.day(None if is_all else ns, date, layers,
+                                                      with_embeddings=False)
+                            if not _is_internal(m)]
                     self._json({"date": date, "memories": [_strip(m.to_dict()) for m in mems]})
 
                 elif path == "/api/node":

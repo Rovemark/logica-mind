@@ -44,8 +44,19 @@ class DreamReport:
 
 
 def _journal_path(store) -> Optional[str]:
-    """Sidecar JSON file next to the SQLite DB, or None for in-memory stores."""
+    """Sidecar JSON file next to the SQLite DB, or None for in-memory stores.
+
+    A MultiStore has no .path of its own — dig into its children and use the
+    first one that has a real on-disk path (the SQLite primary), so dreaming
+    persists even when SQLite is wrapped behind Obsidian/Supabase fan-out.
+    """
     p = getattr(store, "path", None)
+    if (not p or p in (":memory:", "")) and getattr(store, "stores", None):
+        for child in store.stores:
+            cp = getattr(child, "path", None)
+            if cp and cp not in (":memory:", ""):
+                p = cp
+                break
     if not p or p in (":memory:", ""):
         return None
     base = os.path.splitext(p)[0]
