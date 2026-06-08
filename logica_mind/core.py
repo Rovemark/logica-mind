@@ -801,23 +801,31 @@ class LogicaMind:
             keep = ego_nodes(build_adjacency(weighted), focus, max(1, int(depth or 1)))
             node_list = [n for n in node_list if n["id"] in keep]
             links = [l for l in links if l["source"] in keep and l["target"] in keep]
-        # cap to the most-central nodes so a huge graph (e.g. __all__ across every
-        # namespace, thousands of edges) stays renderable in the browser. Keeps the
-        # meaningful core; edges restricted to kept nodes. No cap when focused.
         elif limit and len(node_list) > limit:
-            top = sorted(node_list, key=lambda n: n.get("centrality", 0.0), reverse=True)[:limit]
-            keep = {n["id"] for n in top}
-            node_list = top
+            # keep only the most-central nodes that HAVE a connection (drop orphans
+            # first so the budget goes to real connections), edges restricted to them.
+            connected = [n for n in node_list if deg.get(n["id"], 0) > 0]
+            node_list = sorted(connected, key=lambda n: n.get("centrality", 0.0), reverse=True)[:limit]
+            keep = {n["id"] for n in node_list}
             links = [l for l in links if l["source"] in keep and l["target"] in keep]
         # cap LINKS too — the force canvas is link-bound, and the co_mention layer
         # can pack thousands of edges among even a few nodes. Keep the most useful:
-        # typed relations first, then strongest weight. ~4x the node budget.
+        # typed relations first, then strongest weight. ~5x the node budget so the
+        # cap rarely strands a node (which would re-create orphans).
         if limit:
-            link_cap = max(limit * 4, 400)
+            link_cap = max(limit * 5, 500)
             if len(links) > link_cap:
                 _rank = {"relation": 0, "semantic": 1, "co_mention": 2, "suggested": 3}
                 links = sorted(links, key=lambda l: (_rank.get(l.get("kind", "relation"), 9),
                                                      -float(l.get("weight", 1.0))))[:link_cap]
+        # FINAL pass: after ALL node/link capping, drop any node now left with no
+        # edge — guarantees the rendered graph is fully connected, no floating dots
+        # (the source of the "tudo desconectado" look). Never when focused.
+        if not focus:
+            live = set()
+            for l in links:
+                live.add(l["source"]); live.add(l["target"])
+            node_list = [n for n in node_list if n["id"] in live]
         return node_list, links
 
     def _co_mention_links(self, namespaces, cooc_min: int = 2, cap_per_mem: int = 8):
