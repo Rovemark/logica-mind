@@ -989,9 +989,13 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     tgt = ns if not is_all else mind.namespace
                     self._json(mind.for_namespace(tgt).provenance(first(qs, "id")))
 
-                elif path == "/api/connected":        # derived backlinks for a memory
+                elif path == "/api/connected":        # backlinks for a memory id, OR neighbours for an entity
                     tgt = ns if not is_all else mind.namespace
-                    self._json(mind.for_namespace(tgt).connections(first(qs, "id")))
+                    ent = first(qs, "entity")
+                    if ent:                            # entity name → its graph neighbours
+                        self._json({"entity": ent, "connected": mind.for_namespace(tgt).graph.neighbors(ent)})
+                    else:                              # memory id → derived backlinks
+                        self._json(mind.for_namespace(tgt).connections(first(qs, "id")))
 
                 elif path == "/api/path":             # "how is A related to B?"
                     frm, to = first(qs, "from"), first(qs, "to")
