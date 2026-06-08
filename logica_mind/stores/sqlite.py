@@ -330,6 +330,34 @@ class SQLiteStore(Store):
                 e["cats"][c] = e["cats"].get(c, 0) + n
         return agg, uncategorized
 
+    def filter_memories(self, namespace=None, layers=None, dimension=None, category=None,
+                        session=None, limit=200, offset=0, with_embeddings=False):
+        """Memories filtered by metadata (dimension / category / session) in SQL —
+        newest first, NOT capped by the 5000 candidate window (so clicking a
+        dimension on the Profile finds its older categorized memories, not [])."""
+        sql = "SELECT * FROM memories WHERE 1=1"
+        params: list = []
+        if namespace:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        if layers:
+            ph = ",".join("?" for _ in layers)
+            sql += f" AND layer IN ({ph})"
+            params += [l.value for l in layers]
+        if dimension:
+            sql += " AND json_extract(metadata,'$.dimension') = ?"
+            params.append(dimension)
+        if category:
+            sql += " AND json_extract(metadata,'$.category') = ?"
+            params.append(category)
+        if session:
+            sql += " AND json_extract(metadata,'$.session') = ?"
+            params.append(session)
+        sql += " ORDER BY created_at DESC, seq DESC, rowid DESC LIMIT ? OFFSET ?"
+        params += [limit, offset]
+        cur = self._conn.execute(sql, params)
+        return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
+
     def page(self, namespace=None, layers=None, limit=100, offset=0):
         """A bounded page of memories (newest first) — LIMIT/OFFSET in SQL so a list
         view materializes ~100 rows instead of every row. namespace=None pages

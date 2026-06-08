@@ -701,22 +701,32 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                 if not _is_internal(m)]
                         self._json({"memories": [_strip(m.to_dict()) for m in mems]})
                     else:
-                        names = mind.store.namespaces() if is_all else [ns]
-                        mems = []
-                        for name in names:
-                            for m in mind.store.all(name, layers, with_embeddings=False):
-                                if _is_internal(m):
-                                    continue
-                                md = m.metadata or {}
-                                if session and md.get("session") != session:
-                                    continue
-                                if dim and md.get("dimension") != dim:
-                                    continue
-                                if category and md.get("category") != category:
-                                    continue
-                                mems.append(m)
-                        mems.sort(key=lambda m: m.created_at or "", reverse=True)
-                        self._json({"memories": [_strip(m.to_dict()) for m in mems[off:off + lim]]})
+                        # metadata filter (dimension/category/session) pushed into SQL —
+                        # NOT capped by the 5000 window, so clicking a dimension finds its
+                        # older categorized memories instead of returning [].
+                        ff = getattr(mind.store, "filter_memories", None)
+                        if callable(ff):
+                            mems = [m for m in ff(None if is_all else ns, layers, dim, category,
+                                                  session, lim, off, False)
+                                    if not _is_internal(m)]
+                        else:
+                            names = mind.store.namespaces() if is_all else [ns]
+                            mems = []
+                            for name in names:
+                                for m in mind.store.all(name, layers, with_embeddings=False):
+                                    if _is_internal(m):
+                                        continue
+                                    md = m.metadata or {}
+                                    if session and md.get("session") != session:
+                                        continue
+                                    if dim and md.get("dimension") != dim:
+                                        continue
+                                    if category and md.get("category") != category:
+                                        continue
+                                    mems.append(m)
+                            mems.sort(key=lambda m: m.created_at or "", reverse=True)
+                            mems = mems[off:off + lim]
+                        self._json({"memories": [_strip(m.to_dict()) for m in mems]})
 
                 elif path == "/api/sessions":
                     # distinct sessions with counts + time span + names
