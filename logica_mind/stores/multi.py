@@ -168,6 +168,14 @@ class MultiStore(Store):
                 return s.dimension_counts(namespace)
         return {}, 0
 
+    def filter_memories(self, namespace=None, layers=None, dimension=None, category=None,
+                        session=None, limit=200, offset=0, with_embeddings=False):
+        for s in self.stores:
+            if hasattr(s, "filter_memories"):
+                return s.filter_memories(namespace, layers, dimension, category,
+                                         session, limit, offset, with_embeddings)
+        return []
+
     def page(self, namespace, layers=None, limit=100, offset=0):
         for s in self.stores:
             if hasattr(s, "page"):
