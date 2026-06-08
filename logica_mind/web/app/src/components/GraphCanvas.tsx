@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forceSimulation, forceManyBody, forceLink, forceX, forceY, forceCollide } from "d3-force";
 import { PALETTE, type GraphData } from "../api";
 
 export interface GraphHandle { reheat: () => void; fit: () => void; center: (id: string) => void; }
@@ -221,11 +222,35 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // honor the Settings "Graph animations" toggle: when off, settle the layout
     // synchronously once and freeze (no continuous physics), but keep redrawing
     // so pan/zoom/drag still work.
-    const anim = localStorage.getItem("lm-anim") !== "off";
-    g.alpha = 1;
-    if (!anim) { for (let k = 0; k < 400; k++) tick(); g.alpha = 0; }
-    if (!g.fitOnce) { fitGraph(false); g.fitOnce = true; }
-    const loop = () => { tick(); draw(); g.raf = requestAnimationFrame(loop); }; loop();
+    // d3-force layout — the proven, stable force engine (Barnes-Hut O(N log N),
+    // self-centering) that graph apps like Obsidian rely on. Replaces the hand-rolled
+    // physics that kept imploding / exploding / vanishing. Nodes are shared (d3 moves
+    // them in place); forceLink gets a throwaway copy so g.links keeps string ids for
+    // rendering. forceX/Y(0) keep the cluster centered → it never drifts off-screen.
+    if (g.sim) g.sim.stop();
+    g.sim = forceSimulation(g.nodes)
+      .force("charge", forceManyBody().strength(-220).distanceMax(700).theta(0.9))
+      .force("link", forceLink(g.links.map((l: any) => ({ source: l.source, target: l.target })))
+                       .id((d: any) => d.id).distance(38).strength(0.45))
+      .force("x", forceX(0).strength(0.07))
+      .force("y", forceY(0).strength(0.07))
+      .force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 4))
+      .alphaDecay(0.022)
+      .stop();
+    for (let k = 0; k < 40; k++) g.sim.tick();   // brief pre-settle so the first paint is organized
+    fitGraph(false);
+    g.alpha = 0; g.fitted = false;
+    // loop: relay reheat/drag (g.alpha) into the sim, tick d3 while hot, frame once
+    // settled, always redraw (so hover/pan/zoom/drag stay live).
+    const loop = () => {
+      if (g.sim) {
+        if (g.alpha > 0) { g.sim.alpha(Math.max(g.sim.alpha(), g.alpha)); g.alpha = 0; g.fitted = false; }
+        if (g.sim.alpha() > g.sim.alphaMin()) g.sim.tick();
+        else if (!g.fitted) { g.fitted = true; fitGraph(true); }
+      }
+      draw();
+      g.raf = requestAnimationFrame(loop);
+    }; loop();
 
     // ---- interaction (mouse) ----
     let mode: string | null = null, last: any = null, downPos: any = null, downNode: any = null;
