@@ -34,14 +34,15 @@ _QUERY_SYSTEM = (
 )
 
 _EXTRACT_SYSTEM = (
-    "You extract durable, ATOMIC facts about a USER from a document, for an AI "
-    "assistant's long-term user model. Return a JSON array of short third-person "
-    "statements (one fact each) covering identity, preferences, communication "
-    "style, goals/ambitions, psychology, beliefs/values, skills, health, "
-    "relationships, spirituality and context. Be specific and concrete; skip "
-    "headings, fluff and duplicates. WRITE EACH FACT IN THE SAME LANGUAGE as the "
-    "document (e.g. a Portuguese document → Portuguese facts). Return ONLY the "
-    "JSON array of strings."
+    "You extract durable, ATOMIC facts about a USER from a document SECTION, for "
+    "an AI assistant's long-term user model. Be EXHAUSTIVE — capture EVERY specific "
+    "data point, do NOT summarise or merge: each astrological position (planet, "
+    "sign, exact degree, house), each aspect, each numerology number and its "
+    "meaning, each spiritual element (Odu, orixás/deities, paths), and every "
+    "biographical, psychological, preference, goal, skill, health, belief and "
+    "relationship fact. One fact per array item; short third-person statements that "
+    "keep the specifics (e.g. 'Sol em Câncer a 1°38' na Casa 1'). WRITE IN THE SAME "
+    "LANGUAGE as the document. Return ONLY a JSON array of strings."
 )
 
 
@@ -76,6 +77,14 @@ class DialecticUserModel:
             facts = self._extract_observations(text)
             if facts:
                 mems = []
+                # keep the FULL source verbatim so NOTHING is ever lost (searchable) —
+                # tagged 'profile-source' (not 'observation') so it doesn't crowd the
+                # synthesis but the complete document is always retrievable.
+                src = Memory(content=text, namespace=self.namespace, layer=MemoryLayer.USER,
+                             importance=0.8, tags=["profile-source"])
+                if self.embedder is not None:
+                    src.embedding = self.embedder.embed_one(text[:2000])
+                mems.append(src)
                 for f in facts:
                     mm = Memory(content=f, namespace=self.namespace, layer=MemoryLayer.USER,
                                 importance=importance, tags=["observation"])
@@ -87,7 +96,7 @@ class DialecticUserModel:
                     self.synthesize()       # refresh the profile right away
                 except Exception as e:
                     print(f"[logica-mind] post-observe synthesize fell back ({e})", file=sys.stderr)
-                return mems[0]
+                return mems[1] if len(mems) > 1 else mems[0]
         m = Memory(
             content=text,
             namespace=self.namespace,
@@ -100,29 +109,60 @@ class DialecticUserModel:
         self.store.add([m])
         return m
 
+    def _chunk(self, text: str, size: int = 2200) -> List[str]:
+        """Split a document on its markdown headings / horizontal rules, then pack
+        into ~size pieces — so each SECTION is extracted on its own."""
+        import re as _re
+        parts = _re.split(r"\n(?=#{1,3}\s)|\n-{3,}\s*\n", text)
+        chunks: List[str] = []
+        cur = ""
+        for p in parts:
+            if cur and len(cur) + len(p) > size:
+                chunks.append(cur)
+                cur = p
+            else:
+                cur = (cur + "\n" + p) if cur else p
+        if cur.strip():
+            chunks.append(cur)
+        return chunks or [text]
+
     def _extract_observations(self, text: str) -> List[str]:
-        """LLM-split a rich document into atomic third-person user facts."""
+        """LLM-split a rich document into atomic facts — SECTION BY SECTION, so a
+        dense document (astrology table, numerology, spirituality) is captured in
+        DETAIL instead of summarised away in a single lossy pass."""
         import json as _json
         import re as _re
-        prompt = "DOCUMENT:\n" + text[:12000] + "\n\nExtract the user facts as a JSON array of strings."
-        try:
-            raw = self.llm.complete(prompt, system=_EXTRACT_SYSTEM).strip()
-        except Exception as e:
-            print(f"[logica-mind] user extract failed ({e})", file=sys.stderr)
-            return []
-        mobj = _re.search(r"\[.*\]", raw, _re.DOTALL)
-        if not mobj:
-            return []
-        try:
-            arr = _json.loads(mobj.group(0))
-        except Exception:
-            return []
-        out = []
-        for x in arr:
-            s = str(x).strip()
-            if len(s) > 3:
-                out.append(s[:400])
-        return out[:60]
+        out: List[str] = []
+        for ch in self._chunk(text):
+            ch = ch.strip()
+            if len(ch) < 25:
+                continue
+            prompt = "DOCUMENT SECTION:\n" + ch[:4000] + "\n\nExtract the user facts as a JSON array of strings."
+            try:
+                raw = self.llm.complete(prompt, system=_EXTRACT_SYSTEM).strip()
+            except Exception as e:
+                print(f"[logica-mind] user extract failed ({e})", file=sys.stderr)
+                continue
+            mobj = _re.search(r"\[.*\]", raw, _re.DOTALL)
+            if not mobj:
+                continue
+            try:
+                arr = _json.loads(mobj.group(0))
+            except Exception:
+                continue
+            for x in arr:
+                s = str(x).strip()
+                if len(s) > 3:
+                    out.append(s[:400])
+        # de-dup while preserving order
+        seen = set()
+        uniq: List[str] = []
+        for f in out:
+            k = f.lower()[:90]
+            if k not in seen:
+                seen.add(k)
+                uniq.append(f)
+        return uniq[:300]
 
     def _observations(self) -> List[Memory]:
         obs = [
