@@ -108,7 +108,9 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       let dx = B.x - A.x, dy = B.y - A.y, dist = Math.hypot(dx, dy) || 0.01, f = (dist - K) * 0.04 * a, ux = dx / dist, uy = dy / dist;
       A.vx += ux * f; A.vy += uy * f; B.vx -= ux * f; B.vy -= uy * f; });
     g.nodes.forEach((n: any) => {
-      n.vx += -n.x * 0.004 * a; n.vy += -n.y * 0.004 * a;
+      // stronger centering gravity so loose / low-degree nodes cluster toward the
+      // middle (cohesive, Obsidian-like) instead of drifting off and looking lost.
+      n.vx += -n.x * 0.022 * a; n.vy += -n.y * 0.022 * a;
       if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; return; }
       n.vx *= 0.86; n.vy *= 0.86; n.x += n.vx; n.y += n.vy;
     });
@@ -226,17 +228,18 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // so pan/zoom/drag still work.
     const anim = localStorage.getItem("lm-anim") !== "off";
     g.alpha = 1;
-    if (!anim) {
-      for (let k = 0; k < 400; k++) tick(); g.alpha = 0;
-    } else {
-      // pre-settle OFF-SCREEN so the visible animation starts mostly organized and
-      // is short + smooth (instead of a long jittery O(N²) settle on screen).
-      for (let k = 0; k < 140; k++) tick();
-    }
+    g.framed = false;
+    if (!anim) { for (let k = 0; k < 500; k++) tick(); g.alpha = 0; g.fitOnce = false; }
     if (!g.fitOnce) { fitGraph(false); g.fitOnce = true; }
-    // skip the physics tick once settled (alpha→0) — keep redrawing so hover/pan/
-    // zoom/drag stay responsive, but stop burning CPU on a converged layout.
-    const loop = () => { if (g.alpha > 0) tick(); draw(); g.raf = requestAnimationFrame(loop); }; loop();
+    // Animate from the start (smooth now: repulsion cutoff + labels deferred), then
+    // auto-frame ONCE the layout converges — fixes the "distant / lost" view without
+    // killing the animation. Skip the tick after convergence to spare CPU.
+    const loop = () => {
+      if (g.alpha > 0) tick();
+      draw();
+      if (anim && g.alpha > 0 && g.alpha < 0.05 && !g.framed) { g.framed = true; fitGraph(true); }
+      g.raf = requestAnimationFrame(loop);
+    }; loop();
 
     // ---- interaction (mouse) ----
     let mode: string | null = null, last: any = null, downPos: any = null, downNode: any = null;
