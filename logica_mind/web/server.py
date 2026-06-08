@@ -777,9 +777,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     foc = first(qs, "focus") or None
                     dep = int(first(qs, "depth", "1") or 1)
                     # cap the rendered graph to the most-central nodes (0 = no cap).
-                    # 140 keeps the naive 2D force canvas animating SMOOTHLY (O(N²)
-                    # sim + per-frame edge draw); higher freezes the main thread.
-                    lim = int(first(qs, "limit", "140") or 140)
+                    # 300 stays smooth now that physics is grid-partitioned (~O(N))
+                    # and edges draw in one batched stroke. Raise via ?limit= if your
+                    # machine handles more (the 2D canvas tops out well below WebGL).
+                    lim = int(first(qs, "limit", "300") or 300)
                     self._json(mind.graph_viz(namespace=None if is_all else ns,
                                               include_history=hist, at=at,
                                               layers=layers, focus=foc, depth=dep, limit=lim))
