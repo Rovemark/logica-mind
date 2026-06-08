@@ -635,23 +635,28 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # the life-dimension profile: every categorized fact grouped by
                     # dimension and Maslow tier — powers the Profile view + filters.
                     from ..extract.taxonomy import DIMENSIONS, MASLOW
-                    names = mind.store.namespaces() if is_all else [ns]
-                    agg = {}
-                    uncategorized = 0
-                    for nm in names:
-                        for m in mind.store.all(nm, with_embeddings=False):
-                            if _is_internal(m):
-                                continue
-                            md = m.metadata or {}
-                            dim = md.get("dimension")
-                            if not dim:
-                                uncategorized += 1
-                                continue
-                            e = agg.setdefault(dim, {"count": 0, "cats": {}})
-                            e["count"] += 1
-                            cat = md.get("category")
-                            if cat:
-                                e["cats"][cat] = e["cats"].get(cat, 0) + 1
+                    # aggregate in SQL (not the 5000-capped store.all()) so the WHOLE
+                    # categorized corpus is counted — the grid was near-empty otherwise.
+                    dcf = getattr(mind.store, "dimension_counts", None)
+                    if callable(dcf):
+                        agg, uncategorized = dcf(None if is_all else ns)
+                    else:
+                        names = mind.store.namespaces() if is_all else [ns]
+                        agg, uncategorized = {}, 0
+                        for nm in names:
+                            for m in mind.store.all(nm, with_embeddings=False):
+                                if _is_internal(m):
+                                    continue
+                                md = m.metadata or {}
+                                dim = md.get("dimension")
+                                if not dim:
+                                    uncategorized += 1
+                                    continue
+                                e = agg.setdefault(dim, {"count": 0, "cats": {}})
+                                e["count"] += 1
+                                cat = md.get("category")
+                                if cat:
+                                    e["cats"][cat] = e["cats"].get(cat, 0) + 1
                     out = []
                     for d in DIMENSIONS:
                         info = agg.get(d["id"], {"count": 0, "cats": {}})

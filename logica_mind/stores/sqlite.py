@@ -306,6 +306,30 @@ class SQLiteStore(Store):
         return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
 
     @_locked
+    def dimension_counts(self, namespace=None):
+        """({dimension: {count, cats:{category:count}}}, uncategorized) aggregated in
+        SQL — NOT capped by the 5000 _candidates window (store.all() missed most of
+        the categorized corpus, so the Profile grid read near-empty)."""
+        where = ""
+        params: list = []
+        if namespace:
+            where = " WHERE namespace = ?"
+            params.append(namespace)
+        sql = ("SELECT json_extract(metadata,'$.dimension') d, "
+               "json_extract(metadata,'$.category') c, count(*) n FROM memories"
+               + where + " GROUP BY d, c")
+        agg: dict = {}
+        uncategorized = 0
+        for d, c, n in self._conn.execute(sql, params).fetchall():
+            if not d:
+                uncategorized += n
+                continue
+            e = agg.setdefault(d, {"count": 0, "cats": {}})
+            e["count"] += n
+            if c:
+                e["cats"][c] = e["cats"].get(c, 0) + n
+        return agg, uncategorized
+
     def page(self, namespace=None, layers=None, limit=100, offset=0):
         """A bounded page of memories (newest first) — LIMIT/OFFSET in SQL so a list
         view materializes ~100 rows instead of every row. namespace=None pages
