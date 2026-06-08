@@ -96,21 +96,14 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   function tick() {
     const g = G.current, N = g.nodes.length; if (!N) return;
     const K = Math.max(48, 230 / Math.sqrt(N)), a = g.alpha;
-    // Full O(N²) repulsion — GLOBAL forces keep the layout STABLE and cohesive (the
-    // spatial-grid variant lost long-range force, so drifted nodes never came back
-    // and the graph scattered/vanished). The render bottleneck was per-edge stroke,
-    // not this loop, and that's now batched — so O(N²) at a few-hundred nodes is fine.
     for (let i = 0; i < N; i++) { const A = g.nodes[i]; for (let k = i + 1; k < N; k++) { const B = g.nodes[k];
-      let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy || 0.01, dist = Math.sqrt(d2),
-          rep = (K * K) / d2 * a * 0.9, ux = dx / dist, uy = dy / dist;
+      let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy || 0.01, dist = Math.sqrt(d2), rep = (K * K) / d2 * a * 0.9, ux = dx / dist, uy = dy / dist;
       A.vx += ux * rep; A.vy += uy * rep; B.vx -= ux * rep; B.vy -= uy * rep; } }
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
       let dx = B.x - A.x, dy = B.y - A.y, dist = Math.hypot(dx, dy) || 0.01, f = (dist - K) * 0.04 * a, ux = dx / dist, uy = dy / dist;
       A.vx += ux * f; A.vy += uy * f; B.vx -= ux * f; B.vy -= uy * f; });
     g.nodes.forEach((n: any) => {
-      // gentle centering gravity — with full O(N²) repulsion this is stable and
-      // keeps the graph cohesive without imploding.
-      n.vx += -n.x * 0.005 * a; n.vy += -n.y * 0.005 * a;
+      n.vx += -n.x * 0.004 * a; n.vy += -n.y * 0.004 * a;
       if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; return; }
       n.vx *= 0.86; n.vy *= 0.86; n.x += n.vx; n.y += n.vy;
     });
@@ -132,18 +125,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const edgeLabel = light ? "rgba(70,82,110,.7)" : "rgba(150,165,190,.65)";
     const nodeRing = (shared: boolean) => shared ? (light ? "rgba(60,80,160,.55)" : "rgba(255,255,255,.55)")
                                                  : (light ? "rgba(40,55,90,.3)" : "rgba(10,13,20,.9)");
-    // FAST overview: with nothing hovered or path-highlighted, draw EVERY edge as a
-    // single batched faint path — ONE stroke() call instead of one per edge. Per-edge
-    // stroke is the render bottleneck; batching is what keeps many-node graphs smooth
-    // (the detailed per-edge styling below only kicks in on hover / path mode).
-    if (!hi && !pathSet) {
-      c.beginPath();
-      for (const l of g.links) { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) continue; c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); }
-      // visible (not the faint "dead" tone) so the graph reads as CONNECTED, not a
-      // cloud of loose dots — Obsidian-style legible links.
-      c.strokeStyle = light ? "rgba(90,105,140,.55)" : "rgba(140,160,200,.5)";
-      c.lineWidth = 0.9 / Math.sqrt(t.k); c.stroke();
-    } else g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
+    g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
       const active = !hi || l.source === hi || l.target === hi;
       const onPath = pathEdges ? pathEdges.has([l.source, l.target].sort().join("")) : false;
       const kind = l.kind || "relation";
@@ -198,11 +180,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       c.lineWidth = (n.shared ? 2 : 1.4) / t.k; c.strokeStyle = nodeRing(!!n.shared); c.stroke();
       if (onP) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(251,191,36,.95)"; c.stroke(); }
       else if (n.bridge && !dim) { c.beginPath(); c.arc(n.x, n.y, (rad + 2.5) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 1.4 / t.k; c.setLineDash([2 / t.k, 2 / t.k]); c.strokeStyle = "rgba(245,158,11,.85)"; c.stroke(); c.setLineDash([]); }
-      // labels are the expensive part (stroke+fill text per node) — skip them
-      // WHILE the layout is still settling (alpha high) so the animation stays
-      // smooth; they snap in once it settles, or immediately for the hovered node.
-      if (t.k > 0.6 && (active || onP) && (g.alpha < 0.08 || n.id === hi || onP)) {
-        c.fillStyle = active || onP ? labelFill : labelFillDim; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
+      if (t.k > 0.6 && (active || onP)) { c.fillStyle = active || onP ? labelFill : labelFillDim; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
         c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.strokeText(n.id, n.x, n.y - (rad + 5) / t.k); c.fillText(n.id, n.x, n.y - (rad + 5) / t.k); }
     });
     c.restore();
@@ -210,12 +188,8 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   function fitGraph(animate: boolean) {
     const g = G.current; if (!g.nodes.length) return;
     let a = 1e9, b = 1e9, cc = -1e9, d = -1e9;
-    g.nodes.forEach((n: any) => { if (!isFinite(n.x) || !isFinite(n.y)) return; a = Math.min(a, n.x); b = Math.min(b, n.y); cc = Math.max(cc, n.x); d = Math.max(d, n.y); });
-    if (!isFinite(a) || !isFinite(cc)) return;   // all-NaN layout → don't zoom into the void
-    const w = cc - a || 1, h = d - b || 1, pad = 70;
-    // clamp the zoom so a tiny (collapsed) or huge layout never frames into an empty
-    // screen — keep it readable between 0.15× and 1.8×.
-    const k = Math.max(0.15, Math.min((g.W - pad * 2) / w, (g.H - pad * 2) / h, 1.8));
+    g.nodes.forEach((n: any) => { a = Math.min(a, n.x); b = Math.min(b, n.y); cc = Math.max(cc, n.x); d = Math.max(d, n.y); });
+    const w = cc - a || 1, h = d - b || 1, pad = 70, k = Math.min((g.W - pad * 2) / w, (g.H - pad * 2) / h, 1.8);
     const tx = g.W / 2 - ((a + cc) / 2) * k, ty = g.H / 2 - ((b + d) / 2) * k;
     if (animate) { const s = { ...g.t }, st = performance.now();
       const an = () => { const p = Math.min(1, (performance.now() - st) / 350), e = 1 - Math.pow(1 - p, 3);
@@ -241,18 +215,11 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // honor the Settings "Graph animations" toggle: when off, settle the layout
     // synchronously once and freeze (no continuous physics), but keep redrawing
     // so pan/zoom/drag still work.
-    // SETTLE the layout synchronously off-screen, then frame it and draw STATIC.
-    // Live per-frame physics kept spreading nodes out of the zoomed-in initial
-    // frame ("loads then everything vanishes"); a pre-settled, fitted graph is
-    // stable, cohesive, connected — it appears already laid out (like Obsidian on
-    // open) and never drifts off-screen, freezes, or disappears.
+    const anim = localStorage.getItem("lm-anim") !== "off";
     g.alpha = 1;
-    for (let k = 0; k < 450; k++) tick();
-    g.alpha = 0;                       // settled → no continuous physics
-    fitGraph(false);                   // frame the FINAL layout (always, on every load)
-    // Redraw each frame so hover/pan/zoom stay live; a node-drag reheats alpha and
-    // the tick runs again only then, re-settling without ever flinging off-screen.
-    const loop = () => { if (g.alpha > 0) tick(); draw(); g.raf = requestAnimationFrame(loop); }; loop();
+    if (!anim) { for (let k = 0; k < 400; k++) tick(); g.alpha = 0; }
+    if (!g.fitOnce) { fitGraph(false); g.fitOnce = true; }
+    const loop = () => { tick(); draw(); g.raf = requestAnimationFrame(loop); }; loop();
 
     // ---- interaction (mouse) ----
     let mode: string | null = null, last: any = null, downPos: any = null, downNode: any = null;
