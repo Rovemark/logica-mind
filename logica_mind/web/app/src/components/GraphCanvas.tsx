@@ -96,31 +96,21 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   function tick() {
     const g = G.current, N = g.nodes.length; if (!N) return;
     const K = Math.max(48, 230 / Math.sqrt(N)), a = g.alpha;
-    // ── repulsion via a SPATIAL GRID — only nodes in neighbouring cells repel, so
-    // the cost is ~O(N) instead of O(N²). This is the simple, robust cousin of the
-    // Barnes-Hut/quadtree that engines like Obsidian use to stay smooth with many
-    // nodes. Cell ≈ repulsion range; force falls off as 1/d² so far cells don't matter.
-    const cellSz = K * 3.2;
-    const grid: Map<string, number[]> = new Map();
-    for (let i = 0; i < N; i++) { const n = g.nodes[i];
-      const key = Math.floor(n.x / cellSz) + "," + Math.floor(n.y / cellSz);
-      let b = grid.get(key); if (!b) { b = []; grid.set(key, b); } b.push(i); }
-    for (let i = 0; i < N; i++) { const A = g.nodes[i];
-      const gx = Math.floor(A.x / cellSz), gy = Math.floor(A.y / cellSz);
-      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
-        const b = grid.get((gx + ox) + "," + (gy + oy)); if (!b) continue;
-        for (let bi = 0; bi < b.length; bi++) { const k = b[bi]; if (k <= i) continue; const B = g.nodes[k];
-          let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy || 0.01, dist = Math.sqrt(d2),
-              rep = (K * K) / d2 * a * 0.9, ux = dx / dist, uy = dy / dist;
-          A.vx += ux * rep; A.vy += uy * rep; B.vx -= ux * rep; B.vy -= uy * rep; } } }
+    // Full O(N²) repulsion — GLOBAL forces keep the layout STABLE and cohesive (the
+    // spatial-grid variant lost long-range force, so drifted nodes never came back
+    // and the graph scattered/vanished). The render bottleneck was per-edge stroke,
+    // not this loop, and that's now batched — so O(N²) at a few-hundred nodes is fine.
+    for (let i = 0; i < N; i++) { const A = g.nodes[i]; for (let k = i + 1; k < N; k++) { const B = g.nodes[k];
+      let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy || 0.01, dist = Math.sqrt(d2),
+          rep = (K * K) / d2 * a * 0.9, ux = dx / dist, uy = dy / dist;
+      A.vx += ux * rep; A.vy += uy * rep; B.vx -= ux * rep; B.vy -= uy * rep; } }
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
       let dx = B.x - A.x, dy = B.y - A.y, dist = Math.hypot(dx, dy) || 0.01, f = (dist - K) * 0.04 * a, ux = dx / dist, uy = dy / dist;
       A.vx += ux * f; A.vy += uy * f; B.vx -= ux * f; B.vy -= uy * f; });
     g.nodes.forEach((n: any) => {
-      // moderate centering gravity — cohesive (loose nodes stay near the middle)
-      // WITHOUT collapsing everything into a single point (too strong + the grid's
-      // local-only repulsion made the layout implode and vanish).
-      n.vx += -n.x * 0.01 * a; n.vy += -n.y * 0.01 * a;
+      // gentle centering gravity — with full O(N²) repulsion this is stable and
+      // keeps the graph cohesive without imploding.
+      n.vx += -n.x * 0.005 * a; n.vy += -n.y * 0.005 * a;
       if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; return; }
       n.vx *= 0.86; n.vy *= 0.86; n.x += n.vx; n.y += n.vy;
     });
@@ -149,7 +139,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     if (!hi && !pathSet) {
       c.beginPath();
       for (const l of g.links) { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) continue; c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); }
-      c.strokeStyle = edgeDead; c.lineWidth = 0.8 / Math.sqrt(t.k); c.stroke();
+      // visible (not the faint "dead" tone) so the graph reads as CONNECTED, not a
+      // cloud of loose dots — Obsidian-style legible links.
+      c.strokeStyle = light ? "rgba(90,105,140,.55)" : "rgba(140,160,200,.5)";
+      c.lineWidth = 0.9 / Math.sqrt(t.k); c.stroke();
     } else g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
       const active = !hi || l.source === hi || l.target === hi;
       const onPath = pathEdges ? pathEdges.has([l.source, l.target].sort().join("")) : false;
