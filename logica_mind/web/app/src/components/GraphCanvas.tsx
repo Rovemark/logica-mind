@@ -116,22 +116,36 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const edgeLabel = light ? "rgba(70,82,110,.7)" : "rgba(150,165,190,.65)";
     const nodeRing = (shared: boolean) => shared ? (light ? "rgba(60,80,160,.55)" : "rgba(255,255,255,.55)")
                                                  : (light ? "rgba(40,55,90,.3)" : "rgba(10,13,20,.9)");
-    // While the simulation is HOT, draw a cheap frame: every edge in ONE batched
-    // path (straight lines), nodes as plain dots, no per-edge dashes/arrows/labels.
-    // This keeps the settle animation buttery even at 1000 edges; the rich render
-    // returns the instant it cools (Obsidian uses the same simplify-while-moving).
-    if (g.moving) {
+    // LOD renderer: for a BIG graph (or while the sim is HOT / panning) draw a cheap
+    // frame — every edge in ONE batched path, nodes as plain dots, labels only where
+    // they're readable. This is what keeps THOUSANDS of nodes smooth on the 2D canvas;
+    // the full per-edge grammar (arrows, dashes, per-edge labels) is reserved for small
+    // graphs where you can actually see it. (Obsidian likewise drops detail at scale.)
+    const big = g.nodes.length > 1200;
+    if (g.moving || big) {
       c.strokeStyle = edgeDead; c.lineWidth = 0.9 / Math.sqrt(t.k); c.beginPath();
       g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return; c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); });
       c.stroke();
       g.nodes.forEach((n: any) => { const r = baseRad(n, false) / Math.sqrt(t.k);
         c.beginPath(); c.arc(n.x, n.y, r, 0, 6.283); c.fillStyle = nodeColor(n); c.fill(); });
-      // cheap hover overlay so hovering DURING the settle/pan still gives feedback
-      // (the hovered node + its direct edges) without paying for the full rich draw.
+      // settled big graph: labels only when zoomed in enough to read them, and only for
+      // nodes inside the viewport (culled) so it stays cheap at thousands of nodes.
+      if (!g.moving && t.k > 0.8) {
+        const mnx = -t.x / t.k, mny = -t.y / t.k, mxx = (g.W - t.x) / t.k, mxy = (g.H - t.y) / t.k;
+        c.fillStyle = labelFill; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
+        c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke;
+        g.nodes.forEach((n: any) => { if (n.x < mnx || n.x > mxx || n.y < mny || n.y > mxy) return;
+          const ly = n.y - (baseRad(n, n.id === hi) + 5) / t.k; c.strokeText(n.id, n.x, ly); c.fillText(n.id, n.x, ly); });
+      }
+      // hover overlay (works in every mode): the hovered node + its direct edges +
+      // labels for it and its neighbours, so hovering always tells you what it is.
       if (hi && g.byId[hi]) { const H = g.byId[hi], nb = g.adj[hi] || new Set();
-        c.strokeStyle = light ? "rgba(40,55,90,.7)" : "rgba(255,255,255,.6)"; c.lineWidth = 1.4 / Math.sqrt(t.k); c.beginPath();
+        c.strokeStyle = light ? "rgba(40,55,90,.75)" : "rgba(255,255,255,.65)"; c.lineWidth = 1.6 / Math.sqrt(t.k); c.beginPath();
         nb.forEach((id: string) => { const B = g.byId[id]; if (B) { c.moveTo(H.x, H.y); c.lineTo(B.x, B.y); } }); c.stroke();
-        c.beginPath(); c.arc(H.x, H.y, (baseRad(H, true) + 2) / Math.sqrt(t.k), 0, 6.283); c.fillStyle = nodeColor(H); c.fill(); }
+        c.beginPath(); c.arc(H.x, H.y, (baseRad(H, true) + 2) / Math.sqrt(t.k), 0, 6.283); c.fillStyle = nodeColor(H); c.fill();
+        c.fillStyle = labelFill; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke;
+        const lab = (n: any) => { const ly = n.y - (baseRad(n, n.id === hi) + 5) / t.k; c.strokeText(n.id, n.x, ly); c.fillText(n.id, n.x, ly); };
+        lab(H); nb.forEach((id: string) => { const B = g.byId[id]; if (B) lab(B); }); }
       c.restore(); return;
     }
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
@@ -252,8 +266,13 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // degree-normalization is exactly how Obsidian-style graphs stay spread. A
     // strong, long-range charge opens the cluster; a roomy link distance gives it
     // air; a gentle x/y pull keeps it centered without crushing it back to a ball.
+    // BIG graphs use a faster physics profile (higher Barnes-Hut theta, shorter charge
+    // range, faster cooling, no collide) so a few thousand nodes settle in a few
+    // seconds at a watchable framerate instead of crawling; small graphs keep the
+    // higher-quality profile (collide → no overlap, slower cooling → tighter layout).
+    const bigG = g.nodes.length > 1200;
     g.sim = forceSimulation(g.nodes)
-      .force("charge", forceManyBody().strength(-220).distanceMax(1000).theta(0.85))
+      .force("charge", forceManyBody().strength(bigG ? -260 : -220).distanceMax(bigG ? 650 : 1000).theta(bigG ? 1.5 : 0.85))
       .force("link", forceLink(g.links.map((l: any) => ({ source: l.source, target: l.target })))
                        .id((d: any) => d.id).distance(38))
       // forceCenter locks the centre of mass at the origin (no drift / off-centre
@@ -261,10 +280,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       // pushes fragments/orphans out to a ring → the Obsidian centred globe.
       .force("center", forceCenter(0, 0))
       .force("radial", forceRadial((d: any) => (d._core ? 0 : g.ringR), 0, 0).strength((d: any) => (d._core ? 0.12 : 0.30)))
-      .force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 5))
-      .alphaDecay(0.03)
-      .velocityDecay(0.42)
+      .alphaDecay(bigG ? 0.06 : 0.03)
+      .velocityDecay(bigG ? 0.5 : 0.42)
       .stop();
+    if (!bigG) g.sim.force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 5));
     // brief synchronous pre-settle so the first paint is organized — BOUNDED by node
     // count so a large graph doesn't freeze the main thread on load (~constant cap);
     // the rAF loop animates the rest of the settle, re-fitting as the cluster grows.

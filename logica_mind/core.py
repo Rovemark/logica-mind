@@ -815,7 +815,7 @@ class LogicaMind:
         # typed relations first, then strongest weight. ~5x the node budget so the
         # cap rarely strands a node (which would re-create orphans).
         if limit:
-            link_cap = min(max(limit * 5, 500), 3500)
+            link_cap = min(max(limit * 5, 500), 8000)
             if len(links) > link_cap:
                 _rank = {"relation": 0, "semantic": 1, "co_mention": 2, "suggested": 3}
                 links = sorted(links, key=lambda l: (_rank.get(l.get("kind", "relation"), 9),

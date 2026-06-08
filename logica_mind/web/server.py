@@ -777,10 +777,11 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     foc = first(qs, "focus") or None
                     dep = int(first(qs, "depth", "1") or 1)
                     # cap the rendered graph to the most-central nodes (0 = no cap).
-                    # The client uses a d3-force layout with simplify-while-moving +
-                    # idle-suspend rendering, so ~1000 nodes stays smooth. Raise via
-                    # ?limit= for a fuller graph; true many-thousands wants WebGL.
-                    lim = int(first(qs, "limit", "1000") or 1000)
+                    # The client uses a d3-force layout with an LOD renderer (batched
+                    # edges + viewport-culled labels + idle-suspend), so a few thousand
+                    # nodes stay smooth on the 2D canvas. Default high enough to show the
+                    # whole graph; ?limit= overrides. Truly huge graphs want WebGL.
+                    lim = int(first(qs, "limit", "4000") or 4000)
                     # orphans=1 (default for the UI) RETURNS link-less / cap-stranded
                     # nodes so the client's "Órfãos" toggle can show/hide them with no
                     # refetch. Other callers (MCP) default to a clean connected graph.
