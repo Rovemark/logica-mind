@@ -31,6 +31,15 @@ _QUERY_SYSTEM = (
     "answer isn't supported, say what is unknown rather than guessing. Be concise."
 )
 
+_EXTRACT_SYSTEM = (
+    "You extract durable, ATOMIC facts about a USER from a document, for an AI "
+    "assistant's long-term user model. Return a JSON array of short third-person "
+    "statements (one fact each) covering identity, preferences, communication "
+    "style, goals/ambitions, psychology, beliefs/values, skills, health, "
+    "relationships, spirituality and context. Be specific and concrete; skip "
+    "headings, fluff and duplicates. Return ONLY the JSON array of strings."
+)
+
 
 class DialecticUserModel:
     def __init__(
@@ -55,6 +64,26 @@ class DialecticUserModel:
         text = (text or "").strip()
         if not text:
             return None
+        # A rich / long document (e.g. a pasted profile) gets BROKEN into atomic
+        # observations the model can actually reason over — and the profile is
+        # re-synthesized immediately — instead of being stored as one opaque blob
+        # (the "observe didn't identify anything" failure). Short notes stay as one.
+        if len(text) > 600 and getattr(self.llm, "available", False):
+            facts = self._extract_observations(text)
+            if facts:
+                mems = []
+                for f in facts:
+                    mm = Memory(content=f, namespace=self.namespace, layer=MemoryLayer.USER,
+                                importance=importance, tags=["observation"])
+                    if self.embedder is not None:
+                        mm.embedding = self.embedder.embed_one(f)
+                    mems.append(mm)
+                self.store.add(mems)
+                try:
+                    self.synthesize()       # refresh the profile right away
+                except Exception as e:
+                    print(f"[logica-mind] post-observe synthesize fell back ({e})", file=sys.stderr)
+                return mems[0]
         m = Memory(
             content=text,
             namespace=self.namespace,
@@ -66,6 +95,30 @@ class DialecticUserModel:
             m.embedding = self.embedder.embed_one(text)
         self.store.add([m])
         return m
+
+    def _extract_observations(self, text: str) -> List[str]:
+        """LLM-split a rich document into atomic third-person user facts."""
+        import json as _json
+        import re as _re
+        prompt = "DOCUMENT:\n" + text[:12000] + "\n\nExtract the user facts as a JSON array of strings."
+        try:
+            raw = self.llm.complete(prompt, system=_EXTRACT_SYSTEM).strip()
+        except Exception as e:
+            print(f"[logica-mind] user extract failed ({e})", file=sys.stderr)
+            return []
+        mobj = _re.search(r"\[.*\]", raw, _re.DOTALL)
+        if not mobj:
+            return []
+        try:
+            arr = _json.loads(mobj.group(0))
+        except Exception:
+            return []
+        out = []
+        for x in arr:
+            s = str(x).strip()
+            if len(s) > 3:
+                out.append(s[:400])
+        return out[:60]
 
     def _observations(self) -> List[Memory]:
         obs = [
