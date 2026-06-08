@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "logica-mind"
-version = "0.2.10"
+version = "0.2.11"
 description = "Pluggable, multi-store memory for any AI system — episodic, semantic, temporal-graph and dialectic user memory in one library."
 readme = "README.md"
 requires-python = ">=3.10"
