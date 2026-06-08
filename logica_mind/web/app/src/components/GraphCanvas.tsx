@@ -95,7 +95,12 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   }
   function tick() {
     const g = G.current, N = g.nodes.length; if (!N) return;
-    const K = Math.max(48, 230 / Math.sqrt(N)), a = g.alpha;
+    // K is BOTH the repulsion scale and the spring rest length. The old floor of 48
+    // forced ~48px between every connected pair (gravity too weak to pull back) → a
+    // sprawling field of dots that read as "disconnected". Floor 16 lets K shrink for
+    // bigger graphs (N=131 → K≈20) → a tight, cohesive Obsidian-style cluster, while
+    // still keeping tiny graphs (N<10) from collapsing.
+    const K = Math.max(16, 230 / Math.sqrt(N)), a = g.alpha;
     for (let i = 0; i < N; i++) { const A = g.nodes[i]; for (let k = i + 1; k < N; k++) { const B = g.nodes[k];
       let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy || 0.01, dist = Math.sqrt(d2), rep = (K * K) / d2 * a * 0.9, ux = dx / dist, uy = dy / dist;
       A.vx += ux * rep; A.vy += uy * rep; B.vx -= ux * rep; B.vy -= uy * rep; } }
@@ -103,7 +108,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       let dx = B.x - A.x, dy = B.y - A.y, dist = Math.hypot(dx, dy) || 0.01, f = (dist - K) * 0.04 * a, ux = dx / dist, uy = dy / dist;
       A.vx += ux * f; A.vy += uy * f; B.vx -= ux * f; B.vy -= uy * f; });
     g.nodes.forEach((n: any) => {
-      n.vx += -n.x * 0.004 * a; n.vy += -n.y * 0.004 * a;
+      n.vx += -n.x * 0.01 * a; n.vy += -n.y * 0.01 * a;   // firmer pull → cohesive ball
       if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; return; }
       n.vx *= 0.86; n.vy *= 0.86; n.x += n.vx; n.y += n.vy;
     });
