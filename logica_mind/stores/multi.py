@@ -162,6 +162,12 @@ class MultiStore(Store):
         return [m for m in self.all(namespace, layers, with_embeddings)
                 if (m.created_at or "").startswith(date or "")]
 
+    def dimension_counts(self, namespace=None):
+        for s in self.stores:
+            if hasattr(s, "dimension_counts"):
+                return s.dimension_counts(namespace)
+        return {}, 0
+
     def page(self, namespace, layers=None, limit=100, offset=0):
         for s in self.stores:
             if hasattr(s, "page"):
