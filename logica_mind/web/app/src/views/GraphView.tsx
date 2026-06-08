@@ -25,7 +25,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const [showOrphans, setShowOrphans] = useState(false); // Obsidian-style: hide link-less nodes by default
   const reqRef = useRef(0);                           // stale-guard: ignore out-of-order responses
   const [history, setHistory] = useState(true);
-  const [colorBy, setColorBy] = useState<ColorBy>("namespace");
+  const [colorBy, setColorBy] = useState<ColorBy>("area");   // colour by life-area when available (multi-colour + meaningful); falls back to namespace if the data has no dimensions
   const [coMention, setCoMention] = useState(true);
   const [semantic, setSemantic] = useState(false);
   const [suggest, setSuggest] = useState(false);
@@ -95,6 +95,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     return s;
   }, [data]);
   const hasAreas = areasPresent.size > 0;
+  // default is "area" (colourful + meaningful); if this dataset has no life-areas
+  // yet, fall back to namespace colouring so it isn't an all-grey graph.
+  useEffect(() => { if (loaded && !hasAreas && colorBy === "area") setColorBy("namespace"); }, [loaded, hasAreas]);
 
   // predicate classes actually present (for the relation-type filter)
   const predsPresent = useMemo(() => {

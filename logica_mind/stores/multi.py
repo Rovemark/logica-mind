@@ -176,6 +176,12 @@ class MultiStore(Store):
                                          session, limit, offset, with_embeddings)
         return []
 
+    def dimensioned(self, namespace=None):
+        for s in self.stores:
+            if hasattr(s, "dimensioned"):
+                return s.dimensioned(namespace)
+        return []
+
     def page(self, namespace, layers=None, limit=100, offset=0):
         for s in self.stores:
             if hasattr(s, "page"):

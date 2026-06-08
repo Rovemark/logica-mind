@@ -330,6 +330,18 @@ class SQLiteStore(Store):
                 e["cats"][c] = e["cats"].get(c, 0) + n
         return agg, uncategorized
 
+    def dimensioned(self, namespace=None):
+        """[(content, dimension)] for every categorized (non-edge) memory — SQL,
+        uncapped — so entity→dimension mapping sees the whole corpus."""
+        sql = ("SELECT content, json_extract(metadata,'$.dimension') d FROM memories "
+               "WHERE json_extract(metadata,'$.dimension') IS NOT NULL "
+               "AND (tags IS NULL OR (tags NOT LIKE '%\"edge\"%' AND tags NOT LIKE '%\"alias\"%'))")
+        params: list = []
+        if namespace:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        return [(c, d) for c, d in self._conn.execute(sql, params).fetchall() if c and d]
+
     def filter_memories(self, namespace=None, layers=None, dimension=None, category=None,
                         session=None, limit=200, offset=0, with_embeddings=False):
         """Memories filtered by metadata (dimension / category / session) in SQL —
