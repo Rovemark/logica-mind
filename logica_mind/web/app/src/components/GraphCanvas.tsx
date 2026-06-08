@@ -94,28 +94,6 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     if (n.shared) return "#fbbf24";
     return colorRef.current((n.namespaces && n.namespaces[0]) || "");
   }
-  function tick() {
-    const g = G.current, N = g.nodes.length; if (!N) return;
-    // K drives repulsion (rep = K²/d²) AND the spring rest length. Lowering K
-    // weakens repulsion QUADRATICALLY → the layout implodes (everything collapses to
-    // a point). So keep K strong for repulsion (floor 48 = no collapse); cohesion
-    // comes from gravity below + the shorter spring rest (REST) here, NOT from
-    // starving the repulsion.
-    const K = Math.max(48, 230 / Math.sqrt(N)), a = g.alpha;
-    const REST = K * 0.55;   // links pull connected nodes tighter than the repulsion spacing
-    for (let i = 0; i < N; i++) { const A = g.nodes[i]; for (let k = i + 1; k < N; k++) { const B = g.nodes[k];
-      let dx = A.x - B.x, dy = A.y - B.y, d2 = dx * dx + dy * dy || 0.01, dist = Math.sqrt(d2), rep = (K * K) / d2 * a * 0.9, ux = dx / dist, uy = dy / dist;
-      A.vx += ux * rep; A.vy += uy * rep; B.vx -= ux * rep; B.vy -= uy * rep; } }
-    g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
-      let dx = B.x - A.x, dy = B.y - A.y, dist = Math.hypot(dx, dy) || 0.01, f = (dist - REST) * 0.05 * a, ux = dx / dist, uy = dy / dist;
-      A.vx += ux * f; A.vy += uy * f; B.vx -= ux * f; B.vy -= uy * f; });
-    g.nodes.forEach((n: any) => {
-      n.vx += -n.x * 0.01 * a; n.vy += -n.y * 0.01 * a;   // firmer pull → cohesive ball
-      if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; return; }
-      n.vx *= 0.86; n.vy *= 0.86; n.x += n.vx; n.y += n.vy;
-    });
-    g.alpha *= 0.985; if (g.alpha < 0.004) g.alpha = 0;
-  }
   function draw() {
     const g = G.current, c = g.ctx; if (!c) return; const t = g.t;
     c.clearRect(0, 0, g.W, g.H); c.save(); c.translate(t.x, t.y); c.scale(t.k, t.k);
@@ -132,6 +110,18 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const edgeLabel = light ? "rgba(70,82,110,.7)" : "rgba(150,165,190,.65)";
     const nodeRing = (shared: boolean) => shared ? (light ? "rgba(60,80,160,.55)" : "rgba(255,255,255,.55)")
                                                  : (light ? "rgba(40,55,90,.3)" : "rgba(10,13,20,.9)");
+    // While the simulation is HOT, draw a cheap frame: every edge in ONE batched
+    // path (straight lines), nodes as plain dots, no per-edge dashes/arrows/labels.
+    // This keeps the settle animation buttery even at 1000 edges; the rich render
+    // returns the instant it cools (Obsidian uses the same simplify-while-moving).
+    if (g.moving) {
+      c.strokeStyle = edgeDead; c.lineWidth = 0.9 / Math.sqrt(t.k); c.beginPath();
+      g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return; c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); });
+      c.stroke();
+      g.nodes.forEach((n: any) => { const r = baseRad(n, false) / Math.sqrt(t.k);
+        c.beginPath(); c.arc(n.x, n.y, r, 0, 6.283); c.fillStyle = nodeColor(n); c.fill(); });
+      c.restore(); return;
+    }
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
       const active = !hi || l.source === hi || l.target === hi;
       const onPath = pathEdges ? pathEdges.has([l.source, l.target].sort().join("")) : false;
@@ -228,16 +218,23 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // them in place); forceLink gets a throwaway copy so g.links keeps string ids for
     // rendering. forceX/Y(0) keep the cluster centered → it never drifts off-screen.
     if (g.sim) g.sim.stop();
+    // dense graphs (avg degree ~14 here) collapse into an invisible hairball if
+    // EVERY link pulls with the same strength — so we keep d3's DEFAULT link
+    // strength (1/min(deg)), which auto-weakens springs on high-degree hubs. That
+    // degree-normalization is exactly how Obsidian-style graphs stay spread. A
+    // strong, long-range charge opens the cluster; a roomy link distance gives it
+    // air; a gentle x/y pull keeps it centered without crushing it back to a ball.
     g.sim = forceSimulation(g.nodes)
-      .force("charge", forceManyBody().strength(-220).distanceMax(700).theta(0.9))
+      .force("charge", forceManyBody().strength(-340).distanceMax(1600).theta(0.85))
       .force("link", forceLink(g.links.map((l: any) => ({ source: l.source, target: l.target })))
-                       .id((d: any) => d.id).distance(38).strength(0.45))
-      .force("x", forceX(0).strength(0.07))
-      .force("y", forceY(0).strength(0.07))
-      .force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 4))
-      .alphaDecay(0.022)
+                       .id((d: any) => d.id).distance(54))
+      .force("x", forceX(0).strength(0.045))
+      .force("y", forceY(0).strength(0.045))
+      .force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 5))
+      .alphaDecay(0.0228)
+      .velocityDecay(0.42)
       .stop();
-    for (let k = 0; k < 40; k++) g.sim.tick();   // brief pre-settle so the first paint is organized
+    for (let k = 0; k < 50; k++) g.sim.tick();   // brief pre-settle so the first paint is organized
     fitGraph(false);
     g.alpha = 0; g.fitted = false;
     // loop: relay reheat/drag (g.alpha) into the sim, tick d3 while hot, frame once
@@ -245,8 +242,8 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const loop = () => {
       if (g.sim) {
         if (g.alpha > 0) { g.sim.alpha(Math.max(g.sim.alpha(), g.alpha)); g.alpha = 0; g.fitted = false; }
-        if (g.sim.alpha() > g.sim.alphaMin()) g.sim.tick();
-        else if (!g.fitted) { g.fitted = true; fitGraph(true); }
+        if (g.sim.alpha() > g.sim.alphaMin()) { g.sim.tick(); g.moving = true; }
+        else { if (!g.fitted) { g.fitted = true; fitGraph(true); } g.moving = false; }
       }
       draw();
       g.raf = requestAnimationFrame(loop);
