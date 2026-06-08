@@ -695,7 +695,8 @@ class LogicaMind:
 
     def graph_viz(self, namespace: Optional[str] = None, include_history: bool = True,
                   at: Optional[str] = None, layers: Optional[List[str]] = None,
-                  focus: Optional[str] = None, depth: int = 1, limit: int = 0) -> Dict[str, Any]:
+                  focus: Optional[str] = None, depth: int = 1, limit: int = 0,
+                  orphans: bool = False) -> Dict[str, Any]:
         """Graph payload for the UI. A single namespace, or the *general* graph
         across all of them with shared entities flagged.
 
@@ -716,7 +717,7 @@ class LogicaMind:
                     n["dimension"] = edim[n["id"]]
             for l in viz["links"]:
                 l["namespace"] = namespace
-            node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth, limit)
+            node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth, limit, orphans)
             return {"nodes": node_list, "links": links, "namespaces": [namespace],
                     "focus": focus, "depth": depth}
 
@@ -750,11 +751,11 @@ class LogicaMind:
             if name in edim:
                 n["dimension"] = edim[name]
             node_list.append(n)
-        node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth, limit)
+        node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth, limit, orphans)
         return {"nodes": node_list, "links": links, "namespaces": all_ns,
                 "focus": focus, "depth": depth}
 
-    def _finish_viz(self, node_list, links, ns_scope, want, focus, depth, limit: int = 0):
+    def _finish_viz(self, node_list, links, ns_scope, want, focus, depth, limit: int = 0, orphans: bool = False):
         """Shared graph augmentation: tag relation links (kind/weight/direction/
         predicate-class), fold in the requested emergent layers, compute degree +
         PageRank centrality, (optionally) clip to a focus node's local graph, and
@@ -802,10 +803,11 @@ class LogicaMind:
             node_list = [n for n in node_list if n["id"] in keep]
             links = [l for l in links if l["source"] in keep and l["target"] in keep]
         elif limit and len(node_list) > limit:
-            # keep only the most-central nodes that HAVE a connection (drop orphans
-            # first so the budget goes to real connections), edges restricted to them.
-            connected = [n for n in node_list if deg.get(n["id"], 0) > 0]
-            node_list = sorted(connected, key=lambda n: n.get("centrality", 0.0), reverse=True)[:limit]
+            # keep the most-central nodes. By default drop orphans first so the budget
+            # goes to real connections; when the caller wants orphans (UI toggle), rank
+            # the WHOLE set so link-less nodes can still make the cut and be shown.
+            pool = node_list if orphans else [n for n in node_list if deg.get(n["id"], 0) > 0]
+            node_list = sorted(pool, key=lambda n: n.get("centrality", 0.0), reverse=True)[:limit]
             keep = {n["id"] for n in node_list}
             links = [l for l in links if l["source"] in keep and l["target"] in keep]
         # cap LINKS too — the force canvas is link-bound, and the co_mention layer
@@ -813,15 +815,17 @@ class LogicaMind:
         # typed relations first, then strongest weight. ~5x the node budget so the
         # cap rarely strands a node (which would re-create orphans).
         if limit:
-            link_cap = max(limit * 5, 500)
+            link_cap = min(max(limit * 5, 500), 3500)
             if len(links) > link_cap:
                 _rank = {"relation": 0, "semantic": 1, "co_mention": 2, "suggested": 3}
                 links = sorted(links, key=lambda l: (_rank.get(l.get("kind", "relation"), 9),
                                                      -float(l.get("weight", 1.0))))[:link_cap]
         # FINAL pass: after ALL node/link capping, drop any node now left with no
-        # edge — guarantees the rendered graph is fully connected, no floating dots
-        # (the source of the "tudo desconectado" look). Never when focused.
-        if not focus:
+        # edge — no floating dots (the "tudo desconectado" look). Keep them ONLY when
+        # the caller asked to KEEP orphans (the UI's "Órfãos" toggle) AND we are not in
+        # a focused ego view — a focus view must stay a clean local neighbourhood, and
+        # the link cap can otherwise strand nodes even there.
+        if focus or not orphans:
             live = set()
             for l in links:
                 live.add(l["source"]); live.add(l["target"])

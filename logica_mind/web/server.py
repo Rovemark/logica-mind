@@ -777,14 +777,18 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     foc = first(qs, "focus") or None
                     dep = int(first(qs, "depth", "1") or 1)
                     # cap the rendered graph to the most-central nodes (0 = no cap).
-                    # 250 most-central nodes: the layout is settled synchronously then
-                    # drawn static, so this stays snappy (the one-time settle is the
-                    # only cost). Raise via ?limit= for a fuller — but slower-to-settle
-                    # — graph; true thousands wants a WebGL renderer.
-                    lim = int(first(qs, "limit", "200") or 200)
+                    # The client uses a d3-force layout with simplify-while-moving +
+                    # idle-suspend rendering, so ~1000 nodes stays smooth. Raise via
+                    # ?limit= for a fuller graph; true many-thousands wants WebGL.
+                    lim = int(first(qs, "limit", "1000") or 1000)
+                    # orphans=1 (default for the UI) RETURNS link-less / cap-stranded
+                    # nodes so the client's "Órfãos" toggle can show/hide them with no
+                    # refetch. Other callers (MCP) default to a clean connected graph.
+                    orph = first(qs, "orphans", "1") == "1"
                     self._json(mind.graph_viz(namespace=None if is_all else ns,
                                               include_history=hist, at=at,
-                                              layers=layers, focus=foc, depth=dep, limit=lim))
+                                              layers=layers, focus=foc, depth=dep, limit=lim,
+                                              orphans=orph))
 
                 elif path == "/api/timerange":
                     # true min/max created_at via a cheap data-layer MIN/MAX (no row

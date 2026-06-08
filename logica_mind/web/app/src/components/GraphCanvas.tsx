@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { forceSimulation, forceManyBody, forceLink, forceX, forceY, forceCollide } from "d3-force";
+import { forceSimulation, forceManyBody, forceLink, forceCollide, forceCenter, forceRadial } from "d3-force";
 import { PALETTE, type GraphData } from "../api";
 
 export interface GraphHandle { reheat: () => void; fit: () => void; center: (id: string) => void; }
@@ -72,6 +72,12 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     },
   }));
 
+  // render-only props (path spotlight, tint/highlight, community colouring, palette)
+  // don't change `data`, so the data-effect won't re-run and the idle-suspend loop
+  // would skip the repaint — leaving Path mode / highlight / community recolour
+  // invisible until an unrelated pan/zoom/hover. Force a one-off redraw on change.
+  useEffect(() => { G.current.dirty = true; }, [pathIds, communities, nodeTint]);
+
   function computeComponents() {
     const g = G.current, p: Record<string, string> = {};
     const find = (x: string): string => { p[x] = p[x] || x; while (p[x] !== x) { p[x] = p[p[x]]; x = p[x]; } return x; };
@@ -120,6 +126,12 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       c.stroke();
       g.nodes.forEach((n: any) => { const r = baseRad(n, false) / Math.sqrt(t.k);
         c.beginPath(); c.arc(n.x, n.y, r, 0, 6.283); c.fillStyle = nodeColor(n); c.fill(); });
+      // cheap hover overlay so hovering DURING the settle/pan still gives feedback
+      // (the hovered node + its direct edges) without paying for the full rich draw.
+      if (hi && g.byId[hi]) { const H = g.byId[hi], nb = g.adj[hi] || new Set();
+        c.strokeStyle = light ? "rgba(40,55,90,.7)" : "rgba(255,255,255,.6)"; c.lineWidth = 1.4 / Math.sqrt(t.k); c.beginPath();
+        nb.forEach((id: string) => { const B = g.byId[id]; if (B) { c.moveTo(H.x, H.y); c.lineTo(B.x, B.y); } }); c.stroke();
+        c.beginPath(); c.arc(H.x, H.y, (baseRad(H, true) + 2) / Math.sqrt(t.k), 0, 6.283); c.fillStyle = nodeColor(H); c.fill(); }
       c.restore(); return;
     }
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
@@ -202,21 +214,37 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   useEffect(() => {
     const g = G.current, cv = canvasRef.current; if (!cv) return;
     if (g.raf) cancelAnimationFrame(g.raf);
-    const old: Record<string, any> = {}; (g.nodes || []).forEach((n: any) => (old[n.id] = { x: n.x, y: n.y, vx: n.vx, vy: n.vy }));
-    g.nodes = (data.nodes || []).map((n, i) => { const ang = (2 * Math.PI * i) / Math.max(1, data.nodes.length), R = 120; const o = old[n.id];
-      return { ...n, x: o ? o.x : R * Math.cos(ang) + (Math.random() - 0.5) * 40, y: o ? o.y : R * Math.sin(ang) + (Math.random() - 0.5) * 40, vx: 0, vy: 0, fx: null, fy: null }; });
+    const old: Record<string, any> = {}; (g.nodes || []).forEach((n: any) => (old[n.id] = { x: n.x, y: n.y, vx: n.vx, vy: n.vy, core: n._core }));
+    g.nodes = (data.nodes || []).map((n) => { const o = old[n.id];
+      return { ...n, x: o ? o.x : 0, y: o ? o.y : 0, vx: 0, vy: 0, fx: null, fy: null, _new: !o }; });
     g.links = data.links || []; g.byId = {}; g.nodes.forEach((n: any) => (g.byId[n.id] = n));
     g.adj = {}; g.links.forEach((l: any) => { (g.adj[l.source] = g.adj[l.source] || new Set()).add(l.target); (g.adj[l.target] = g.adj[l.target] || new Set()).add(l.source); });
     computeComponents();
+    // Identify the CORE — the DOMINANT connected component. The layout pulls the core
+    // to the centre and pushes fragments/orphans to an OUTER RING → Obsidian's centred
+    // globe (verified headless). If no component dominates (all tiny pairs / all
+    // orphans) there is NO core: everyone shares one centred cloud, so we never strand
+    // a lonely dot in the middle of a giant empty ring.
+    const _sz: Record<number, number> = {};
+    g.nodes.forEach((n: any) => (_sz[g.comp[n.id]] = (_sz[g.comp[n.id]] || 0) + 1));
+    let _gi = -1, _gz = 0; for (const k in _sz) if (_sz[+k] > _gz) { _gz = _sz[+k]; _gi = +k; }
+    const _coreOk = _gz >= Math.max(8, g.nodes.length * 0.12);   // needs a real giant to ring around
+    let _ringN = 0; g.nodes.forEach((n: any) => { n._core = _coreOk ? g.comp[n.id] === _gi : true; if (!n._core) _ringN++; });
+    // ring radius scales with how many nodes sit on it, so they spread along the
+    // circumference instead of piling into a thick crowded band.
+    g.ringR = _ringN ? Math.min(2400, Math.max(1100, Math.round(_ringN * 3.2))) : 0;
+    g.nodes.forEach((n: any, i: number) => {
+      // seed NEW nodes by role; also RESEED a reused node whose core membership FLIPPED
+      // (toggle/layer change) so forceRadial doesn't fling it across the whole canvas.
+      const flip = !n._new && old[n.id] && old[n.id].core !== undefined && old[n.id].core !== n._core;
+      if (n._new || flip) { const ang = (2 * Math.PI * i) / Math.max(1, g.nodes.length), R = n._core ? 150 : (g.ringR || 760);
+        n.x = R * Math.cos(ang) + (Math.random() - 0.5) * 40; n.y = R * Math.sin(ang) + (Math.random() - 0.5) * 40; } });
     setupCanvas();
-    // honor the Settings "Graph animations" toggle: when off, settle the layout
-    // synchronously once and freeze (no continuous physics), but keep redrawing
-    // so pan/zoom/drag still work.
-    // d3-force layout — the proven, stable force engine (Barnes-Hut O(N log N),
-    // self-centering) that graph apps like Obsidian rely on. Replaces the hand-rolled
-    // physics that kept imploding / exploding / vanishing. Nodes are shared (d3 moves
-    // them in place); forceLink gets a throwaway copy so g.links keeps string ids for
-    // rendering. forceX/Y(0) keep the cluster centered → it never drifts off-screen.
+    // d3-force layout — the proven, stable force engine (Barnes-Hut O(N log N)) that
+    // graph apps like Obsidian rely on. Replaces the hand-rolled physics that kept
+    // imploding / exploding / vanishing. Nodes are shared (d3 moves them in place);
+    // forceLink gets a throwaway copy so g.links keeps string ids for rendering.
+    // forceCenter + forceRadial give the centred globe (core in, fragments ringed).
     if (g.sim) g.sim.stop();
     // dense graphs (avg degree ~14 here) collapse into an invisible hairball if
     // EVERY link pulls with the same strength — so we keep d3's DEFAULT link
@@ -225,37 +253,60 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // strong, long-range charge opens the cluster; a roomy link distance gives it
     // air; a gentle x/y pull keeps it centered without crushing it back to a ball.
     g.sim = forceSimulation(g.nodes)
-      .force("charge", forceManyBody().strength(-340).distanceMax(1600).theta(0.85))
+      .force("charge", forceManyBody().strength(-220).distanceMax(1000).theta(0.85))
       .force("link", forceLink(g.links.map((l: any) => ({ source: l.source, target: l.target })))
-                       .id((d: any) => d.id).distance(54))
-      .force("x", forceX(0).strength(0.045))
-      .force("y", forceY(0).strength(0.045))
+                       .id((d: any) => d.id).distance(38))
+      // forceCenter locks the centre of mass at the origin (no drift / off-centre
+      // clumping); forceRadial pulls the connected CORE to the centre (radius 0) and
+      // pushes fragments/orphans out to a ring → the Obsidian centred globe.
+      .force("center", forceCenter(0, 0))
+      .force("radial", forceRadial((d: any) => (d._core ? 0 : g.ringR), 0, 0).strength((d: any) => (d._core ? 0.12 : 0.30)))
       .force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 5))
-      .alphaDecay(0.0228)
+      .alphaDecay(0.03)
       .velocityDecay(0.42)
       .stop();
-    for (let k = 0; k < 50; k++) g.sim.tick();   // brief pre-settle so the first paint is organized
+    // brief synchronous pre-settle so the first paint is organized — BOUNDED by node
+    // count so a large graph doesn't freeze the main thread on load (~constant cap);
+    // the rAF loop animates the rest of the settle, re-fitting as the cluster grows.
+    const pre = Math.max(8, Math.min(50, Math.round(40000 / Math.max(1, g.nodes.length))));
+    const _t0 = performance.now();
+    for (let k = 0; k < pre && performance.now() - _t0 < 90; k++) g.sim.tick();  // hard 90ms cap → never a load freeze
     fitGraph(false);
-    g.alpha = 0; g.fitted = false;
+    g.alpha = 0; g.fitted = false; g.initialSettle = true; g.fc = 0;
     // loop: relay reheat/drag (g.alpha) into the sim, tick d3 while hot, frame once
     // settled, always redraw (so hover/pan/zoom/drag stay live).
+    g.dirty = true;
     const loop = () => {
       if (g.sim) {
-        if (g.alpha > 0) { g.sim.alpha(Math.max(g.sim.alpha(), g.alpha)); g.alpha = 0; g.fitted = false; }
-        if (g.sim.alpha() > g.sim.alphaMin()) { g.sim.tick(); g.moving = true; }
-        else { if (!g.fitted) { g.fitted = true; fitGraph(true); } g.moving = false; }
+        if (g.alpha > 0) { g.sim.alpha(Math.max(g.sim.alpha(), g.alpha)); g.alpha = 0; g.fitted = false; g.dirty = true; }
+        if (g.sim.alpha() > g.sim.alphaMin()) { g.sim.tick(); g.hot = true;
+          // keep the growing cluster framed during the FIRST settle only (never yank
+          // the camera mid-drag or after the user has panned/zoomed).
+          if (g.initialSettle && !g.drag && !g.pan && (g.fc = (g.fc || 0) + 1) % 15 === 0) fitGraph(false); }
+        else { if (!g.fitted) { g.fitted = true; fitGraph(true); g.dirty = true; } g.hot = false; g.initialSettle = false; }
       }
-      draw();
+      // cheap batched draw while physics is hot OR panning (a cheap hover overlay in
+      // the batched path still gives hover feedback mid-settle, no rich-draw cost).
+      g.moving = g.hot || g.pan;
+      // idle-suspend: only repaint when the view actually changed. The signature
+      // catches pan/zoom/fit/hover automatically (they move g.t or g.hover) with no
+      // per-handler bookkeeping; g.hot covers the live settle; g.dirty forces a
+      // one-off rich repaint (render-prop change, pan/drag release). theme is in the
+      // sig so an OS dark/light flip repaints. When idle → draw() never runs, so a
+      // 1000-node graph sits at ~0% CPU instead of repainting 60x/second.
+      const _light = document.documentElement.getAttribute("data-theme") === "light" ? 1 : 0;
+      const sig = `${g.t.x | 0},${g.t.y | 0},${g.t.k.toFixed(3)},${g.hover},${g.moving ? 1 : 0},${_light}`;
+      if (g.hot || g.dirty || sig !== g.lastSig) { draw(); g.lastSig = sig; g.dirty = false; }
       g.raf = requestAnimationFrame(loop);
     }; loop();
 
     // ---- interaction (mouse) ----
     let mode: string | null = null, last: any = null, downPos: any = null, downNode: any = null;
-    const onWheel = (e: WheelEvent) => { e.preventDefault(); const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, f = e.deltaY < 0 ? 1.1 : 0.9;
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); g.initialSettle = false; const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, f = e.deltaY < 0 ? 1.1 : 0.9;
       g.t.x = mx - (mx - g.t.x) * f; g.t.y = my - (my - g.t.y) * f; g.t.k *= f; };
-    const onDown = (e: MouseEvent) => { const r = cv.getBoundingClientRect(), n = nodeAt(e.clientX - r.left, e.clientY - r.top);
+    const onDown = (e: MouseEvent) => { g.initialSettle = false; const r = cv.getBoundingClientRect(), n = nodeAt(e.clientX - r.left, e.clientY - r.top);
       downPos = { x: e.clientX, y: e.clientY }; downNode = n;
-      if (n) { g.drag = n; n.fx = n.x; n.fy = n.y; mode = "node"; g.alpha = 1; } else mode = "pan"; last = { x: e.clientX, y: e.clientY }; };
+      if (n) { g.drag = n; n.fx = n.x; n.fy = n.y; mode = "node"; g.alpha = 1; } else { mode = "pan"; g.pan = true; } last = { x: e.clientX, y: e.clientY }; };
     const onMove = (e: MouseEvent) => { const r = cv.getBoundingClientRect();
       if (mode === "pan") { g.t.x += e.clientX - last.x; g.t.y += e.clientY - last.y; last = { x: e.clientX, y: e.clientY }; }
       else if (mode === "node" && g.drag) { g.drag.fx = (e.clientX - r.left - g.t.x) / g.t.k; g.drag.fy = (e.clientY - r.top - g.t.y) / g.t.k; g.alpha = Math.max(g.alpha, 0.3); }
@@ -266,8 +317,14 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     cv.addEventListener("mouseleave", onLeave);
     const onUp = (e: MouseEvent) => {
       const moved = downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 5;
+      const wasPan = !downNode;
       if (downNode && !moved) pickRef.current(downNode.id);   // click (not drag) → open detail
       if (g.drag) { g.drag.fx = null; g.drag.fy = null; } mode = null; g.drag = null; downPos = null; downNode = null;
+      g.pan = false; g.dirty = true;   // end pan/drag → one rich repaint
+      // after a PAN only (not a node drag), the graph slid under a now-stale g.hover →
+      // re-evaluate at the release point so the highlight matches the cursor.
+      if (moved && wasPan) { const r = cv.getBoundingClientRect(), n2 = nodeAt(e.clientX - r.left, e.clientY - r.top), id2 = n2 ? n2.id : null;
+        if (id2 !== g.hover) { g.hover = id2; hoverCbRef.current?.(id2, e.clientX - r.left, e.clientY - r.top); } }
     };
     cv.addEventListener("wheel", onWheel, { passive: false });
     cv.addEventListener("mousedown", onDown);
@@ -278,11 +335,11 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     let pinch: any = null, tStart = 0, tNode: any = null, tMoved = false;
     const pinchInfo = (e: TouchEvent, r: DOMRect) => { const a = e.touches[0], b = e.touches[1];
       return { dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), mx: (a.clientX + b.clientX) / 2 - r.left, my: (a.clientY + b.clientY) / 2 - r.top }; };
-    const onTStart = (e: TouchEvent) => { const r = cv.getBoundingClientRect();
-      if (e.touches.length === 2) { mode = "pinch"; pinch = pinchInfo(e, r); e.preventDefault(); return; }
+    const onTStart = (e: TouchEvent) => { g.initialSettle = false; const r = cv.getBoundingClientRect();
+      if (e.touches.length === 2) { mode = "pinch"; g.pan = true; pinch = pinchInfo(e, r); e.preventDefault(); return; }
       const t = e.touches[0], n = nodeAt(t.clientX - r.left, t.clientY - r.top);
       tStart = performance.now(); tNode = n; tMoved = false;
-      if (n) { g.drag = n; n.fx = n.x; n.fy = n.y; mode = "node"; g.alpha = 1; } else mode = "pan"; last = { x: t.clientX, y: t.clientY }; e.preventDefault(); };
+      if (n) { g.drag = n; n.fx = n.x; n.fy = n.y; mode = "node"; g.alpha = 1; } else { mode = "pan"; g.pan = true; } last = { x: t.clientX, y: t.clientY }; e.preventDefault(); };
     const onTMove = (e: TouchEvent) => { const r = cv.getBoundingClientRect(); tMoved = true;
       if (mode === "pinch" && e.touches.length === 2) { const pi = pinchInfo(e, r), f = pi.dist / (pinch.dist || pi.dist);
         g.t.x = pi.mx - (pi.mx - g.t.x) * f; g.t.y = pi.my - (pi.my - g.t.y) * f; g.t.k *= f; pinch = pi; }
@@ -291,8 +348,8 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       e.preventDefault(); };
     const onTEnd = (e: TouchEvent) => {
       if (tNode && !tMoved && performance.now() - tStart < 400) pickRef.current(tNode.id);  // tap → open detail
-      if (e.touches.length === 0) { if (g.drag) { g.drag.fx = null; g.drag.fy = null; } mode = null; g.drag = null; pinch = null; tNode = null; }
-      else if (e.touches.length === 1) { mode = "pan"; last = { x: e.touches[0].clientX, y: e.touches[0].clientY }; pinch = null; } };
+      if (e.touches.length === 0) { if (g.drag) { g.drag.fx = null; g.drag.fy = null; } mode = null; g.drag = null; pinch = null; tNode = null; g.pan = false; g.dirty = true; }
+      else if (e.touches.length === 1) { mode = "pan"; g.pan = true; last = { x: e.touches[0].clientX, y: e.touches[0].clientY }; pinch = null; } };
     cv.addEventListener("touchstart", onTStart, { passive: false });
     cv.addEventListener("touchmove", onTMove, { passive: false });
     cv.addEventListener("touchend", onTEnd);
