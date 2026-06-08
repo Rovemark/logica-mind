@@ -20,7 +20,10 @@ const centColor = (c: number) => `hsl(${Math.round(210 - 210 * Math.min(1, Math.
 export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: { ns: string; colorFor: (n: string) => string; onOpenMemory?: (m: any) => void; focusEntity?: { name: string; n: number } | null }) {
   const { t } = useI18n();
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(false);       // first load done (gates the full-screen spinner)
+  const [refetching, setRefetching] = useState(false); // a toggle is reloading — keep the graph visible
+  const [showOrphans, setShowOrphans] = useState(false); // Obsidian-style: hide link-less nodes by default
+  const reqRef = useRef(0);                           // stale-guard: ignore out-of-order responses
   const [history, setHistory] = useState(true);
   const [colorBy, setColorBy] = useState<ColorBy>("namespace");
   const [coMention, setCoMention] = useState(true);
@@ -53,9 +56,15 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
 
   useEffect(() => {
     const layers = ["relation", coMention && "co_mention", semantic && "semantic"].filter(Boolean) as string[];
-    setLoaded(false);
+    // Don't blank the canvas on every toggle — keep the current graph on screen and
+    // show a small "updating" pill instead. The stale-guard (rid) ensures only the
+    // latest request wins, so a slow layer fetch can never leave it stuck loading.
+    const rid = ++reqRef.current;
+    setRefetching(true);
     api.graph(ns, history, at, { layers, focus: focusNode || undefined, depth })
-      .then(setData).catch(() => setData({ nodes: [], links: [] })).finally(() => setLoaded(true));
+      .then((d) => { if (rid === reqRef.current) { setData(d); setLoaded(true); } })
+      .catch(() => { if (rid === reqRef.current) { setData({ nodes: [], links: [] }); setLoaded(true); } })
+      .finally(() => { if (rid === reqRef.current) setRefetching(false); });
   }, [ns, history, at, coMention, semantic, focusNode, depth]);
 
   // reset transient view state when switching namespace
@@ -116,16 +125,33 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
       const ids = new Set(nodes.map((n) => n.id));
       for (const s of suggestedLinks) if (ids.has(s.a) && ids.has(s.b)) links.push({ source: s.a, target: s.b, label: "", kind: "suggested", weight: s.score });
     }
+    // Órfãos toggle (Obsidian-style): hide nodes with no visible edge unless asked.
+    // Computed over the FINAL link set, so it respects layer/confidence/type filters.
+    if (!showOrphans) {
+      const deg = new Set<string>();
+      for (const l of links) { deg.add(l.source); deg.add(l.target); }
+      nodes = nodes.filter((n) => deg.has(n.id));
+    }
     return { nodes, links };
-  }, [data, colorBy, areaFilter, minConf, predOff, t, suggest, suggestedLinks]);
+  }, [data, colorBy, areaFilter, minConf, predOff, t, suggest, suggestedLinks, showOrphans]);
+
+  // how many link-less nodes the graph currently holds (for the toggle's count badge)
+  const orphanCount = useMemo(() => {
+    const deg = new Set<string>();
+    for (const l of data.links) { deg.add(l.source); deg.add(l.target); }
+    return data.nodes.reduce((c, n) => c + (deg.has(n.id) ? 0 : 1), 0);
+  }, [data]);
 
   // a highlight query paints matches gold and dims the rest (Obsidian colour groups);
   // otherwise colour follows the colour-by mode
   const tq = tintQuery.trim().toLowerCase();
-  const tint = tq ? (n: any) => (n.id.toLowerCase().includes(tq) ? "#fbbf24" : "var(--dim2)")
+  // memoised so its identity is stable across re-renders (hover/state churn) — the
+  // canvas keys a repaint on nodeTint identity, so an unstable closure would defeat
+  // idle-suspend by repainting on every render.
+  const tint = useMemo(() => tq ? (n: any) => (n.id.toLowerCase().includes(tq) ? "#fbbf24" : "var(--dim2)")
     : colorBy === "area" ? (n: any) => (n.dimension ? dimColor(n.dimension) : "var(--dim2)")
     : colorBy === "centrality" ? (n: any) => centColor(n.centrality || 0)
-    : undefined;
+    : undefined, [tq, colorBy]);
   const communities = colorBy === "community" && !tq;
 
   async function toggleScrub() {
@@ -177,6 +203,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
         <div className="absolute top-3 left-3.5 text-[var(--dim2)] text-[11.5px] z-[3]">
           {shown.nodes.length} {t("graph_entities")} · {shown.links.length} {t("relations")}
           {at && <span className="text-[var(--gold)]"> · {t("graph_as_of")} {tShort(at)}</span>}
+          {refetching && <span className="text-[var(--accent)]"> · {t("graph_updating")}</span>}
         </div>
 
         {/* local/ego-graph banner — appears when focused on one entity */}
@@ -232,6 +259,14 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                 <div className="flex items-center mb-2">
                   <span className="text-[var(--dim2)] text-[10px] uppercase tracking-[.6px]">{t("graph_filters")}</span>
                   {nFilters > 0 && <button onClick={() => { setMinConf(0); setPredOff(new Set()); setTintQuery(""); }} className="ml-auto text-[11px] text-[var(--accent)] hover:underline">{t("graph_reset")}</button>}
+                </div>
+                {/* Órfãos — show/hide link-less nodes (Obsidian-style toggle) */}
+                <div onClick={() => setShowOrphans((v) => !v)} className="flex items-center justify-between mb-3 cursor-pointer select-none">
+                  <span className="text-[11.5px] text-[var(--dim)]">{t("graph_orphans")}{orphanCount > 0 ? ` ·${orphanCount}` : ""}</span>
+                  <span role="switch" aria-checked={showOrphans}
+                    className={`relative w-9 h-[18px] rounded-full transition-colors flex-none ${showOrphans ? "bg-[var(--accent)]" : "bg-[var(--line)]"}`}>
+                    <span className={`absolute top-[2px] h-3.5 w-3.5 rounded-full bg-white transition-all ${showOrphans ? "left-[19px]" : "left-[2px]"}`} />
+                  </span>
                 </div>
                 <div className="text-[11.5px] text-[var(--dim)] flex items-center justify-between mb-1">
                   <span>{t("graph_min_conf")}</span><span className="tabular-nums text-[var(--txt)]">{Math.round(minConf * 100)}%</span>

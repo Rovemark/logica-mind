@@ -155,6 +155,8 @@ const EN: Record<string, string> = {
   "glayer_comention": "Co-mentions",
   "glayer_semantic": "Semantic",
   "graph_filters": "Filters",
+  "graph_orphans": "Orphans",
+  "graph_updating": "updating…",
   "graph_min_conf": "Min confidence",
   "graph_search": "Find entity…",
   "graph_predicates": "Relation types",

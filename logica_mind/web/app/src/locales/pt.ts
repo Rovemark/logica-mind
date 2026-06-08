@@ -132,6 +132,8 @@ const d: Record<string, string> = {
   "glayer_comention": "Co-menções",
   "glayer_semantic": "Semântica",
   "graph_filters": "Filtros",
+  "graph_orphans": "Órfãos",
+  "graph_updating": "atualizando…",
   "graph_min_conf": "Confiança mín.",
   "graph_search": "Achar entidade…",
   "graph_predicates": "Tipos de relação",
