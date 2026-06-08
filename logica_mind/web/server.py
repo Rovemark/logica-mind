@@ -362,7 +362,14 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                     "created": items, "graph_edges": max(0, after - before),
                                     "user_updated": False, "deduped": len(items) == 0})
                 elif path == "/api/log":
-                    m = target.log(str(body.get("text", "")), role=body.get("role"), session=body.get("session"))
+                    # carry the originating CHANNEL (telegram/whatsapp/voice/dashboard/
+                    # claude-code/synapses…) as structured metadata so memories know
+                    # where they came from, not just a text prefix.
+                    _md = dict(body["metadata"]) if isinstance(body.get("metadata"), dict) else {}
+                    if body.get("channel"):
+                        _md["channel"] = body.get("channel")
+                    m = target.log(str(body.get("text", "")), role=body.get("role"),
+                                   session=body.get("session"), metadata=_md or None)
                     self._json({"ok": bool(m), "id": m.id if m else None})
                 elif path == "/api/forget":
                     self._json({"deleted": target.forget(memory_id=body.get("id"), query=body.get("query"))})
@@ -388,7 +395,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                               str(body.get("text", "")))
                     self._json({"ok": bool(mem), "id": mem.id if mem else None})
                 elif path == "/api/ingest":
-                    self._json(target.ingest_conversation(body.get("messages") or [], session=body.get("session")))
+                    self._json(target.ingest_conversation(body.get("messages") or [], session=body.get("session"),
+                                                          source=body.get("source"), channel=body.get("channel")))
+                elif path == "/api/dream":
+                    # run a sleep-time consolidation cycle for this namespace (inductive
+                    # graph inference + distillation). Returns the dream report. Meant to
+                    # be called on a schedule (cron) against the live service.
+                    try:
+                        rep = target.dream(**(body.get("opts") or {}))
+                        out = rep.asdict() if hasattr(rep, "asdict") else (
+                            rep.__dict__ if hasattr(rep, "__dict__") else rep)
+                        self._json({"ok": True, "report": out})
+                    except Exception as e:
+                        self._json({"ok": False, "error": str(e)}, 500)
                 elif path == "/api/record":
                     title = str(body.get("title", "")).strip()
                     if not title:
