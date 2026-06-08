@@ -781,7 +781,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # drawn static, so this stays snappy (the one-time settle is the
                     # only cost). Raise via ?limit= for a fuller — but slower-to-settle
                     # — graph; true thousands wants a WebGL renderer.
-                    lim = int(first(qs, "limit", "250") or 250)
+                    lim = int(first(qs, "limit", "200") or 200)
                     self._json(mind.graph_viz(namespace=None if is_all else ns,
                                               include_history=hist, at=at,
                                               layers=layers, focus=foc, depth=dep, limit=lim))
