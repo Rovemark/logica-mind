@@ -117,9 +117,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       let dx = B.x - A.x, dy = B.y - A.y, dist = Math.hypot(dx, dy) || 0.01, f = (dist - K) * 0.04 * a, ux = dx / dist, uy = dy / dist;
       A.vx += ux * f; A.vy += uy * f; B.vx -= ux * f; B.vy -= uy * f; });
     g.nodes.forEach((n: any) => {
-      // stronger centering gravity so loose / low-degree nodes cluster toward the
-      // middle (cohesive, Obsidian-like) instead of drifting off and looking lost.
-      n.vx += -n.x * 0.022 * a; n.vy += -n.y * 0.022 * a;
+      // moderate centering gravity — cohesive (loose nodes stay near the middle)
+      // WITHOUT collapsing everything into a single point (too strong + the grid's
+      // local-only repulsion made the layout implode and vanish).
+      n.vx += -n.x * 0.01 * a; n.vy += -n.y * 0.01 * a;
       if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; return; }
       n.vx *= 0.86; n.vy *= 0.86; n.x += n.vx; n.y += n.vy;
     });
@@ -216,8 +217,12 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   function fitGraph(animate: boolean) {
     const g = G.current; if (!g.nodes.length) return;
     let a = 1e9, b = 1e9, cc = -1e9, d = -1e9;
-    g.nodes.forEach((n: any) => { a = Math.min(a, n.x); b = Math.min(b, n.y); cc = Math.max(cc, n.x); d = Math.max(d, n.y); });
-    const w = cc - a || 1, h = d - b || 1, pad = 70, k = Math.min((g.W - pad * 2) / w, (g.H - pad * 2) / h, 1.8);
+    g.nodes.forEach((n: any) => { if (!isFinite(n.x) || !isFinite(n.y)) return; a = Math.min(a, n.x); b = Math.min(b, n.y); cc = Math.max(cc, n.x); d = Math.max(d, n.y); });
+    if (!isFinite(a) || !isFinite(cc)) return;   // all-NaN layout → don't zoom into the void
+    const w = cc - a || 1, h = d - b || 1, pad = 70;
+    // clamp the zoom so a tiny (collapsed) or huge layout never frames into an empty
+    // screen — keep it readable between 0.15× and 1.8×.
+    const k = Math.max(0.15, Math.min((g.W - pad * 2) / w, (g.H - pad * 2) / h, 1.8));
     const tx = g.W / 2 - ((a + cc) / 2) * k, ty = g.H / 2 - ((b + d) / 2) * k;
     if (animate) { const s = { ...g.t }, st = performance.now();
       const an = () => { const p = Math.min(1, (performance.now() - st) / 350), e = 1 - Math.pow(1 - p, 3);
@@ -254,7 +259,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const loop = () => {
       if (g.alpha > 0) tick();
       draw();
-      if (anim && g.alpha > 0 && g.alpha < 0.05 && !g.framed) { g.framed = true; fitGraph(true); }
+      if (anim && g.alpha > 0 && g.alpha < 0.02 && !g.framed) { g.framed = true; fitGraph(true); }
       g.raf = requestAnimationFrame(loop);
     }; loop();
 
