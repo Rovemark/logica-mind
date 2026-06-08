@@ -22,7 +22,9 @@ _SYSTEM = (
     "Given the CURRENT MODEL and NEW OBSERVATIONS, return an updated model in plain "
     "prose with short labelled lines (Identity, Preferences, Communication style, "
     "Goals, Context). Reconcile contradictions in favour of the most recent "
-    "observation. Be specific and brief. Return only the updated model text."
+    "observation. Be specific and brief. WRITE IN THE SAME LANGUAGE as the "
+    "observations (e.g. Portuguese observations → Portuguese model). Return only "
+    "the updated model text."
 )
 
 _QUERY_SYSTEM = (
@@ -37,7 +39,9 @@ _EXTRACT_SYSTEM = (
     "statements (one fact each) covering identity, preferences, communication "
     "style, goals/ambitions, psychology, beliefs/values, skills, health, "
     "relationships, spirituality and context. Be specific and concrete; skip "
-    "headings, fluff and duplicates. Return ONLY the JSON array of strings."
+    "headings, fluff and duplicates. WRITE EACH FACT IN THE SAME LANGUAGE as the "
+    "document (e.g. a Portuguese document → Portuguese facts). Return ONLY the "
+    "JSON array of strings."
 )
 
 
