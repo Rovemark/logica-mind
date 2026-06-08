@@ -1088,7 +1088,7 @@ class LogicaMind:
 
     def ingest_conversation(self, messages: List[Dict[str, Any]], session: Optional[str] = None,
                             extract: bool = True, derive: bool = True,
-                            source: Optional[str] = None) -> Dict[str, int]:
+                            source: Optional[str] = None, channel: Optional[str] = None) -> Dict[str, int]:
         """conversation ingestion. `messages` is a list of
         {"role"/"speaker", "content"} dicts. Each turn is logged (episodic); with
         an LLM, durable facts are extracted seeing the WHOLE exchange (so a reply
@@ -1096,7 +1096,12 @@ class LogicaMind:
         derived for the dialectic model. `source` tags every captured memory with
         its origin (e.g. the MCP client name: 'claude-code', 'cursor', 'chatgpt')
         so the dashboard can show what captured it. Returns {logged, facts, observations}."""
-        meta = {"source": source} if source else None
+        meta: Dict[str, Any] = {}
+        if source:
+            meta["source"] = source
+        if channel:
+            meta["channel"] = channel
+        meta = meta or None
         turns = []
         for msg in messages or []:
             if not isinstance(msg, dict):
