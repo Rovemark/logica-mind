@@ -123,9 +123,25 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // graphs where you can actually see it. (Obsidian likewise drops detail at scale.)
     const big = g.nodes.length > 1200;
     if (g.moving || big) {
-      c.strokeStyle = edgeDead; c.lineWidth = 0.9 / Math.sqrt(t.k); c.beginPath();
-      g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return; c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); });
-      c.stroke();
+      // edges grouped BY COLOUR — a handful of strokes (one per edge type/predicate
+      // class), not one per edge, so the batched draw stays cheap yet keeps the
+      // colourful edge grammar at scale (greying everything was the "sem cores" bug).
+      c.lineWidth = 0.9 / Math.sqrt(t.k);
+      const _grp: Record<string, any[]> = {};
+      g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
+        const kind = l.kind || "relation";
+        const rgb = l.valid === false ? "_d"
+          : kind === "co_mention" ? COMENTION_RGB
+          : kind === "semantic" ? SEMANTIC_RGB
+          : kind === "suggested" ? "251,191,36"
+          : (PCLASS_RGB[l.pclass || "other"] || PCLASS_RGB.other);
+        (_grp[rgb] = _grp[rgb] || []).push(A, B); });
+      for (const rgb in _grp) {
+        c.strokeStyle = rgb === "_d" ? edgeDead : `rgba(${rgb},0.55)`;
+        c.beginPath(); const arr = _grp[rgb];
+        for (let i = 0; i < arr.length; i += 2) { c.moveTo(arr[i].x, arr[i].y); c.lineTo(arr[i + 1].x, arr[i + 1].y); }
+        c.stroke();
+      }
       g.nodes.forEach((n: any) => { const r = baseRad(n, false) / Math.sqrt(t.k);
         c.beginPath(); c.arc(n.x, n.y, r, 0, 6.283); c.fillStyle = nodeColor(n); c.fill(); });
       // settled big graph: labels only when zoomed in enough to read them, and only for
