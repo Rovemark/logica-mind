@@ -1221,15 +1221,23 @@ class LogicaMind:
         boundary matching keeps short names from over-matching."""
         import re as _re
         from collections import Counter
-        # gather (content, dimension) for every categorized fact across the graphs
+        # gather (content, dimension) for every categorized fact — UNCAPPED via SQL
+        # (store.all() only saw the newest 5000, so entities older than that never
+        # picked up a dimension and the graph couldn't colour by area).
         facts: List[tuple] = []
-        for ns in namespaces:
-            for m in self.store.all(ns):
-                if "edge" in (m.tags or []) or "alias" in (m.tags or []):
-                    continue
-                dim = (m.metadata or {}).get("dimension")
-                if dim and m.content:
-                    facts.append((m.content.lower(), dim))
+        df = getattr(self.store, "dimensioned", None)
+        if callable(df):
+            for ns in namespaces:
+                for content, dim in df(ns):
+                    facts.append((content.lower(), dim))
+        else:
+            for ns in namespaces:
+                for m in self.store.all(ns):
+                    if "edge" in (m.tags or []) or "alias" in (m.tags or []):
+                        continue
+                    dim = (m.metadata or {}).get("dimension")
+                    if dim and m.content:
+                        facts.append((m.content.lower(), dim))
         if not facts:
             return {}
         # the canonical entity names in play (subjects + objects of valid edges)
@@ -1241,28 +1249,37 @@ class LogicaMind:
                 if e.object:
                     ents.add(e.object)
         from .extract.taxonomy import group_of
+        # FAST entity→dimension voting: a per-entity regex over every fact is
+        # O(entities×facts) (minutes at scale). Instead index entity names in a set
+        # and slide 1–4 word n-grams over each fact ONCE, O(1) membership per n-gram.
+        ent_lower = {e.lower(): e for e in ents if len(e.strip()) >= 2}
+        ent_set = set(ent_lower.keys())
+        if not ent_set:
+            return {}
+        word_re = _re.compile(r"[\wÀ-ÿ]+")
+        votes: Dict[str, Counter] = {}
+        for content, dim in facts:
+            toks = word_re.findall(content)
+            seen_here: set = set()
+            for i in range(len(toks)):
+                for n in range(1, 5):
+                    if i + n > len(toks):
+                        break
+                    ng = " ".join(toks[i:i + n])
+                    if ng in ent_set and ng not in seen_here:
+                        seen_here.add(ng)
+                        votes.setdefault(ng, Counter())[dim] += 1
         out: Dict[str, str] = {}
-        for ent in ents:
-            name = ent.strip()
-            if len(name) < 2:
-                continue
-            pat = _re.compile(r"\b" + _re.escape(name.lower()) + r"\b")
-            votes: Counter = Counter()
-            for content, dim in facts:
-                if pat.search(content):
-                    votes[dim] += 1
-            if not votes:
-                continue
-            # pick the dominant life-AREA first (a group can hold several dimensions),
-            # then the busiest dimension inside it — so an entity that's mostly about
-            # business reads as business even when its business facts span dimensions.
+        for ng, vc in votes.items():
+            # dominant life-AREA first (a group holds several dimensions), then the
+            # busiest dimension inside it.
             group_votes: Counter = Counter()
-            for dim, n in votes.items():
+            for dim, n in vc.items():
                 group_votes[group_of(dim) or "personal"] += n
             top_group = group_votes.most_common(1)[0][0]
-            best = max((d for d in votes if (group_of(d) or "personal") == top_group),
-                       key=lambda d: votes[d])
-            out[ent] = best
+            best = max((d for d in vc if (group_of(d) or "personal") == top_group),
+                       key=lambda d: vc[d])
+            out[ent_lower[ng]] = best
         return out
 
     # ---- observations ------------------------------------------------------
