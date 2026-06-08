@@ -241,20 +241,18 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // honor the Settings "Graph animations" toggle: when off, settle the layout
     // synchronously once and freeze (no continuous physics), but keep redrawing
     // so pan/zoom/drag still work.
-    const anim = localStorage.getItem("lm-anim") !== "off";
+    // SETTLE the layout synchronously off-screen, then frame it and draw STATIC.
+    // Live per-frame physics kept spreading nodes out of the zoomed-in initial
+    // frame ("loads then everything vanishes"); a pre-settled, fitted graph is
+    // stable, cohesive, connected — it appears already laid out (like Obsidian on
+    // open) and never drifts off-screen, freezes, or disappears.
     g.alpha = 1;
-    g.framed = false;
-    if (!anim) { for (let k = 0; k < 500; k++) tick(); g.alpha = 0; g.fitOnce = false; }
-    if (!g.fitOnce) { fitGraph(false); g.fitOnce = true; }
-    // Animate from the start (smooth now: repulsion cutoff + labels deferred), then
-    // auto-frame ONCE the layout converges — fixes the "distant / lost" view without
-    // killing the animation. Skip the tick after convergence to spare CPU.
-    const loop = () => {
-      if (g.alpha > 0) tick();
-      draw();
-      if (anim && g.alpha > 0 && g.alpha < 0.02 && !g.framed) { g.framed = true; fitGraph(true); }
-      g.raf = requestAnimationFrame(loop);
-    }; loop();
+    for (let k = 0; k < 450; k++) tick();
+    g.alpha = 0;                       // settled → no continuous physics
+    fitGraph(false);                   // frame the FINAL layout (always, on every load)
+    // Redraw each frame so hover/pan/zoom stay live; a node-drag reheats alpha and
+    // the tick runs again only then, re-settling without ever flinging off-screen.
+    const loop = () => { if (g.alpha > 0) tick(); draw(); g.raf = requestAnimationFrame(loop); }; loop();
 
     // ---- interaction (mouse) ----
     let mode: string | null = null, last: any = null, downPos: any = null, downNode: any = null;
