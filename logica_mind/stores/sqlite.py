@@ -288,6 +288,24 @@ class SQLiteStore(Store):
         return out
 
     @_locked
+    def day(self, namespace=None, date=None, layers=None, with_embeddings=False):
+        """Every memory created on a given UTC day (YYYY-MM-DD) — date filter is in
+        SQL (substr(created_at,1,10)=?) so it is NOT capped by the _candidates 5000
+        window. namespace=None scans GLOBALLY across all namespaces (__all__ view)."""
+        sql = "SELECT * FROM memories WHERE substr(created_at,1,10) = ?"
+        params: list = [date]
+        if namespace:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        if layers:
+            ph = ",".join("?" for _ in layers)
+            sql += f" AND layer IN ({ph})"
+            params += [l.value for l in layers]
+        sql += " ORDER BY created_at DESC, seq DESC, rowid DESC"
+        cur = self._conn.execute(sql, params)
+        return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
+
+    @_locked
     def page(self, namespace=None, layers=None, limit=100, offset=0):
         """A bounded page of memories (newest first) — LIMIT/OFFSET in SQL so a list
         view materializes ~100 rows instead of every row. namespace=None pages

@@ -155,6 +155,13 @@ class MultiStore(Store):
                 return s.day_counts(namespace, exclude_layers)
         return {}
 
+    def day(self, namespace=None, date=None, layers=None, with_embeddings=False):
+        for s in self.stores:
+            if hasattr(s, "day"):
+                return s.day(namespace, date, layers, with_embeddings)
+        return [m for m in self.all(namespace, layers, with_embeddings)
+                if (m.created_at or "").startswith(date or "")]
+
     def page(self, namespace, layers=None, limit=100, offset=0):
         for s in self.stores:
             if hasattr(s, "page"):
