@@ -27,6 +27,9 @@ const dimLabel = (d: string) => d.replace(/^(biz|project|org)_/, "").replace(/_/
 
 export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: { ns: string; colorFor: (n: string) => string; onOpenMemory?: (m: any) => void; focusEntity?: { name: string; n: number } | null }) {
   const { t } = useI18n();
+  // dimension label in the USER'S language (dim_* keys cover the whole taxonomy);
+  // ids the taxonomy doesn't know fall back to the prettified raw id
+  const dimName = (d: string) => { const k = "dim_" + d; const s = t(k as any); return s === k ? dimLabel(d) : s; };
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
   const [loaded, setLoaded] = useState(false);       // first load done (gates the full-screen spinner)
   const [refetching, setRefetching] = useState(false); // a toggle is reloading — keep the graph visible
@@ -281,7 +284,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   // pretty hub labels (emoji cues, dimension ids humanized)
   const hubLabel = useMemo(() => (k: string) => {
     if (k === "—") return k;
-    if (colorBy === "area") return dimLabel(k);
+    if (colorBy === "area") return dimName(k);
     if (colorBy === "type") return `${TYPE_ICON[k] || "❖"} ${k}`;
     if (colorBy === "channel") return `${k === "voice" ? "🎙" : "💬"} ${k}`;
     if (colorBy === "namespace") return `🤖 ${k}`;
@@ -545,7 +548,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                 {facetValues.map(({ v, n }) => {
                   const on = !facetOff.has(v);
                   const col = v === "—" ? "var(--dim2)" : valueColor(v);
-                  const label = colorBy === "area" && v !== "—" ? dimLabel(v) : v;
+                  const label = colorBy === "area" && v !== "—" ? dimName(v) : v;
                   return (
                     <button key={v} title={t("tip_facet_chip")}
                       onClick={(e) => setFacetOff((s) => {
@@ -636,11 +639,11 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                     <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_area")}</div>
                     {AREAS.filter((a) => dimsByArea[a.id]?.length).map((a) => (
                       <div key={a.id} className="flex flex-col gap-1">
-                        <span className="text-[var(--dim2)] text-[10px] uppercase tracking-[.5px]" style={{ color: a.color }}>{a.label}</span>
+                        <span className="text-[var(--dim2)] text-[10px] uppercase tracking-[.5px]" style={{ color: a.color }}>{t(("area_" + a.id) as any)}</span>
                         {dimsByArea[a.id].map((dim) => (
                           <span key={dim} className="inline-flex items-center gap-2 text-[var(--dim)] pl-1">
                             <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(dim) }} />
-                            <span className="truncate capitalize">{dimLabel(dim)}</span>
+                            <span className="truncate">{dimName(dim)}</span>
                             <span className="tabular-nums text-[var(--dim2)]">{facetCount[dim] ?? ""}</span>
                           </span>
                         ))}

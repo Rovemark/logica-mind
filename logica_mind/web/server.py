@@ -1260,17 +1260,18 @@ def serve(mind, host: str = "127.0.0.1", port: int = 8420, open_browser: bool = 
     is_local = host in ("127.0.0.1", "::1", "localhost")
     token = os.environ.get("LOGICA_MIND_TOKEN")
     if allow_writes is None:
-        allow_writes = is_local                # writes on by default only on loopback
-    if allow_writes and not is_local and not token:
-        raise SystemExit("logica-mind: refusing to enable write endpoints on a non-loopback "
-                         "host without LOGICA_MIND_TOKEN set.")
-    if allow_writes and not is_local:
-        print("⚠️  write endpoints exposed on a non-loopback host — bearer token required.")
+        # per-request auth is what actually restricts writers: loopback callers are
+        # trusted, anyone else needs the bearer token (_authed). So write endpoints
+        # stay on by default — a 0.0.0.0 bind without a token still only accepts
+        # writes from the machine itself (remote callers get 401), instead of the
+        # old bind-level gate 403ing the local memory pipeline too.
+        allow_writes = True
     if not is_local and not token:
-        # reads are now auth-gated too, so a tokenless non-loopback bind 401s every
-        # API call — warn the operator instead of silently shipping a broken board
-        print("⚠️  non-loopback host without LOGICA_MIND_TOKEN — all /api reads will "
-              "return 401. Set LOGICA_MIND_TOKEN to use the dashboard remotely.")
+        # remote calls (reads and writes) are auth-gated per request; loopback
+        # callers keep working either way
+        print("⚠️  non-loopback host without LOGICA_MIND_TOKEN — remote /api calls "
+              "will return 401 (loopback callers keep working). Set LOGICA_MIND_TOKEN "
+              "to use the dashboard remotely.")
     httpd = ThreadingHTTPServer((host, port), make_handler(mind, allow_writes=allow_writes, token=token))
     url = f"http://{host}:{port}"
     n = len(mind.store.namespaces())

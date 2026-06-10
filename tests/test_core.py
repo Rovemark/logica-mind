@@ -1467,6 +1467,42 @@ def test_web_get_requires_auth_on_non_loopback():
     assert hit("/api/memories", "10.0.0.9", {"Authorization": "Bearer tok"}) == 200
 
 
+def test_web_writes_are_per_request_not_per_bind():
+    """Regression: a 0.0.0.0 bind used to 403 EVERY write (allow_writes gated on the
+    bind host), silently killing the local memory pipeline behind a reverse proxy.
+    Writes are now governed per request: loopback callers always can, remote callers
+    need the bearer; allow_writes=False stays a hard read-only switch."""
+    import io
+    from logica_mind.web import server as S
+
+    def post(handler, path, peer, body=b'{"text":"x","namespace":"root"}', headers=None):
+        class R:
+            client_address = (peer, 1)
+            def __init__(s):
+                s.path = path; s.command = "POST"
+                s.headers = {"Content-Length": str(len(body)), **(headers or {})}
+                s.rfile = io.BytesIO(body); s.wfile = io.BytesIO(); s._st = None
+            def send_response(s, c): s._st = c
+            def send_header(s, k, v): pass
+            def end_headers(s): pass
+            def log_message(s, *a): pass
+        r = R()
+        for n in dir(handler):
+            if n.startswith(("do_", "_")) and callable(getattr(handler, n, None)):
+                try: setattr(r, n, getattr(handler, n).__get__(r, R))
+                except Exception: pass
+        r.do_POST(); return r._st
+
+    m = mk()
+    open_h = S.make_handler(m, allow_writes=True, token="tok")    # serve() default now
+    assert post(open_h, "/api/remember", "127.0.0.1") == 200      # local pipeline writes
+    assert post(open_h, "/api/remember", "10.0.0.9") == 401       # remote needs bearer
+    assert post(open_h, "/api/remember", "10.0.0.9",
+                headers={"Authorization": "Bearer tok"}) == 200   # bearer writes
+    ro_h = S.make_handler(m, allow_writes=False)                  # forced read-only
+    assert post(ro_h, "/api/remember", "127.0.0.1") == 403        # even loopback
+
+
 def test_graph_alias_resolution_invalidates():
     m = mk()
     m.graph.ingest("Bob", "lives_in", "Paris")

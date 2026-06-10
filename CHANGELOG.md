@@ -3,6 +3,23 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.2] — 2026-06-10
+
+### Fixed — memory writes behind a public bind (cluster mode)
+- **Write endpoints were dead on any non-loopback bind**: `serve(host="0.0.0.0")`
+  (the cluster/server topology, typically behind a reverse proxy) gated writes on
+  the *bind host*, so every POST — including from the machine's own memory
+  pipeline — got `403 writes disabled`, silently stalling ingestion. Writes are
+  now authorized **per request**, exactly like reads: loopback callers are always
+  trusted, remote callers need the `LOGICA_MIND_TOKEN` bearer.
+  `allow_writes=False` remains a hard read-only switch. Regression-tested.
+
+### Dimension labels in your language
+- The 34-dimension taxonomy (plus the four life/work areas) is now translated in
+  **all 15 UI languages** — graph facet sidebar, orbit/ring hub labels, legend
+  and the Profile cards/map show e.g. *Saúde*, *Receita*, *Cronograma* instead
+  of raw English ids. Ids the taxonomy doesn't know keep the prettified raw id.
+
 ## [0.3.1] — 2026-06-10
 
 ### Graph explorer
