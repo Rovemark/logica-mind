@@ -85,6 +85,19 @@ class TemporalGraph:
         mems = self.store.all(self.namespace, layers=[MemoryLayer.GRAPH], with_embeddings=False)
         # alias rows live in the GRAPH layer too — never expose them as edges
         out = [_memory_to_edge(m) for m in mems if "alias" not in (m.tags or [])]
+        # ENTITY RESOLUTION at read time: canonicalize endpoints through the alias
+        # map, so casing/spacing variants ('LogicaOS'/'Logica OS') and explicit
+        # add_alias() merges collapse onto ONE node everywhere downstream (viz,
+        # dimensions, co-mentions, facets) — without rewriting stored rows.
+        amap = self._alias_map()
+        if amap:
+            for e in out:
+                cs = amap.get(_norm_entity(e.subject))
+                if cs and cs != e.subject:
+                    e.subject = cs
+                co = amap.get(_norm_entity(e.object))
+                if co and co != e.object:
+                    e.object = co
         if at is not None:
             return [e for e in out if e.valid_at(at)]
         if not include_history:

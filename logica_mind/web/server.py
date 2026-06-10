@@ -373,6 +373,18 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     self._json({"ok": bool(m), "id": m.id if m else None})
                 elif path == "/api/forget":
                     self._json({"deleted": target.forget(memory_id=body.get("id"), query=body.get("query"))})
+                elif path == "/api/entity/alias":
+                    # rename/merge an entity (non-destructive): variant resolves to
+                    # canonical from now on, and edges() canonicalizes at read time —
+                    # the graph collapses the nodes everywhere without rewriting rows.
+                    variant = str(body.get("variant", "")).strip()
+                    canonical = str(body.get("canonical", "")).strip()
+                    if not variant or not canonical:
+                        return self._json({"error": "variant and canonical required"}, 400)
+                    base_ns = ns if ns not in _ALL else mind.namespace
+                    mind.for_namespace(base_ns).graph.add_alias(variant, canonical)
+                    return self._json({"ok": True, "variant": variant, "canonical": canonical})
+
                 elif path == "/api/forget_about":
                     entity = str(body.get("entity", "")).strip()
                     if not entity:

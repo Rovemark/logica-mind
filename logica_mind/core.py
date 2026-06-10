@@ -131,6 +131,7 @@ class LogicaMind:
         reranker: Optional["Reranker"] = None,
         rerank_pool: int = 30,
         entity_boost: float = 0.0,
+        graph_boost: float = 0.06,
     ):
         self.namespace = namespace
         self.store = store or SQLiteStore()
@@ -145,13 +146,16 @@ class LogicaMind:
             except Exception:
                 llm = None
         self.llm = llm or NullLLM()
-        # default extractor: LLM-based if an LLM is available, else noop
+        # default extractor: LLM-based if an LLM is available, else the keyword
+        # heuristic — zero-key clients still get dimensions (Profile + coloured
+        # graph) instead of untagged raw facts.
         if extractor is not None:
             self.extractor = extractor
         elif getattr(self.llm, "available", False):
             self.extractor = LLMExtractor(self.llm)
         else:
-            self.extractor = NoopExtractor()
+            from .extract.heuristic import HeuristicExtractor
+            self.extractor = HeuristicExtractor()
 
         self.dedup_threshold = dedup_threshold
         self.w_sim, self.w_imp, self.w_rec = weights
@@ -160,6 +164,11 @@ class LogicaMind:
         self.reranker = reranker
         self.rerank_pool = rerank_pool
         self.entity_boost = entity_boost
+        # graph-aware recall: memories about the query entities' 1-hop NEIGHBOURS
+        # also rank up (default ON — it only fires when the query names a graph
+        # entity, and the knowledge graph is exactly the thing that knows what is
+        # connected to what). Set 0 to disable.
+        self.graph_boost = graph_boost
         self._warned_dim = False
 
         self.graph = TemporalGraph(self.store, namespace, self.embedder)
@@ -537,8 +546,13 @@ class LogicaMind:
         self._check_dim(q_emb, raw)
 
         # entity-boosted retrieval: graph entities mentioned in the query lift
-        # memories that also mention them (entity linking)
-        boost_ents = self._query_entities(query) if self.entity_boost > 0 else set()
+        # memories that also mention them (entity linking); with graph_boost on,
+        # the entities' 1-HOP NEIGHBOURS lift their memories too (graph-aware).
+        want_ents = self.entity_boost > 0 or self.graph_boost > 0
+        boost_ents = self._query_entities(query) if want_ents else set()
+        nbr_ents: set = set()
+        if boost_ents and self.graph_boost > 0:
+            nbr_ents = self._graph_neighborhood(self._query_entity_names(query))[0] - boost_ents
 
         reranked: List[SearchResult] = []
         for r in raw:
@@ -547,11 +561,15 @@ class LogicaMind:
             imp = r.memory.importance
             final = self.w_sim * sim + self.w_imp * imp + self.w_rec * rec
             comps = {"similarity": round(sim, 4), "importance": round(imp, 4), "recency": round(rec, 4)}
-            if boost_ents:
+            if boost_ents or nbr_ents:
                 ctoks = _tokset(r.memory.content)
-                if any(e <= ctoks for e in boost_ents):   # entity tokens present in content
-                    final += self.entity_boost
-                    comps["entity_boost"] = self.entity_boost
+                if boost_ents and any(e <= ctoks for e in boost_ents):   # entity tokens present in content
+                    b = self.entity_boost or self.graph_boost
+                    final += b
+                    comps["entity_boost"] = b
+                elif nbr_ents and any(e <= ctoks for e in nbr_ents):     # 1-hop neighbour of a query entity
+                    final += self.graph_boost
+                    comps["graph_boost"] = self.graph_boost
             if min_importance and imp < min_importance:
                 continue                          # fact-rating threshold
             reranked.append(SearchResult(memory=r.memory, score=final, components=comps))
@@ -620,6 +638,64 @@ class LogicaMind:
         except Exception:
             pass
         return ents
+
+    def _query_entity_names(self, query: str) -> List[str]:
+        """Graph-entity NAMES mentioned in the query (same matching as
+        _query_entities, but returns the canonical names — fuel for the 1-hop
+        graph expansion)."""
+        qtoks = _tokset(query)
+        names: List[str] = []
+        try:
+            for name in self.graph.entity_names():
+                ntoks = entity_tokset(name)
+                if ntoks and ntoks <= qtoks:
+                    names.append(name)
+        except Exception:
+            pass
+        return names
+
+    def _graph_neighborhood(self, names: List[str], max_per_entity: int = 10):
+        """1-hop expansion: (neighbour token-sets, rendered facts) for the given
+        entity names. This is what makes recall GRAPH-AWARE — things connected to
+        what you asked about rank up, and context() can inject the graph's own
+        knowledge as compact fact lines."""
+        nbrs: set = set()
+        facts: List[str] = []
+        try:
+            for name in names:
+                for e in self.graph.query(name)[:max_per_entity]:
+                    other = e.object if e.subject.lower() == name.lower() else e.subject
+                    t = entity_tokset(other)
+                    if t:
+                        nbrs.add(t)
+                    facts.append(f"{e.subject} {e.predicate.replace('_', ' ')} {e.object}")
+        except Exception:
+            pass
+        return nbrs, facts
+
+    def reembed(self, namespaces: Optional[List[str]] = None, batch: int = 64) -> Dict[str, int]:
+        """Re-embed EVERY memory with the CURRENT embedder — the dimension
+        migration for switching embedders (hashing 256d → onnx/local 384d →
+        voyage 1024d). The store holds ONE fixed vector dimension, so after
+        changing the embedder run this once and recall is consistent again.
+        Idempotent; safe to re-run."""
+        import sys as _sys
+        setter = getattr(self.store, "set_embeddings", None)
+        if not callable(setter):
+            raise RuntimeError("store does not support re-embedding (set_embeddings missing)")
+        nss = namespaces or self.store.namespaces()
+        done: Dict[str, int] = {}
+        for ns in nss:
+            mems = self.store.all(ns, with_embeddings=False)
+            n = 0
+            for i in range(0, len(mems), batch):
+                chunk = mems[i:i + batch]
+                vecs = self.embedder.embed([m.content or "" for m in chunk])
+                setter(ns, [(m.id, v) for m, v in zip(chunk, vecs)])
+                n += len(chunk)
+                print(f"[reembed] {ns}: {n}/{len(mems)}", file=_sys.stderr)
+            done[ns] = n
+        return done
 
     def get(self, memory_id: str) -> Optional[Memory]:
         return self.store.get(self.namespace, memory_id)
@@ -1484,6 +1560,23 @@ class LogicaMind:
                 block = "## User\n" + profile
                 if self._approx_tokens("\n\n".join(blocks + [block])) <= budget:
                     blocks.append(block)
+
+        # knowledge-graph facts about the query's entities — the graph's OWN
+        # knowledge injected as compact fact lines (graph-aware context). Dense,
+        # cheap tokens; goes before the prose memories.
+        qnames = self._query_entity_names(query)
+        if qnames:
+            _, facts = self._graph_neighborhood(qnames, max_per_entity=6)
+            flines: List[str] = []
+            for f in dict.fromkeys(facts):               # dedup, keep order
+                line = f"- {f}"
+                candidate = blocks + ["## Knowledge graph\n" + "\n".join(flines + [line])]
+                if self._approx_tokens("\n\n".join(candidate)) <= budget:
+                    flines.append(line)
+                else:
+                    break
+            if flines:
+                blocks.append("## Knowledge graph\n" + "\n".join(flines))
 
         chosen: List[str] = []
         for h in self.recall(query, layers=layers, limit=20, session=session):

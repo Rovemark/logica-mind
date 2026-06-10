@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "logica-mind"
-version = "0.2.31"
+version = "0.3.0"
 description = "Pluggable, multi-store memory for any AI system — episodic, semantic, temporal-graph and dialectic user memory in one library."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,10 @@ voyage = ["voyageai>=0.2"]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.39"]
 local = ["sentence-transformers>=2.2"]
+# true semantic embeddings WITHOUT torch (~50MB of wheels vs ~2GB):
+onnx = ["onnxruntime>=1.17", "tokenizers>=0.15"]
+# at-rest encryption for the SQLite store (SQLiteStore(encryption_key=...)):
+sqlcipher = ["sqlcipher3-binary>=0.5.4"]
 postgres = ["psycopg[binary]>=3.1"]
 redis = ["redis>=5.0"]
 all = ["voyageai>=0.2", "openai>=1.0", "anthropic>=0.39", "sentence-transformers>=2.2",

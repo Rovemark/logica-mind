@@ -47,6 +47,12 @@ def main(argv=None):
     sub.add_parser("stats", help="show per-layer counts")
     sub.add_parser("mcp", help="run as an MCP server over stdio")
 
+    s_remb = sub.add_parser("reembed", help="re-embed every memory with the CURRENT embedder "
+                                            "(the dimension migration after switching embedders)")
+    s_remb.add_argument("--all-namespaces", action="store_true",
+                        help="re-embed every namespace in the store (default: just the current one)")
+    s_remb.add_argument("--batch", type=int, default=64)
+
     s_demo = sub.add_parser("demo", help="load a fictional demo dataset (or clear it)")
     s_demo.add_argument("--clear", action="store_true", help="remove the demo data instead of loading it")
     s_demo.add_argument("--serve", action="store_true", help="open the dashboard after loading")
@@ -91,6 +97,12 @@ def main(argv=None):
     elif args.cmd == "dream":
         print("💤 dreaming…")
         print(mind.dream().to_dict())
+    elif args.cmd == "reembed":
+        nss = None if args.all_namespaces else [mind.namespace]
+        done = mind.reembed(namespaces=nss, batch=args.batch)
+        total = sum(done.values())
+        print(f"🔁 re-embedded {total} memor{'y' if total == 1 else 'ies'} "
+              f"across {len(done)} namespace(s) at {mind.embedder.dim}d")
     elif args.cmd == "stats":
         for k, v in mind.stats().items():
             print(f"{k:>10}: {v}")

@@ -50,7 +50,9 @@ or Redis whenever you want them.
 
 ```bash
 pip install logica-mind                 # core: zero dependencies, fully offline
+pip install "logica-mind[onnx]"         # + TRUE semantic recall without torch (~50MB; +22% recall@5 — see bench/)
 pip install "logica-mind[voyage]"       # + Voyage embeddings & reranker
+pip install "logica-mind[sqlcipher]"    # + at-rest encryption for the SQLite store
 pip install "logica-mind[all]"          # + Voyage, OpenAI, Supabase, Postgres, Redis, local
 ```
 
@@ -329,7 +331,7 @@ Full guides live in [`docs/`](docs/):
 | [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
 | [Dashboard](docs/dashboard.md) | [Internationalization](docs/internationalization.md) | [Portability & privacy](docs/portability-and-privacy.md) |
 | [CLI](docs/cli.md) | [Graph intelligence](docs/graph-intelligence.md) | [Connections](docs/connections.md) |
-| [API reference](docs/api-reference.md) | | |
+| [API reference](docs/api-reference.md) | [Benchmarks (LoCoMo)](bench/README.md) | [TypeScript client](clients/typescript/src/index.ts) |
 
 ---
 

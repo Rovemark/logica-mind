@@ -47,6 +47,10 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   });
   const [layoutMenu, setLayoutMenu] = useState(false);
   useEffect(() => { localStorage.setItem("graph_layout", layout); }, [layout]);
+  // first-visit hint: surface the layout/facet superpowers once, then never again
+  const [hint, setHint] = useState(() => !localStorage.getItem("graph_hint_seen"));
+  const dismissHint = () => { localStorage.setItem("graph_hint_seen", "1"); setHint(false); };
+  useEffect(() => { if (!hint) return; const t2 = setTimeout(dismissHint, 18000); return () => clearTimeout(t2); }, [hint]);
   const [coMention, setCoMention] = useState(true);
   const [semantic, setSemantic] = useState(false);
   const [suggest, setSuggest] = useState(false);
@@ -479,6 +483,15 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
             ) : (
               <div className="mt-2.5 text-[12px] text-[var(--dim)] border-t border-[var(--line)] pt-2.5">{t("graph_no_path")}</div>
             ))}
+          </div>
+        )}
+
+        {/* first-visit hint — one-time pointer at the layout/facet superpowers */}
+        {hint && loaded && shown.nodes.length > 0 && (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[5] glass border border-[var(--accent)]/50 rounded-[12px] px-3.5 py-2 flex items-center gap-2.5 text-[12px] text-[var(--dim)] shadow-[var(--shadow)] max-w-[80%]">
+            <Orbit size={14} className="text-[var(--accent)] flex-none" />
+            <span>{t("graph_first_hint")}</span>
+            <button onClick={dismissHint} className="text-[var(--dim2)] hover:text-[var(--txt)] flex-none"><X size={13} /></button>
           </div>
         )}
 

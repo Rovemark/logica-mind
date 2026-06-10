@@ -23,6 +23,8 @@ export default function NodeDetail({
   const [erasing, setErasing] = useState(false);
   const [eraseConfirm, setEraseConfirm] = useState(false);
   const [erased, setErased] = useState(false);
+  const [mergeTo, setMergeTo] = useState("");
+  const [merging, setMerging] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -87,6 +89,25 @@ export default function NodeDetail({
         </div>
       )}
       {erased && <div className="text-[11px] text-[var(--dim)] mt-1.5">✓ {t("erased")}</div>}
+
+      {/* rename / merge — non-destructive alias: this entity resolves to the target
+          from now on, and the graph collapses the nodes everywhere */}
+      <div className="mt-2 flex items-center gap-1.5">
+        <input value={mergeTo} onChange={(e) => setMergeTo(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
+          placeholder={t("node_merge_placeholder")}
+          className="flex-1 min-w-0 bg-[var(--panel2)] border border-[var(--line)] rounded-lg px-2 py-1 text-[11.5px] outline-none text-[var(--txt)]" />
+        <button disabled={!mergeTo.trim() || merging} onClick={async () => {
+          setMerging(true);
+          try {
+            const r = await api.entityAlias(ns, name, mergeTo.trim());
+            setMergeTo(""); onPickEntity(r.canonical || mergeTo.trim());
+          } catch { /* fail-soft */ }
+          setMerging(false);
+        }} className="text-[11px] border border-[var(--line)] rounded-lg px-2 py-1 text-[var(--dim)] hover:text-[var(--txt)] disabled:opacity-40 flex-none">
+          {merging ? "…" : t("node_merge_btn")}
+        </button>
+      </div>
       <div className="text-[var(--dim)] text-[12px] mt-0.5">
         {connected.length} {t("connected").toLowerCase()} · {mems.length} {t("memories").toLowerCase()}
       </div>

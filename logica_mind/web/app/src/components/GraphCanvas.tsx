@@ -171,18 +171,19 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
           c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(124,156,255,.9)"; c.stroke();
         }
         const col = a.ref ? nodeColor(a.ref) : "#7c9cff";
-        if (a.disc) {
-          c.beginPath(); c.arc(a.x, a.y, a.disc, 0, 6.283);
-          c.fillStyle = col + "12"; c.fill();
+        // hubs keep a MINIMUM on-screen size: zoomed way out, the members fade into
+        // dots but the facet hubs stay readable — the "collapse to hubs" overview.
+        const dr = a.disc ? Math.max(a.disc, 20 / t.k) : 0;
+        if (dr) {
+          c.beginPath(); c.arc(a.x, a.y, dr, 0, 6.283);
+          c.fillStyle = col + (t.k < 0.45 ? "26" : "12"); c.fill();
           c.lineWidth = 1 / t.k; c.strokeStyle = col + "2e"; c.stroke();
         }
-        if (t.k > 0.22) {
-          c.font = `600 ${13 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
-          c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.fillStyle = col;
-          const ly = a.y - (a.disc ? a.disc + 8 / t.k : 0);
-          const txt = `${labelRef.current ? labelRef.current(k) : k} · ${a.count}`;
-          c.strokeText(txt, a.x, ly); c.fillText(txt, a.x, ly);
-        }
+        c.font = `600 ${13 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
+        c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.fillStyle = col;
+        const ly = a.y - (dr ? dr + 8 / t.k : 0);
+        const txt = `${labelRef.current ? labelRef.current(k) : k} · ${a.count}`;
+        c.strokeText(txt, a.x, ly); c.fillText(txt, a.x, ly);
       }
     }
     // LOD renderer: for a BIG graph (or while the sim is HOT / panning) draw a cheap
@@ -348,7 +349,9 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const g = G.current; if (!g.anchors) return null;
     const x = (cx - g.t.x) / g.t.k, y = (cy - g.t.y) / g.t.k;
     for (const k in g.anchors) { const a = g.anchors[k];
-      if (k !== "—" && a.disc && Math.hypot(a.x - x, a.y - y) <= a.disc) return k; }
+      // hit-radius mirrors the drawn min-screen-size disc (zoomed out, hubs stay clickable)
+      const dr = a.disc ? Math.max(a.disc, 20 / g.t.k) : 0;
+      if (k !== "—" && dr && Math.hypot(a.x - x, a.y - y) <= dr) return k; }
     return null;
   }
 

@@ -194,6 +194,14 @@ class MultiStore(Store):
                 return s.change_token(namespace)
         return None
 
+    def set_embeddings(self, namespace, pairs):
+        n = 0
+        pairs = list(pairs)
+        for s in self.stores:
+            if hasattr(s, "set_embeddings"):
+                n = max(n, s.set_embeddings(namespace, pairs))
+        return n
+
     def dimensioned(self, namespace=None):
         for s in self.stores:
             if hasattr(s, "dimensioned"):

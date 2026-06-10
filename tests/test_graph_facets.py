@@ -82,6 +82,74 @@ def test_graph_viz_cache_hits_and_invalidates():
     assert len(v3["nodes"]) > len(v1["nodes"])
 
 
+def test_graph_aware_recall_boosts_neighbour_memories():
+    m = _mind()
+    _edge(m, "Voyspark", "focuses_on", "SEO")
+    m.remember("SEO strategy needs better backlinks", extract=False)
+    m.remember("nota completamente alheia sobre macarrão", extract=False)
+    hits = m.recall("me fala do Voyspark", limit=5)
+    by = {h.memory.content: h for h in hits}
+    seo = next(v for k, v in by.items() if "SEO" in k)
+    # a memória do VIZINHO (SEO) recebe o graph_boost — recall é graph-aware
+    assert "graph_boost" in seo.components or "entity_boost" in seo.components
+    pasta = next(v for k, v in by.items() if "macarrão" in k)
+    assert "graph_boost" not in pasta.components and "entity_boost" not in pasta.components
+
+
+def test_context_includes_knowledge_graph_facts():
+    m = _mind()
+    _edge(m, "Voyspark", "focuses_on", "SEO")
+    m.remember("SEO strategy doc", extract=False)
+    block = m.context("qual o status do Voyspark", token_budget=800)
+    assert "## Knowledge graph" in block
+    assert "Voyspark focuses on SEO" in block
+
+
+def test_offline_heuristic_extractor_tags_dimensions():
+    from logica_mind.extract.heuristic import HeuristicExtractor, guess_dimension
+    m = _mind()                                     # sem LLM → heurístico é o default
+    assert isinstance(m.extractor, HeuristicExtractor)
+    created = m.remember("I love coffee and jazz music, my favorite brand is Moka")
+    assert created and created[0].metadata.get("dimension") == "preference"
+    # pt-BR também
+    assert guess_dimension("o prazo do cronograma do projeto estourou") in ("project_timeline", "project_status")
+    assert guess_dimension("minha família e meu filho vêm jantar") == "relationship"
+    # sem evidência → sem chute (conservador, igual ao comportamento antigo)
+    assert guess_dimension("xyzzy plugh") is None
+
+
+def test_alias_merges_existing_nodes_at_read_time():
+    m = _mind()
+    _edge(m, "Logica OS", "uses", "SQLite")
+    _edge(m, "LogicaOS", "ships", "Dashboard")      # variação de grafia → MESMO nó
+    subs = {e.subject for e in m.graph.edges(include_history=True)}
+    logica = [s for s in subs if "logica" in s.lower().replace(" ", "")]
+    assert len(set(logica)) == 1, f"variações deviam colapsar num nó só: {logica}"
+    # rename/merge explícito: tudo resolve pro novo nome canônico
+    m.graph.add_alias(logica[0], "Logica Mind OS")
+    subs2 = {e.subject for e in m.graph.edges(include_history=True)}
+    assert "Logica Mind OS" in subs2
+
+
+def test_reembed_migrates_embedding_dimension():
+    from logica_mind.embeddings.base import Embedder
+
+    class Fake8(Embedder):
+        name = "fake8"
+        dim = 8
+        def embed(self, texts):
+            return [[0.5] * 8 for _ in texts]
+
+    m = _mind()
+    m.remember("primeira memória de teste", extract=False)
+    m.remember("segunda memória de teste", extract=False)
+    m.embedder = Fake8()                            # troca de embedder (dimensão nova)
+    done = m.reembed(namespaces=["t"])
+    assert done["t"] >= 2
+    dims = {len(r.embedding) for r in m.store.all("t") if r.embedding is not None}
+    assert dims == {8}, f"todas as memórias deviam estar em 8d: {dims}"
+
+
 def test_mentions_is_superset_of_precise_match():
     m = _mind()
     _edge(m, "Voyspark", "ships", "Artigos")

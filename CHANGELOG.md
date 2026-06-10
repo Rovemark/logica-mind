@@ -3,6 +3,58 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.0] — 2026-06-10
+
+### Graph-aware recall (retrieval 2.0)
+- **Recall now uses the knowledge graph**: when the query names a graph entity,
+  memories about its **1-hop neighbours** rank up too (`graph_boost`, on by
+  default) — ask about *Voyspark* and the facts connected to it surface, not
+  just the strings that literally match.
+- **`context()` injects the graph's own knowledge**: a compact
+  `## Knowledge graph` section with the query entities' strongest facts,
+  budget-fitted, before the prose memories.
+
+### Semantic embeddings without torch (`onnx`)
+- New **`OnnxEmbedder`** (`pip install logica-mind[onnx]`): all-MiniLM-L6-v2
+  via onnxruntime + tokenizers — ~50MB of wheels instead of ~2GB of torch,
+  true semantic recall offline. Model auto-downloads once.
+- New **`logica-mind reembed`** (and `mind.reembed()`): re-embeds every memory
+  with the current embedder — the safe dimension migration when switching
+  embedders (hashing 256d → onnx/local 384d → voyage 1024d).
+- **Benchmarked** (see `bench/`): on full LoCoMo evidence-recall, `onnx` scores
+  **+22% recall@5 / +20% recall@10** over the hashing default.
+
+### Offline fact extraction
+- The zero-key default extractor is now **HeuristicExtractor**: keyword voting
+  against the taxonomy's own example categories (plus a pt-BR supplement) tags
+  a life/work **dimension** per fact — offline clients get a living Profile and
+  a coloured graph out of the box. Conservative: no evidence → no tag.
+
+### Entity resolution & editing
+- **Read-time entity resolution**: edge endpoints are canonicalized through the
+  alias map, so casing/spacing variants (`LogicaOS` / `Logica OS`) and explicit
+  merges collapse onto ONE node everywhere (viz, dimensions, co-mentions,
+  facets) without rewriting stored rows.
+- **Rename/merge in the dashboard**: every entity panel has a merge field, and
+  the new `POST /api/entity/alias` endpoint (plus SDK method) does it
+  programmatically. Non-destructive, alias-based.
+
+### Benchmarks
+- New **`bench/locomo.py`**: judge-free LoCoMo evidence-recall harness with a
+  results table in `bench/README.md` (reproducible in one command).
+
+### SDK & security
+- **Official TypeScript client** (`clients/typescript`): tiny, dependency-free,
+  typed — remember/log/recall/context/graph/entityAlias. (LangChain and
+  LlamaIndex adapters already ship in `logica_mind.integrations`.)
+- **At-rest encryption (optional)**: `SQLiteStore(encryption_key=…)` via
+  SQLCipher (`pip install logica-mind[sqlcipher]`).
+
+### Explorer polish
+- Facet hubs keep a minimum on-screen size zoomed out (collapse-to-hubs
+  overview) and stay clickable; a one-time first-visit hint points at the
+  layout/facet superpowers; new strings translated in all 15 languages.
+
 ## [0.2.31] — 2026-06-10
 
 ### Performance (the graph opens ~50× faster warm)

@@ -67,7 +67,8 @@ def _locked(fn):
 class SQLiteStore(Store):
     name = "sqlite"
 
-    def __init__(self, path: str = "logica_mind.db", max_candidates: int = 5000):
+    def __init__(self, path: str = "logica_mind.db", max_candidates: int = 5000,
+                 encryption_key: Optional[str] = None):
         self.path = path
         self.max_candidates = max_candidates
         # reentrant so a locked public method can call another helper that locks
@@ -78,8 +79,21 @@ class SQLiteStore(Store):
         # opening the same shared db; WAL lets readers run during a writer and
         # busy_timeout makes concurrent writers wait-and-retry instead of dropping
         # the captured turn with 'database is locked'.
-        self._conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
-        self._conn.row_factory = sqlite3.Row
+        if encryption_key:
+            # at-rest encryption via SQLCipher (optional: pip install logica-mind[sqlcipher]).
+            # Same dbapi as sqlite3; PRAGMA key must run before any other statement.
+            try:
+                import sqlcipher3 as _drv                      # type: ignore
+            except ImportError as e:  # pragma: no cover
+                raise RuntimeError(
+                    "encryption_key set but sqlcipher3 is not installed. "
+                    "Run: pip install logica-mind[sqlcipher]") from e
+            self._conn = _drv.connect(path, check_same_thread=False, timeout=30)
+            self._conn.row_factory = _drv.Row
+            self._conn.execute("PRAGMA key = '%s'" % encryption_key.replace("'", "''"))
+        else:
+            self._conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
+            self._conn.row_factory = sqlite3.Row
         if path not in (":memory:", ""):
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=30000")
@@ -249,6 +263,16 @@ class SQLiteStore(Store):
     def namespaces(self) -> List[str]:
         cur = self._conn.execute("SELECT DISTINCT namespace FROM memories ORDER BY namespace")
         return [r["namespace"] for r in cur.fetchall()]
+
+    @_locked
+    def set_embeddings(self, namespace: str, pairs) -> int:
+        """Bulk-replace embeddings: pairs = [(memory_id, embedding), …]. Fuel for
+        reembed() — the dimension migration when the embedder changes."""
+        rows = [(json.dumps(v) if v is not None else None, namespace, mid) for mid, v in pairs]
+        self._conn.executemany(
+            "UPDATE memories SET embedding = ? WHERE namespace = ? AND id = ?", rows)
+        self._conn.commit()
+        return len(rows)
 
     @_locked
     def change_token(self, namespace=None) -> str:

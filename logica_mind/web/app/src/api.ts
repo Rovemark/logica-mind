@@ -108,6 +108,9 @@ export const api = {
   // unlinked mentions are expensive (full graph scan) — fetched lazily, after the panel opens
   nodeUnlinked: (ns: string, name: string): Promise<{ unlinked: { entity: string; count: number }[] }> =>
     j(`/api/node?${nsq(ns)}&name=${encodeURIComponent(name)}&unlinked=1`),
+  // rename/merge an entity: variant resolves to canonical from now on (non-destructive)
+  entityAlias: (ns: string, variant: string, canonical: string): Promise<{ ok: boolean; canonical: string }> =>
+    post("/api/entity/alias", { namespace: wns(ns) || ns, variant, canonical }),
   sessions: (ns: string): Promise<{ sessions: SessionItem[] }> => j(`/api/sessions?${nsq(ns)}`),
   sessionMemories: (ns: string, session: string): Promise<{ memories: Memory[] }> =>
     j(`/api/memories?${nsq(ns)}&session=${encodeURIComponent(session)}`),
