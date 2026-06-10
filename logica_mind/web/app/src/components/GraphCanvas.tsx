@@ -43,6 +43,10 @@ interface Props {
   // label drawn at the centre of the orbit layout (the photo's company node) —
   // usually the active namespace / brain name.
   centerLabel?: string;
+  // pretty-printer for hub labels (e.g. dimension ids → human label, emoji prefix)
+  labelOf?: (k: string) => string;
+  // shift+click on a hub → "keep ONLY this group" (the view applies the facet filter)
+  onGroupSolo?: (k: string) => void;
   // persistent click-spotlight: everything except this node + its direct neighbours
   // goes translucent (the "click a hub → see only who participated" interaction).
   spotlight?: string | null;
@@ -53,7 +57,7 @@ interface Props {
 // interaction. Pan/zoom/drag with mouse AND touch (pinch-zoom). A click/tap on a
 // node calls onPick(name) so the parent can show its memories + relations.
 const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
-  { data, communities, colorFor, onPick, nodeTint, onHover, pathIds, layout = "force", groupKey, groupOf, spotlight, centerLabel }, ref,
+  { data, communities, colorFor, onPick, nodeTint, onHover, pathIds, layout = "force", groupKey, groupOf, spotlight, centerLabel, labelOf, onGroupSolo }, ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -75,6 +79,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   spotRef.current = spotlight;
   const centerRef = useRef(centerLabel);
   centerRef.current = centerLabel;
+  const labelRef = useRef(labelOf);
+  labelRef.current = labelOf;
+  const soloRef = useRef(onGroupSolo);
+  soloRef.current = onGroupSolo;
 
   const G = useRef<any>({ nodes: [], links: [], byId: {}, adj: {}, comp: {}, t: { x: 0, y: 0, k: 1 }, hover: null, drag: null, alpha: 0, raf: 0, W: 0, H: 0, dpr: 1, fitOnce: false });
 
@@ -172,7 +180,8 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
           c.font = `600 ${13 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
           c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.fillStyle = col;
           const ly = a.y - (a.disc ? a.disc + 8 / t.k : 0);
-          c.strokeText(`${k} · ${a.count}`, a.x, ly); c.fillText(`${k} · ${a.count}`, a.x, ly);
+          const txt = `${labelRef.current ? labelRef.current(k) : k} · ${a.count}`;
+          c.strokeText(txt, a.x, ly); c.fillText(txt, a.x, ly);
         }
       }
     }
@@ -273,14 +282,15 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
         rgb = PCLASS_RGB[l.pclass || "other"] || PCLASS_RGB.other;
         alpha = active ? 0.3 + 0.55 * conf : 0.12; width = 0.7 + 1.8 * conf; arrow = true;
       }
-      if (pathSet) {                                       // Path-mode spotlight
-        if (onPath) { rgb = "251,191,36"; alpha = 0.95; width = Math.max(width, 2.6); }
-        else { alpha *= 0.1; arrow = false; }
-      } else if (spotSet) {                                // click-spotlight (node or hub)
+      if (spotSet) {                                       // click-spotlight WINS over path
+        // (an explicit click is fresher intent than a lingering path query)
         const lit = spotN ? (l.source === spot || l.target === spot)
                           : (spotSet.has(l.source) && spotSet.has(l.target));
         if (lit) { alpha = Math.max(alpha, 0.8); width = Math.max(width, 1.5); }
         else { alpha *= 0.06; arrow = false; }
+      } else if (pathSet) {                                // Path-mode spotlight
+        if (onPath) { rgb = "251,191,36"; alpha = 0.95; width = Math.max(width, 2.6); }
+        else { alpha *= 0.1; arrow = false; }
       }
       c.strokeStyle = `rgba(${rgb},${alpha})`;
       c.lineWidth = width / Math.sqrt(t.k);
@@ -300,8 +310,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     });
     g.nodes.forEach((n: any) => { const onP = pathSet ? pathSet.has(n.id) : null;
       const inS = spotSet ? spotSet.has(n.id) : null;
-      const active = (!hi || n.id === hi || (nbr && nbr.has(n.id))) && onP !== false && inS !== false;
-      const dim = onP === false || inS === false;
+      // spotlight wins over path (explicit click beats a lingering path query)
+      const dimmed = spotSet ? inS === false : onP === false;
+      const active = (!hi || n.id === hi || (nbr && nbr.has(n.id))) && !dimmed;
+      const dim = dimmed;
       const col = nodeColor(n), rad = baseRad(n, n.id === hi);
       if (n.id === hi || (nbr && nbr.has(n.id))) { c.beginPath(); c.arc(n.x, n.y, rad + 7 / t.k, 0, 6.283); c.fillStyle = col + "33"; c.fill(); }
       c.beginPath(); c.arc(n.x, n.y, rad / Math.sqrt(t.k), 0, 6.283);
@@ -386,19 +398,38 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
         // their participants orbiting them; facet-LESS nodes form the outer rim arcs.
         const real = names.filter((k) => k !== "—");
         const periph = groups["—"] || [];
-        const R1 = real.length <= 1 ? (real.length ? 0 : 0) : Math.max(340, Math.round(Math.sqrt(N) * 30 + real.length * 26));
+        // hub-ring radius also scales with the BIGGEST group's own spiral radius —
+        // otherwise a dominant group (e.g. telegram with 130 members) overlaps the
+        // centre and its neighbours instead of reading as a clean orbit.
+        const maxGroup = real.length ? Math.max(...real.map((k) => groups[k].length)) : 0;
+        const R1 = real.length <= 1 ? 0 : Math.max(
+          340,
+          Math.round(Math.sqrt(N) * 30 + real.length * 26),
+          Math.round(30 * Math.sqrt(maxGroup) * 1.7),
+        );
         real.forEach((k, gi) => {
           const ang = (2 * Math.PI * gi) / Math.max(1, real.length) - Math.PI / 2;
           const ax = R1 * Math.cos(ang), ay = R1 * Math.sin(ang);
           const members = groups[k].slice().sort((a, b) => (b.degree || 0) - (a.degree || 0));
           members.forEach((n: any, j: number) => { const r = 30 * Math.sqrt(j + 0.5), th = j * 2.39996;
             n._tx = ax + r * Math.cos(th); n._ty = ay + r * Math.sin(th); });
-          g.anchors[k] = { x: ax, y: ay, count: groups[k].length, ref: members[0], disc: 26 + Math.sqrt(groups[k].length) * 9 };
+          // tiny hubs keep a small disc — a 1-member hub with the full-size disc
+          // swallowed its own node
+          g.anchors[k] = { x: ax, y: ay, count: groups[k].length, ref: members[0],
+            disc: groups[k].length < 2 ? 14 : 26 + Math.sqrt(groups[k].length) * 9 };
         });
         if (periph.length) {
-          const RP = Math.max(R1 * 1.55, 520) + Math.sqrt(periph.length) * 6;
-          periph.forEach((n: any, j: number) => { const a = (2 * Math.PI * j) / periph.length - Math.PI / 2;
-            n._tx = RP * Math.cos(a); n._ty = RP * Math.sin(a); });
+          // periphery on MULTIPLE concentric rims (~140/rim): one giant circle for a
+          // facet-poor dataset (80% of nodes) dwarfed the hubs and wasted the canvas
+          const rims = Math.max(1, Math.ceil(periph.length / 140));
+          const perRim = Math.ceil(periph.length / rims);
+          const RP0 = Math.max(R1 * 1.45, 520);
+          periph.forEach((n: any, j: number) => {
+            const rim = Math.floor(j / perRim), idx = j % perRim, cnt = Math.min(perRim, periph.length - rim * perRim);
+            const a = (2 * Math.PI * idx) / Math.max(1, cnt) - Math.PI / 2 + rim * 0.11;
+            const RP = RP0 + rim * 90;
+            n._tx = RP * Math.cos(a); n._ty = RP * Math.sin(a);
+          });
         }
       } else {
         const order = g.nodes.slice().sort((a: any, b: any) => (b.centrality || 0) - (a.centrality || 0));
@@ -532,8 +563,12 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       if (downNode && !moved) pickRef.current(downNode.id);   // click (not drag) → open detail
       if (!downNode && !moved) {                              // click on a hub → group spotlight; empty space clears it
         const r2 = cv.getBoundingClientRect(), ak = anchorAt(e.clientX - r2.left, e.clientY - r2.top);
-        const next = ak ? (g.groupSpot === ak ? null : ak) : null;
-        if (next !== g.groupSpot) { g.groupSpot = next; g.dirty = true; }
+        if (ak && e.shiftKey && soloRef.current) {            // shift+click → keep ONLY this group (facet filter)
+          soloRef.current(ak); g.groupSpot = null; g.dirty = true;
+        } else {
+          const next = ak ? (g.groupSpot === ak ? null : ak) : null;
+          if (next !== g.groupSpot) { g.groupSpot = next; g.dirty = true; }
+        }
       }
       if (g.drag) { g.drag.fx = null; g.drag.fy = null; } mode = null; g.drag = null; downPos = null; downNode = null;
       g.pan = false; g.dirty = true;   // end pan/drag → one rich repaint
@@ -575,8 +610,13 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const onResize = () => { clearTimeout(rzT); rzT = setTimeout(() => { setupCanvas(); fitGraph(false); g.alpha = Math.max(g.alpha, 0.15); }, 150); };
     window.addEventListener("resize", onResize);
 
+    // Escape clears the hub spotlight (the view clears its own filters on Escape too)
+    const onKeyEsc = (e: KeyboardEvent) => { if (e.key === "Escape" && g.groupSpot) { g.groupSpot = null; g.dirty = true; } };
+    window.addEventListener("keydown", onKeyEsc);
+
     return () => {
       cancelAnimationFrame(g.raf);
+      window.removeEventListener("keydown", onKeyEsc);
       cv.removeEventListener("wheel", onWheel); cv.removeEventListener("mousedown", onDown);
       cv.removeEventListener("mouseleave", onLeave);
       window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);

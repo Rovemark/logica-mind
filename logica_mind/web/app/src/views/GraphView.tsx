@@ -7,7 +7,9 @@ import { useI18n } from "../i18n";
 import { AREAS, dimArea, type Area } from "../lifearea";
 import { predLabel } from "../predlabel";
 
-type ColorBy = "namespace" | "community" | "area" | "type" | "channel" | "centrality";
+type ColorBy = "namespace" | "community" | "area" | "type" | "channel" | "source" | "project" | "squad" | "centrality";
+// hub label icons (zero-asset): entity types + a couple of channel cues
+const TYPE_ICON: Record<string, string> = { Person: "👤", Organization: "🏢", Product: "📦", Place: "📍", Project: "🧩", Concept: "💡" };
 // graph ORGANISATION (layout engine): organic web · facet orbits (hubs with their
 // members around them — the org-map look) · concentric rings by importance.
 type LayoutMode = "force" | "orbit" | "rings";
@@ -31,7 +33,13 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const [showOrphans, setShowOrphans] = useState(false); // Obsidian-style: hide link-less nodes by default
   const reqRef = useRef(0);                           // stale-guard: ignore out-of-order responses
   const [history, setHistory] = useState(true);
-  const [colorBy, setColorBy] = useState<ColorBy>("area");   // colour by life-area when available (multi-colour + meaningful); falls back to namespace if the data has no dimensions
+  // colour facet — persisted like the layout; defaults to life-area (multi-colour +
+  // meaningful) and falls back to namespace if the dataset has no dimensions
+  const [colorBy, setColorBy] = useState<ColorBy>(() => {
+    const v = localStorage.getItem("graph_colorBy") as ColorBy | null;
+    return v && ["namespace", "community", "area", "type", "channel", "source", "project", "squad", "centrality"].includes(v) ? v : "area";
+  });
+  useEffect(() => { localStorage.setItem("graph_colorBy", colorBy); }, [colorBy]);
   // layout/organisation mode — persisted so the user's preferred view sticks
   const [layout, setLayout] = useState<LayoutMode>(() => {
     const v = localStorage.getItem("graph_layout") as LayoutMode | null;
@@ -87,6 +95,21 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   // reset transient view state when switching namespace
   useEffect(() => { setPicked(null); setScrub(false); setAt(null); setFacetOff(new Set()); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); setPathRes(null); }, [ns]);
 
+  // keyboard: Esc clears filters/highlights; l/c/f toggle the layout/colour/filter menus
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Escape") { setFacetOff(new Set()); setTintQuery(""); setPicked(null); setLayoutMenu(false); setColorMenu(false); setFiltersOpen(false); }
+      else if (e.key === "l") setLayoutMenu((v) => !v);
+      else if (e.key === "c") setColorMenu((v) => !v);
+      else if (e.key === "f") setFiltersOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // suggested links (predicted-but-missing edges) — opt-in overlay
   useEffect(() => {
     if (!suggest) { setSuggestedLinks([]); return; }
@@ -135,13 +158,20 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     return [...s].sort();
   }, [data]);
   const hasChannels = channelsPresent.length > 0;
+  // presence of the metadata-voted facets (source/project/squad) — greys the options out
+  const facetPresence = useMemo(() => {
+    const p = { source: false, project: false, squad: false };
+    data.nodes.forEach((n: any) => { if (n.source) p.source = true; if (n.project) p.project = true; if (n.squad) p.squad = true; });
+    return p;
+  }, [data]);
   // RAW facet value of a node under the active colour facet ("—" = no value) —
   // null facet (community/centrality) means the chip filter doesn't apply.
   const facetVal = useMemo(() => {
     if (colorBy === "namespace") return (n: any) => (n.namespaces && n.namespaces[0]) || "—";
     if (colorBy === "area") return (n: any) => n.dimension || "—";
     if (colorBy === "type") return (n: any) => n.type || "—";
-    if (colorBy === "channel") return (n: any) => n.channel || "—";
+    if (colorBy === "channel" || colorBy === "source" || colorBy === "project" || colorBy === "squad")
+      return (n: any) => n[colorBy] || "—";
     return null;
   }, [colorBy]);
   // distinct values of the active facet with counts (chips), busiest first
@@ -151,6 +181,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     data.nodes.forEach((n) => { const v = facetVal(n); c[v] = (c[v] || 0) + 1; });
     return Object.entries(c).map(([v, n]) => ({ v, n })).sort((a, b) => b.n - a.n);
   }, [data, facetVal]);
+  const facetCount = useMemo(() => Object.fromEntries(facetValues.map((x) => [x.v, x.n])) as Record<string, number>, [facetValues]);
   // default is "area" (colourful + meaningful); if this dataset has no life-areas
   // yet, fall back to namespace colouring so it isn't an all-grey graph.
   useEffect(() => { if (loaded && !hasAreas && colorBy === "area") setColorBy("namespace"); }, [loaded, hasAreas]);
@@ -211,7 +242,8 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const tint = useMemo(() => tq ? (n: any) => (n.id.toLowerCase().includes(tq) ? "#fbbf24" : "var(--dim2)")
     : colorBy === "area" ? (n: any) => (n.dimension ? valueColor(n.dimension) : "var(--dim2)")
     : colorBy === "type" ? (n: any) => valueColor(n.type)
-    : colorBy === "channel" ? (n: any) => (n.channel ? valueColor(n.channel) : "var(--dim2)")
+    : (colorBy === "channel" || colorBy === "source" || colorBy === "project" || colorBy === "squad")
+      ? (n: any) => (n[colorBy] ? valueColor(n[colorBy]) : "var(--dim2)")
     : colorBy === "centrality" ? (n: any) => centColor(n.centrality || 0)
     : undefined, [tq, colorBy]);
   const communities = colorBy === "community" && !tq;
@@ -220,12 +252,27 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   // entity type, by life-area = one per dimension. Community grouping is resolved
   // inside the canvas (it owns the connected components).
   const groupOf = useMemo(() => {
-    if (colorBy === "area") return (n: any) => (n.dimension ? dimLabel(n.dimension) : null);
+    // RAW values as group keys (same keys as facetVal/chips/colours) — the canvas
+    // prettifies labels via labelOf, so hub-solo and chips speak the same language.
+    if (colorBy === "area") return (n: any) => n.dimension || null;
     if (colorBy === "type") return (n: any) => n.type || null;
-    if (colorBy === "channel") return (n: any) => n.channel || null;
+    if (colorBy === "channel" || colorBy === "source" || colorBy === "project" || colorBy === "squad")
+      return (n: any) => n[colorBy] || null;
     if (colorBy === "community") return undefined;
     return (n: any) => (n.namespaces && n.namespaces[0]) || null;
   }, [colorBy]);
+  // pretty hub labels (emoji cues, dimension ids humanized)
+  const hubLabel = useMemo(() => (k: string) => {
+    if (k === "—") return k;
+    if (colorBy === "area") return dimLabel(k);
+    if (colorBy === "type") return `${TYPE_ICON[k] || "❖"} ${k}`;
+    if (colorBy === "channel") return `${k === "voice" ? "🎙" : "💬"} ${k}`;
+    if (colorBy === "namespace") return `🤖 ${k}`;
+    return k;
+  }, [colorBy]);
+  // shift+click on a hub → keep ONLY that group (same semantics as chip solo)
+  const onGroupSolo = useMemo(() => (k: string) =>
+    setFacetOff(new Set(facetValues.map((x) => x.v).filter((v) => v !== k))), [facetValues]);
 
   async function toggleScrub() {
     if (scrub) { setScrub(false); setAt(null); return; }
@@ -246,7 +293,17 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     if (!pathFrom.trim() || !pathTo.trim()) return;
     try { setPathRes(await api.path(ns, pathFrom.trim(), pathTo.trim())); } catch { setPathRes(null); }
   }
-  const pathIds = pathRes?.found ? pathRes.path : undefined;
+  // only spotlight a path whose nodes are all VISIBLE — after a filter/focus/scrub
+  // change, a stale path would point at nodes that aren't on the canvas anymore
+  const shownIds = useMemo(() => new Set(shown.nodes.map((n) => n.id)), [shown]);
+  const pathIds = pathRes?.found && pathRes.path.every((id) => shownIds.has(id)) ? pathRes.path : undefined;
+
+  // ghost-state guard: if the focused node fell out of the visible set (facet filter,
+  // temporal scrub, namespace data change), drop the focus instead of showing a
+  // banner for an invisible node over an empty canvas
+  useEffect(() => {
+    if (focusNode && loaded && !refetching && !shownIds.has(focusNode)) setFocusNode(null);
+  }, [focusNode, loaded, refetching, shownIds]);
 
   const Btn = ({ on, onClick, icon: Icon, children, title }: any) => (
     <button onClick={onClick} title={title}
@@ -262,6 +319,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     { id: "area", key: "graph_color_area", disabled: !hasAreas },
     { id: "type", key: "graph_color_type", disabled: !hasTypes },
     { id: "channel", key: "graph_color_channel", disabled: !hasChannels },
+    { id: "source", key: "graph_color_source", disabled: !facetPresence.source },
+    { id: "project", key: "graph_color_project", disabled: !facetPresence.project },
+    { id: "squad", key: "graph_color_squad", disabled: !facetPresence.squad },
     { id: "centrality", key: "graph_color_centrality" },
   ];
   const legendNs = useMemo(() => {
@@ -439,8 +499,15 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
               const label = colorBy === "area" && v !== "—" ? dimLabel(v) : v;
               return (
                 <button key={v} title={t("tip_facet_chip")}
-                  onClick={() => setFacetOff((s) => { const ns2 = new Set(s); if (ns2.has(v)) ns2.delete(v); else ns2.add(v); return ns2; })}
-                  className={`glass border rounded-full px-2.5 py-[5px] text-[11px] inline-flex items-center gap-1.5 ${on ? "" : "opacity-40 line-through"}`}
+                  onClick={(e) => setFacetOff((s) => {
+                    if (e.shiftKey) {                       // shift+click → SOLO this value (or un-solo back to all)
+                      const others = facetValues.map((x) => x.v).filter((x) => x !== v);
+                      const isSolo = s.size === others.length && others.every((o) => s.has(o));
+                      return isSolo ? new Set<string>() : new Set(others);
+                    }
+                    const ns2 = new Set(s); if (ns2.has(v)) ns2.delete(v); else ns2.add(v); return ns2;
+                  })}
+                  className={`glass border rounded-full px-2.5 py-[6px] text-[11px] inline-flex items-center gap-1.5 ${on ? "" : "opacity-40 line-through"}`}
                   style={{ borderColor: on ? col : "var(--line)", color: on ? col : "var(--dim)", background: on ? undefined : undefined }}>
                   <span className="w-2 h-2 rounded-full" style={{ background: col }} /> {label}
                   <span className="tabular-nums opacity-60">{n}</span>
@@ -458,7 +525,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           <GraphCanvas ref={gref} data={shown} communities={communities} colorFor={colorFor} onPick={setPicked} nodeTint={tint}
             onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} pathIds={pathIds}
             layout={layout} groupKey={colorBy} groupOf={groupOf} spotlight={picked}
-            centerLabel={ns === "__all__" ? "✦" : ns} />
+            centerLabel={ns === "__all__" ? "✦" : ns} labelOf={hubLabel} onGroupSolo={onGroupSolo} />
         )}
 
         {/* hover preview — the entity's top facts without a click (Obsidian-style) */}
@@ -500,23 +567,14 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                     <div className="h-2 rounded-full" style={{ background: "linear-gradient(90deg, hsl(210,72%,55%), hsl(120,72%,55%), hsl(40,72%,55%), hsl(0,72%,55%))" }} />
                     <div className="flex justify-between text-[10px] text-[var(--dim2)]"><span>{t("cent_low")}</span><span>{t("cent_hub")}</span></div>
                   </div>
-                ) : colorBy === "type" ? (
+                ) : (colorBy === "type" || colorBy === "channel" || colorBy === "source" || colorBy === "project" || colorBy === "squad") ? (
                   <div className="flex flex-col gap-1.5">
-                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_type")}</div>
-                    {typesPresent.map((ty) => (
-                      <span key={ty} className="inline-flex items-center gap-2 text-[var(--dim)]">
-                        <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(ty) }} />
-                        <span className="truncate">{ty}</span>
-                      </span>
-                    ))}
-                  </div>
-                ) : colorBy === "channel" ? (
-                  <div className="flex flex-col gap-1.5">
-                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_channel")}</div>
-                    {channelsPresent.map((ch) => (
-                      <span key={ch} className="inline-flex items-center gap-2 text-[var(--dim)]">
-                        <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(ch) }} />
-                        <span className="truncate">{ch}</span>
+                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t(("graph_colored_by_" + colorBy) as any)}</div>
+                    {facetValues.filter((f) => f.v !== "—").map(({ v, n }) => (
+                      <span key={v} className="inline-flex items-center gap-2 text-[var(--dim)]">
+                        <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(v) }} />
+                        <span className="truncate">{v}</span>
+                        <span className="tabular-nums text-[var(--dim2)]">{n}</span>
                       </span>
                     ))}
                   </div>
@@ -530,6 +588,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                           <span key={dim} className="inline-flex items-center gap-2 text-[var(--dim)] pl-1">
                             <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(dim) }} />
                             <span className="truncate capitalize">{dimLabel(dim)}</span>
+                            <span className="tabular-nums text-[var(--dim2)]">{facetCount[dim] ?? ""}</span>
                           </span>
                         ))}
                       </div>

@@ -44,6 +44,13 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_mem_ns_layer ON memories (namespace, layer);
 CREATE INDEX IF NOT EXISTS idx_mem_created  ON memories (namespace, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mem_session  ON memories (namespace, json_extract(metadata, '$.session'));
+-- partial expression indexes: dimensioned()/tagged() filter on these JSON keys with
+-- IS NOT NULL — without them every facet vote was a full namespace scan.
+CREATE INDEX IF NOT EXISTS idx_mem_dim     ON memories (namespace, json_extract(metadata, '$.dimension')) WHERE json_extract(metadata, '$.dimension') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mem_channel ON memories (namespace, json_extract(metadata, '$.channel'))   WHERE json_extract(metadata, '$.channel') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mem_project ON memories (namespace, json_extract(metadata, '$.project'))   WHERE json_extract(metadata, '$.project') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mem_squad   ON memories (namespace, json_extract(metadata, '$.squad'))     WHERE json_extract(metadata, '$.squad') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mem_source  ON memories (namespace, json_extract(metadata, '$.source'))    WHERE json_extract(metadata, '$.source') IS NOT NULL;
 """
 
 
@@ -222,12 +229,40 @@ class SQLiteStore(Store):
         # with_embeddings=False skips parsing the 384-float vector per row — a big
         # win for enumeration/aggregation endpoints (sessions, dimensions, analytics)
         # that only read content/metadata, never similarity.
-        return self._candidates(namespace, layers, with_embeddings=with_embeddings)
+        #
+        # ENUMERATION IS UNCAPPED on purpose: all() feeds the graph (edges), the
+        # exporter and aggregations — the max_candidates window belongs to SEARCH
+        # ranking only. With the cap, a namespace holding more graph rows than the
+        # window silently DROPPED its oldest edges from the graph/dimensions/
+        # co-mentions (seen live: 7,471 edges, 2,471 invisible).
+        sql = "SELECT * FROM memories WHERE namespace = ?"
+        params: list = [namespace]
+        if layers:
+            placeholders = ",".join("?" for _ in layers)
+            sql += f" AND layer IN ({placeholders})"
+            params += [l.value for l in layers]
+        sql += " ORDER BY created_at DESC, seq DESC, rowid DESC"
+        cur = self._conn.execute(sql, params)
+        return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
 
     @_locked
     def namespaces(self) -> List[str]:
         cur = self._conn.execute("SELECT DISTINCT namespace FROM memories ORDER BY namespace")
         return [r["namespace"] for r in cur.fetchall()]
+
+    @_locked
+    def change_token(self, namespace=None) -> str:
+        """Cheap token that changes whenever the (namespace's) data changes — fuels
+        read-side caches (graph_viz). COUNT catches deletes, MAX(rowid) catches
+        inserts; in-place UPDATEs of old rows are rare enough that the dream cycle's
+        rewrite pattern (insert+invalidate) still flips the token."""
+        if namespace:
+            r = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(MAX(rowid),0) AS m FROM memories WHERE namespace = ?",
+                (namespace,)).fetchone()
+        else:
+            r = self._conn.execute("SELECT COUNT(*) AS n, COALESCE(MAX(rowid),0) AS m FROM memories").fetchone()
+        return f"{r['n']}:{r['m']}"
 
     @_locked
     def touch(self, namespace: str, ids: List[str]) -> None:

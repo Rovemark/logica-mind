@@ -188,6 +188,12 @@ class MultiStore(Store):
                 return s.tagged(namespace, key)
         return []
 
+    def change_token(self, namespace=None):
+        for s in self.stores:
+            if hasattr(s, "change_token"):
+                return s.change_token(namespace)
+        return None
+
     def dimensioned(self, namespace=None):
         for s in self.stores:
             if hasattr(s, "dimensioned"):

@@ -183,7 +183,7 @@ class ObsidianStore(Store):
                 return True
         return False
 
-    def all(self, namespace, layers=None) -> List[Memory]:
+    def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         return self._candidates(namespace, layers)
 
     def touch(self, namespace: str, ids: List[str]) -> None:

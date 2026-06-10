@@ -116,7 +116,7 @@ class PostgresStore(Store):
             cur.execute("DELETE FROM logica_mind_memory WHERE namespace=%s AND id=%s", (namespace, memory_id))
             return cur.rowcount > 0
 
-    def all(self, namespace, layers=None) -> List[Memory]:
+    def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         return self._candidates(namespace, layers)
 
     def namespaces(self) -> List[str]:

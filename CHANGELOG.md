@@ -3,6 +3,45 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.2.31] — 2026-06-10
+
+### Performance (the graph opens ~50× faster warm)
+- **Read-side cache for `/api/graph`** keyed by a cheap store change-token —
+  unchanged data serves the cached payload (~80ms over the wire, was ~4s every
+  time); any write flips the token.
+- **`store.all()` is now uncapped enumeration** — the search candidate window no
+  longer applies to it, fixing a silent bug where a namespace with more graph
+  rows than the window dropped its OLDEST edges from the graph, dimensions and
+  co-mentions (seen live: 2,471 of 7,471 edges invisible).
+- Graph paths skip embedding parsing entirely (`with_embeddings=False`), the
+  co-mention scan swapped its giant alternation regex for the sliding n-gram +
+  set-membership matcher (~60× faster, punctuated names now match), entity
+  dimension voting reuses the node list instead of re-reading the graph layer,
+  and **partial expression indexes** back every facet query.
+
+### Facets & explorer
+- **New colour/organisation facets: source, project, squad** — same generic
+  metadata voting as channel; options grey out without data, legends show
+  per-value counts everywhere.
+- **Facet votes are global**: tags on any namespace's memories colour the
+  entity in every view (a squad tag written by one agent lights the entity up
+  in another agent's graph).
+- **Shift+click = SOLO** on filter chips and on hub discs ("only telegram" in
+  one click); **Esc** clears filters/highlights/spotlights; `l`/`c`/`f` toggle
+  the layout/colour/filter menus; colour facet is persisted like the layout.
+- Click-spotlight now takes precedence over Path mode; single-member hubs keep
+  a small disc; the facet-less periphery spreads over multiple rims instead of
+  one giant circle; the hub ring scales with the dominant group so orbits stay
+  readable; stale focus/path state auto-clears when nodes leave the view.
+- Hub labels get zero-asset icon cues (entity types, channels, agents) and the
+  orbit centre shows the active namespace.
+- The 17 new UI strings are translated in **all 15 languages**.
+
+### Tests
+- New `tests/test_graph_facets.py` locks in uncapped enumeration, the tagged()
+  whitelist, facet voting, node facets in `/api/graph`, cache hit/invalidation
+  and the mentions() superset guarantee. Full suite: 195 passed.
+
 ## [0.2.30] — 2026-06-10
 
 ### Facet filters

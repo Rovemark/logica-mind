@@ -80,7 +80,9 @@ class TemporalGraph:
     def edges(self, include_history: bool = False, at: Optional[str] = None) -> List[Edge]:
         """All edges. `at` (ISO timestamp) gives a point-in-time view: only edges
         that were valid at that instant — "what was true on date X"."""
-        mems = self.store.all(self.namespace, layers=[MemoryLayer.GRAPH])
+        # with_embeddings=False: edges never use vectors, and parsing 384 floats per
+        # row was the single biggest cost of every /api/graph request (~1.5-2s).
+        mems = self.store.all(self.namespace, layers=[MemoryLayer.GRAPH], with_embeddings=False)
         # alias rows live in the GRAPH layer too — never expose them as edges
         out = [_memory_to_edge(m) for m in mems if "alias" not in (m.tags or [])]
         if at is not None:

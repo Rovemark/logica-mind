@@ -708,21 +708,51 @@ class LogicaMind:
         the canvas can speak a real edge grammar instead of one flat blue line."""
         want = set(layers) if layers is not None else {"relation", "co_mention"}
 
+        # read-side cache: graph_viz recomputed everything per request (~seconds at
+        # 14k memories) even though the payload only changes on WRITE. A cheap store
+        # change-token keys the cache; any insert/delete flips it.
+        _is_all = not namespace or namespace in ("__all__", "*", "all")
+        _ct = getattr(self.store, "change_token", None)
+        _tok = _ct(None if _is_all else namespace) if callable(_ct) else None
+        _key = (namespace, include_history, at, tuple(sorted(want)), focus, depth, limit, orphans)
+        if _tok is not None:
+            _hit = getattr(self, "_viz_cache", {}).get(_key)
+            if _hit and _hit[0] == _tok:
+                return _hit[1]
+
+        def _memo(result):
+            if _tok is not None:
+                cache = getattr(self, "_viz_cache", None)
+                if cache is None:
+                    cache = self._viz_cache = {}
+                if len(cache) > 32:          # bounded — a handful of view variants
+                    cache.clear()
+                cache[_key] = (_tok, result)
+            return result
+
         if namespace and namespace not in ("__all__", "*", "all"):
             viz = TemporalGraph(self.store, namespace, self.embedder).to_viz(include_history, at=at)
-            edim = self._entity_dimensions([namespace])
-            ech = self._entity_facets([namespace], [n["id"] for n in viz["nodes"]], "channel")
+            _names = [n["id"] for n in viz["nodes"]]
+            edim = self._entity_dimensions([namespace], node_names=_names)
+            # every taggable facet rides on the nodes (empty keys cost ~0: the
+            # indexed tagged() returns [] and the vote short-circuits).
+            # facet votes are GLOBAL ([None] = no namespace filter): where an entity
+            # was discussed is entity-level knowledge — squad/channel tags often live
+            # on OTHER agents' memories, not on the graph-bearing namespace itself.
+            _fac = {k: self._entity_facets([None], _names, k)
+                    for k in ("channel", "source", "project", "squad")}
             for n in viz["nodes"]:
                 n["namespaces"], n["shared"] = [namespace], False
                 if n["id"] in edim:
                     n["dimension"] = edim[n["id"]]
-                if n["id"] in ech:
-                    n["channel"] = ech[n["id"]]
+                for k, mp in _fac.items():
+                    if n["id"] in mp:
+                        n[k] = mp[n["id"]]
             for l in viz["links"]:
                 l["namespace"] = namespace
             node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth, limit, orphans)
-            return {"nodes": node_list, "links": links, "namespaces": [namespace],
-                    "focus": focus, "depth": depth}
+            return _memo({"nodes": node_list, "links": links, "namespaces": [namespace],
+                          "focus": focus, "depth": depth})
 
         nodes: Dict[str, set] = {}
         ntypes: Dict[str, str] = {}          # entity → its type (Concept/Product/Person/…) for colouring
@@ -750,8 +780,10 @@ class LogicaMind:
                     "valid": e.is_valid, "valid_from": e.valid_from, "valid_to": e.valid_to,
                     "confidence": e.confidence, "namespace": ns,
                 })
-        edim = self._entity_dimensions(all_ns)
-        ech = self._entity_facets(all_ns, list(nodes.keys()), "channel")
+        edim = self._entity_dimensions(all_ns, node_names=list(nodes.keys()))
+        # global facet votes (see the single-namespace branch for the why)
+        _fac = {k: self._entity_facets([None], list(nodes.keys()), k)
+                for k in ("channel", "source", "project", "squad")}
         node_list = []
         for name, nss in nodes.items():
             n = {"id": name, "namespaces": sorted(nss), "shared": len(nss) > 1}
@@ -759,12 +791,13 @@ class LogicaMind:
                 n["dimension"] = edim[name]
             if ntypes.get(name):
                 n["type"] = ntypes[name]
-            if name in ech:
-                n["channel"] = ech[name]
+            for k, mp in _fac.items():
+                if name in mp:
+                    n[k] = mp[name]
             node_list.append(n)
         node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth, limit, orphans)
-        return {"nodes": node_list, "links": links, "namespaces": all_ns,
-                "focus": focus, "depth": depth}
+        return _memo({"nodes": node_list, "links": links, "namespaces": all_ns,
+                      "focus": focus, "depth": depth})
 
     def _finish_viz(self, node_list, links, ns_scope, want, focus, depth, limit: int = 0, orphans: bool = False):
         """Shared graph augmentation: tag relation links (kind/weight/direction/
@@ -844,11 +877,15 @@ class LogicaMind:
         return node_list, links
 
     def _co_mention_links(self, namespaces, cooc_min: int = 2, cap_per_mem: int = 8):
-        """Emergent connections: entity pairs that get TALKED ABOUT TOGETHER. One
-        regex scan over each namespace's facts; a fact that names two graph
-        entities votes a co-mention edge between them. No LLM, no embeddings — the
-        Obsidian 'unlinked mention', but computed. Capped per memory so a giant
-        note can't emit a quadratic fan of pairs."""
+        """Emergent connections: entity pairs that get TALKED ABOUT TOGETHER. A fact
+        that names two graph entities votes a co-mention edge between them. No LLM,
+        no embeddings — the Obsidian 'unlinked mention', but computed. Capped per
+        memory so a giant note can't emit a quadratic fan of pairs.
+
+        Mention detection is the same sliding 1-4 word n-gram + set membership used
+        by _entity_facets: O(tokens) per memory instead of one giant alternation
+        regex over thousands of entity names (60x faster at 14k memories), and it
+        matches punctuated names (tailwind.config.js) via token-normalised keys."""
         import re as _re
         from collections import Counter
         ents: set = set()
@@ -860,22 +897,31 @@ class LogicaMind:
                     ents.add(e.object)
         if len(ents) < 2:
             return []
-        lower_map = {e.lower(): e for e in ents}
-        pat = _re.compile(r"\b(" + "|".join(
-            _re.escape(e) for e in sorted(lower_map, key=len, reverse=True)) + r")\b")
+        _tok = _re.compile(r"[\w][\w'\-]*")
+        canon = {" ".join(_tok.findall(e.lower())): e for e in ents}
+        canon.pop("", None)
         pair_count: Counter = Counter()
         for ns in namespaces:
-            for m in self.store.all(ns):
-                if "edge" in (m.tags or []) or "alias" in (m.tags or []):
+            # only TEXT layers carry prose worth scanning — graph rows are the edges
+            # themselves (and parsing their embeddings was pure waste).
+            for m in self.store.all(ns, layers=[MemoryLayer.EPISODIC, MemoryLayer.SEMANTIC, MemoryLayer.USER],
+                                    with_embeddings=False):
+                if "alias" in (m.tags or []):
                     continue
+                toks = _tok.findall((m.content or "").lower())
+                L = len(toks)
                 found: List[str] = []
                 seen: set = set()
-                for mt in pat.finditer((m.content or "").lower()):
-                    nm = lower_map.get(mt.group(1))
-                    if nm and nm not in seen:
-                        seen.add(nm)
-                        found.append(nm)
-                        if len(found) >= cap_per_mem:
+                for i in range(L):
+                    if len(found) >= cap_per_mem:
+                        break
+                    for size in (4, 3, 2, 1):              # longest match first at each position
+                        if i + size > L:
+                            continue
+                        nm = canon.get(" ".join(toks[i:i + size]))
+                        if nm and nm not in seen:
+                            seen.add(nm)
+                            found.append(nm)
                             break
                 for i in range(len(found)):
                     for j in range(i + 1, len(found)):
@@ -1259,7 +1305,7 @@ class LogicaMind:
                         d[str(val)] = d.get(str(val), 0) + 1
         return {e: max(v, key=lambda k: v[k]) for e, v in votes.items()}
 
-    def _entity_dimensions(self, namespaces: List[str]) -> Dict[str, str]:
+    def _entity_dimensions(self, namespaces: List[str], node_names=None) -> Dict[str, str]:
         """Map each graph entity to its DOMINANT life/work dimension, so the
         knowledge graph can be coloured/filtered the same way the Profile is.
 
@@ -1280,7 +1326,7 @@ class LogicaMind:
                     facts.append((content.lower(), dim))
         else:
             for ns in namespaces:
-                for m in self.store.all(ns):
+                for m in self.store.all(ns, with_embeddings=False):
                     if "edge" in (m.tags or []) or "alias" in (m.tags or []):
                         continue
                     dim = (m.metadata or {}).get("dimension")
@@ -1288,14 +1334,17 @@ class LogicaMind:
                         facts.append((m.content.lower(), dim))
         if not facts:
             return {}
-        # the canonical entity names in play (subjects + objects of valid edges)
-        ents: set = set()
-        for ns in namespaces:
-            for e in TemporalGraph(self.store, ns, self.embedder).edges():
-                if e.subject:
-                    ents.add(e.subject)
-                if e.object:
-                    ents.add(e.object)
+        # the canonical entity names in play (subjects + objects of valid edges).
+        # graph_viz already HAS the node list — passing node_names skips re-reading
+        # the whole graph layer here (it was the 2nd full read per request).
+        ents: set = set(node_names) if node_names else set()
+        if not ents:
+            for ns in namespaces:
+                for e in TemporalGraph(self.store, ns, self.embedder).edges():
+                    if e.subject:
+                        ents.add(e.subject)
+                    if e.object:
+                        ents.add(e.object)
         from .extract.taxonomy import group_of
         # FAST entity→dimension voting: a per-entity regex over every fact is
         # O(entities×facts) (minutes at scale). Instead index entity names in a set

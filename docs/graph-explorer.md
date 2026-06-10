@@ -38,7 +38,17 @@ means:
 - **Entity type** — Concept, Product, Person, Organization, Place, Project:
   covers every graph node.
 - **Channel** — where things were *talked about* (see below).
+- **Source** — which store/system a memory came from (obsidian, agent_memory…).
+- **Project** / **Squad** — any `metadata.project` / `metadata.squad` your app
+  writes (classifiers, deterministic mappings, manual tags — your pipeline).
 - **Centrality** — a cool→hot gradient by PageRank importance.
+
+Facet votes are **global**: where an entity was discussed is entity-level
+knowledge, so tags on *any* namespace's memories colour the entity in every
+view — a squad tag written by one agent's memories lights the entity up when
+you're looking at another agent's graph. The colour facet is **persisted** per
+browser, options grey out automatically when the dataset has no data for them,
+and every legend shows per-value node counts.
 
 Colours are assigned by **golden-angle hue rotation** — every distinct facet
 value gets a maximally-separated, stable colour, no matter how many values there
@@ -76,13 +86,19 @@ The same voting machinery (`store.tagged(namespace, key)` +
 
 ## Facet filters (keep only what you want)
 
-Whenever a categorical facet is active (namespace, life-area, entity type or
-channel), a row of **filter chips** appears — one per value, with its node
-count. Chips are **multi-select toggles**: click `voice` and `sessions` off and
-the graph keeps **only telegram + whatsapp**, links to hidden nodes included.
-A *show all* chip restores everything; switching facet or namespace resets the
-filter. Chips and graph share the same colours, so the filter reads like the
-legend.
+Whenever a categorical facet is active (namespace, life-area, entity type,
+channel, source, project or squad), a row of **filter chips** appears — one per
+value, with its node count. Chips are **multi-select toggles**: click `voice`
+and `sessions` off and the graph keeps **only telegram + whatsapp**, links to
+hidden nodes included. **Shift+click a chip to SOLO it** ("only telegram" in
+one click; shift+click again restores everything) — the same gesture works on
+a **hub disc** in the Orbits/Rings layouts. A *show all* chip restores
+everything; switching facet or namespace resets the filter; **Esc** clears
+filters, highlights and spotlights at any time. Chips and graph share the same
+colours, so the filter reads like the legend.
+
+**Keyboard**: `l` toggles the layout menu, `c` the colour menu, `f` the filter
+popover, `Esc` clears everything transient.
 
 ## Spotlight (click interactions)
 

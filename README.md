@@ -266,16 +266,27 @@ labels localize, and a first visit auto-matches the browser language.
 The **graph explorer** is a full instrument: three **organisation modes** —
 organic **Web** (force), **Orbits** (facet hubs on a circle with their members
 around them, the org-map look) and **Rings** (concentric tiers by PageRank
-importance) — and six **colour facets**: agent/namespace, community, life-area
+importance) — and nine **colour facets**: agent/namespace, community, life-area
 (every one of the 34 dimensions gets its own stable colour), entity type,
-**channel** and centrality. The channel facet is generic: any memory your app
-tags with `metadata.channel` (whatsapp, telegram, voice, sessions, slack — your
-call) votes its channel onto the entities it mentions, so the graph organizes
-itself around *where things were talked about*. Hubs are **clickable**: click a
-channel/agent hub and everything else goes translucent — only that hub's
-participants stay lit; click a node for the same spotlight on its direct
-neighbourhood, hover for an instant preview of its memories. Full guide:
+**channel**, **source**, **project**, **squad** and centrality. The metadata
+facets are generic: any memory your app tags with `metadata.channel` (whatsapp,
+telegram, voice, sessions, slack — your call), `metadata.project` or
+`metadata.squad` votes that value onto the entities it mentions, so the graph
+organizes itself around *where and in what context things were talked about*.
+Every facet also gets **filter chips** (multi-select; shift+click keeps only
+one value) so "show me just the telegram universe" is a single click. Hubs are
+**clickable**: click a channel/agent hub and everything else goes translucent —
+only that hub's participants stay lit (shift+click a hub filters down to it);
+click a node for the same spotlight on its direct neighbourhood, hover for an
+instant preview of its memories. Full guide:
 **[Graph explorer](docs/graph-explorer.md)**.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/img/dashboard-orbit.png" alt="Orbits — facet hubs (channels) with their participants around them"><br><sub><b>Orbits</b> — one hub per channel/agent/facet value with its participants around it; the facet-less periphery is one chip away from hidden.</sub></td>
+    <td width="50%"><img src="docs/img/dashboard-rings.png" alt="Rings — concentric importance tiers, sectored by entity type"><br><sub><b>Rings</b> — hubs in the middle, periphery outside, one angular sector per facet value (here: entity types).</sub></td>
+  </tr>
+</table>
 
 <div align="center">
   <img src="docs/img/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
