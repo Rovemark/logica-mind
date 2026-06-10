@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "diwarnai per squad",
   "graph_filter_show_all": "tampilkan semua",
   "tip_facet_chip": "Klik untuk sembunyikan/tampilkan nilai ini — simpan hanya saluran/agen/area yang kamu mau",
+  "close": "Tutup",
   "graph_layers": "Lapisan",
   "glayer_relation": "Relasi",
   "glayer_comention": "Penyebutan bersama",

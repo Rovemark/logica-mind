@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "스쿼드별 색상",
   "graph_filter_show_all": "모두 보기",
   "tip_facet_chip": "클릭하여 이 값 숨기기/표시 — 원하는 채널/에이전트/영역만 남기세요",
+  "close": "닫기",
   "graph_layers": "레이어",
   "glayer_relation": "관계",
   "glayer_comention": "동시 언급",

@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "ekibe göre renkli",
   "graph_filter_show_all": "tümünü göster",
   "tip_facet_chip": "Bu değeri gizlemek/göstermek için tıkla — yalnızca istediğin kanalları/ajanları/alanları tut",
+  "close": "Kapat",
   "graph_layers": "Katmanlar",
   "glayer_relation": "İlişkiler",
   "glayer_comention": "Birlikte anılma",

@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "coloreado por squad",
   "graph_filter_show_all": "mostrar todo",
   "tip_facet_chip": "Clic para ocultar/mostrar este valor — deja solo los canales/agentes/áreas que quieras",
+  "close": "Cerrar",
   "graph_layers": "Capas",
   "glayer_relation": "Relaciones",
   "glayer_comention": "Co-menciones",

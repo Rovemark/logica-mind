@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "цвет по скваду",
   "graph_filter_show_all": "показать все",
   "tip_facet_chip": "Клик — скрыть/показать значение; оставьте только нужные каналы/агентов/области",
+  "close": "Закрыть",
   "graph_layers": "Слои",
   "glayer_relation": "Связи",
   "glayer_comention": "Совместные упоминания",

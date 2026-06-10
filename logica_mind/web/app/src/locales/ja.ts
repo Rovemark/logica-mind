@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "スクワッドで色分け",
   "graph_filter_show_all": "すべて表示",
   "tip_facet_chip": "クリックでこの値を隠す/表示 — 残したいチャンネル/エージェント/領域だけに",
+  "close": "閉じる",
   "graph_layers": "レイヤー",
   "glayer_relation": "リレーション",
   "glayer_comention": "共起",

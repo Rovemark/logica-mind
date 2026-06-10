@@ -3,6 +3,22 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.1] — 2026-06-10
+
+### Graph explorer
+- **Facet filter is now a collapsible right sidebar** — the value chips
+  (channels, agents, areas, types…) overflowed the toolbar on facets with many
+  values and could collide with the button rows. They now live in an organized,
+  scrollable panel anchored below the toolbar: one row per value (colour dot +
+  label + count), same click-to-hide and shift+click-to-solo semantics, open/
+  closed state persisted. The toolbar gains a compact toggle showing the
+  visible/total count.
+- New `close` UI string translated in all 15 languages.
+
+### Docs
+- Documentation screenshots are now captured exclusively from the bundled
+  `logica-mind demo` dataset.
+
 ## [0.3.0] — 2026-06-10
 
 ### Graph-aware recall (retrieval 2.0)

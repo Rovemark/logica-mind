@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb, Spline, Orbit } from "lucide-react";
+import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb, Spline, Orbit, ListFilter } from "lucide-react";
 import { api, tShort, valueColor, type GraphData, type PathResult, type SuggestedLink } from "../api";
 import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
 import NodeDetail from "../components/NodeDetail";
@@ -61,6 +61,19 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   // the ones you want (e.g. "só telegram + whatsapp"). Reset when the facet changes.
   const [facetOff, setFacetOff] = useState<Set<string>>(new Set());
   useEffect(() => { setFacetOff(new Set()); }, [colorBy]);
+  // the value filter lives in a collapsible RIGHT SIDEBAR (chips overflowed the
+  // toolbar on facets with many values) — open/closed state is persisted
+  const [facetPanel, setFacetPanel] = useState(() => localStorage.getItem("graph_facet_panel") === "1");
+  useEffect(() => { localStorage.setItem("graph_facet_panel", facetPanel ? "1" : "0"); }, [facetPanel]);
+  // the toolbar wraps on narrow screens — the sidebar anchors right below it
+  const tbRef = useRef<HTMLDivElement>(null);
+  const [tbH, setTbH] = useState(34);
+  useEffect(() => {
+    const el = tbRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setTbH(el.offsetHeight));
+    ro.observe(el); setTbH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
   const [minConf, setMinConf] = useState(0);
   const [predOff, setPredOff] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -359,7 +372,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
         )}
 
         {/* ── top filter bar ── */}
-        <div className="absolute top-3 right-3 flex gap-1.5 z-[4] flex-wrap justify-end max-w-[78%]">
+        <div ref={tbRef} className="absolute top-3 right-3 flex gap-1.5 z-[4] flex-wrap justify-end max-w-[78%]">
           {/* search / focus */}
           <div className="glass border border-[var(--line)] rounded-[9px] px-2 flex items-center gap-1.5 text-[12px]" title={t("tip_search")}>
             <Search size={12} className="text-[var(--dim2)]" />
@@ -450,6 +463,14 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
               </div>
             )}
           </div>
+          {/* facet-value filter toggle — opens the right sidebar with one row per
+              value of the active colour facet (lives in the toolbar so it never
+              collides with the wrapped button rows) */}
+          {facetVal && facetValues.length > 1 && (
+            <Btn on={facetPanel || facetOff.size > 0} onClick={() => setFacetPanel((v) => !v)} icon={ListFilter} title={t("tip_facet_chip")}>
+              {facetOff.size > 0 ? `${facetValues.length - facetOff.size}/${facetValues.length}` : facetValues.length}
+            </Btn>
+          )}
           <Btn on={pathOpen || !!pathIds} onClick={() => { setPathOpen((v) => !v); if (pathOpen) setPathRes(null); }} icon={Route} title={t("tip_path")}>{t("graph_path")}</Btn>
           <Btn on={history} onClick={() => setHistory((v) => !v)} icon={Clock} title={t("tip_history")}>{t("graph_history")}</Btn>
           <Btn on={scrub} onClick={toggleScrub} icon={Timer} title={t("tip_time")}>{t("graph_time")}</Btn>
@@ -495,40 +516,59 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           </div>
         )}
 
-        {/* facet-value filter chips — one per value of the ACTIVE colour facet
-            (channels, agents, areas, types…). Multi-select: click to hide/show a
-            value, so "keep only telegram + whatsapp" is just switching the rest off. */}
-        {facetVal && facetValues.length > 1 && (
-          <div className="absolute top-[52px] right-3 flex gap-1.5 z-[3] flex-wrap justify-end max-w-[78%] max-h-[96px] overflow-y-auto">
-            {facetOff.size > 0 && (
-              <button onClick={() => setFacetOff(new Set())}
-                className="glass border border-[var(--accent)]/60 rounded-full px-2.5 py-[5px] text-[11px] text-[var(--accent)] inline-flex items-center gap-1">
-                <X size={11} /> {t("graph_filter_show_all")}
-              </button>
-            )}
-            {facetValues.map(({ v, n }) => {
-              const on = !facetOff.has(v);
-              const col = v === "—" ? "var(--dim2)" : valueColor(v);
-              const label = colorBy === "area" && v !== "—" ? dimLabel(v) : v;
-              return (
-                <button key={v} title={t("tip_facet_chip")}
-                  onClick={(e) => setFacetOff((s) => {
-                    if (e.shiftKey) {                       // shift+click → SOLO this value (or un-solo back to all)
-                      const others = facetValues.map((x) => x.v).filter((x) => x !== v);
-                      const isSolo = s.size === others.length && others.every((o) => s.has(o));
-                      return isSolo ? new Set<string>() : new Set(others);
-                    }
-                    const ns2 = new Set(s); if (ns2.has(v)) ns2.delete(v); else ns2.add(v); return ns2;
-                  })}
-                  className={`glass border rounded-full px-2.5 py-[6px] text-[11px] inline-flex items-center gap-1.5 ${on ? "" : "opacity-40 line-through"}`}
-                  style={{ borderColor: on ? col : "var(--line)", color: on ? col : "var(--dim)", background: on ? undefined : undefined }}>
-                  <span className="w-2 h-2 rounded-full" style={{ background: col }} /> {label}
-                  <span className="tabular-nums opacity-60">{n}</span>
+        {/* facet-value filter — collapsible RIGHT SIDEBAR, one row per value of the
+            ACTIVE colour facet (channels, agents, areas, types…). Multi-select: click
+            hides/shows a value ("keep only telegram + whatsapp" = switch the rest
+            off); shift+click solos. Collapsed it is a single button, so the bar never
+            overflows the toolbar again. */}
+        {facetVal && facetValues.length > 1 && facetPanel && (() => {
+          const facetLabel = t((COLOR_OPTS.find((o) => o.id === colorBy)?.key ?? "graph_color_namespace") as any);
+          const visible = facetValues.length - facetOff.size;
+          return (
+            <div style={{ top: 12 + tbH + 8 }}
+              className="absolute right-3 bottom-3 z-[4] w-[236px] max-w-[70%] glass border border-[var(--line)] rounded-[12px] shadow-[var(--shadow)] flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-2 border-b border-[var(--line)] flex-none">
+                <span className="text-[10px] uppercase tracking-[.6px] text-[var(--dim2)] inline-flex items-center gap-1.5 min-w-0">
+                  <ListFilter size={11} className="flex-none" />
+                  <span className="truncate">{facetLabel}</span>
+                  <span className="tabular-nums flex-none">· {facetOff.size > 0 ? `${visible}/${facetValues.length}` : facetValues.length}</span>
+                </span>
+                <button onClick={() => setFacetPanel(false)} title={t("close")} className="text-[var(--dim2)] hover:text-[var(--txt)] flex-none"><X size={13} /></button>
+              </div>
+              {facetOff.size > 0 && (
+                <button onClick={() => setFacetOff(new Set())}
+                  className="mx-2.5 mt-2 flex-none border border-[var(--accent)]/60 rounded-[8px] px-2.5 py-[5px] text-[11px] text-[var(--accent)] inline-flex items-center justify-center gap-1">
+                  <X size={11} /> {t("graph_filter_show_all")}
                 </button>
-              );
-            })}
-          </div>
-        )}
+              )}
+              <div className="flex-1 overflow-y-auto px-1.5 py-1.5">
+                {facetValues.map(({ v, n }) => {
+                  const on = !facetOff.has(v);
+                  const col = v === "—" ? "var(--dim2)" : valueColor(v);
+                  const label = colorBy === "area" && v !== "—" ? dimLabel(v) : v;
+                  return (
+                    <button key={v} title={t("tip_facet_chip")}
+                      onClick={(e) => setFacetOff((s) => {
+                        if (e.shiftKey) {                   // shift+click → SOLO this value (or un-solo back to all)
+                          const others = facetValues.map((x) => x.v).filter((x) => x !== v);
+                          const isSolo = s.size === others.length && others.every((o) => s.has(o));
+                          return isSolo ? new Set<string>() : new Set(others);
+                        }
+                        const ns2 = new Set(s); if (ns2.has(v)) ns2.delete(v); else ns2.add(v); return ns2;
+                      })}
+                      className={`w-full flex items-center gap-2 px-2 py-[5px] rounded-[8px] text-left text-[11.5px] hover:bg-[var(--panel2)] ${on ? "" : "opacity-45"}`}
+                      style={{ color: on ? col : "var(--dim)" }}>
+                      <span className="w-2 h-2 rounded-full flex-none" style={{ background: col }} />
+                      <span className={`flex-1 truncate ${on ? "" : "line-through"}`}>{label}</span>
+                      <span className="tabular-nums text-[var(--dim2)] flex-none">{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="px-3 py-2 border-t border-[var(--line)] text-[10px] leading-snug text-[var(--dim2)] flex-none">{t("tip_facet_chip")}</div>
+            </div>
+          );
+        })()}
 
         {!loaded ? (
           <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("loading")}</div>

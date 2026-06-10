@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "स्क्वाड से रंगीन",
   "graph_filter_show_all": "सभी दिखाएँ",
   "tip_facet_chip": "इस मान को छिपाने/दिखाने के लिए क्लिक करें — केवल मनचाहे चैनल/एजेंट/क्षेत्र रखें",
+  "close": "बंद करें",
   "graph_layers": "लेयर",
   "glayer_relation": "संबंध",
   "glayer_comention": "सह-उल्लेख",

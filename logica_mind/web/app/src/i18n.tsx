@@ -165,6 +165,7 @@ const EN: Record<string, string> = {
   "node_merge_btn": "Merge",
   "graph_filter_show_all": "show all",
   "tip_facet_chip": "Click to hide/show this value — keep only the channels/agents/areas you want",
+  "close": "Close",
   "graph_layout_by": "Organize",
   "graph_layout_force": "Web",
   "graph_layout_orbit": "Orbits",

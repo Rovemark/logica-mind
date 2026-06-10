@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "স্কোয়াড অনুযায়ী রঙিন",
   "graph_filter_show_all": "সব দেখান",
   "tip_facet_chip": "এই মান লুকাতে/দেখাতে ক্লিক করুন — শুধু পছন্দের চ্যানেল/এজেন্ট/এলাকা রাখুন",
+  "close": "বন্ধ করুন",
   "graph_layers": "স্তর",
   "glayer_relation": "সম্পর্ক",
   "glayer_comention": "সহ-উল্লেখ",

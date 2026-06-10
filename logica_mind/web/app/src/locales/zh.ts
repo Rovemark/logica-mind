@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "按小队着色",
   "graph_filter_show_all": "显示全部",
   "tip_facet_chip": "点击隐藏/显示该值——只保留你想要的频道/代理/区域",
+  "close": "关闭",
   "graph_layers": "图层",
   "glayer_relation": "关系",
   "glayer_comention": "共同提及",

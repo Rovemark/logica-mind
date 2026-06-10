@@ -147,6 +147,7 @@ const d: Record<string, string> = {
   "graph_colored_by_squad": "ملوّن حسب الفريق",
   "graph_filter_show_all": "عرض الكل",
   "tip_facet_chip": "انقر لإخفاء/إظهار هذه القيمة — أبقِ فقط القنوات/الوكلاء/المجالات التي تريدها",
+  "close": "إغلاق",
   "graph_layers": "الطبقات",
   "glayer_relation": "العلاقات",
   "glayer_comention": "إشارات مشتركة",

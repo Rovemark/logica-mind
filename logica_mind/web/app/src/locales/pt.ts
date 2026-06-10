@@ -142,6 +142,7 @@ const d: Record<string, string> = {
   "node_merge_btn": "Fundir",
   "graph_filter_show_all": "mostrar tudo",
   "tip_facet_chip": "Clique pra ocultar/mostrar este valor — deixe só os canais/agentes/áreas que quiser",
+  "close": "Fechar",
   "graph_layout_by": "Organizar",
   "graph_layout_force": "Teia",
   "graph_layout_orbit": "Órbitas",
