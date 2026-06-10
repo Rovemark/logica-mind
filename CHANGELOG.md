@@ -3,6 +3,44 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.2.29] — 2026-06-10
+
+### Graph explorer: layouts, facets & spotlight
+- **Three organisation modes** (new "Organize" control, persisted): organic
+  **Web** (force), **Orbits** — facet hubs on a circle with their members
+  orbiting them, a centre disc for the namespace and facet-less nodes on the
+  outer rim (the org-map look) — and **Rings** — concentric tiers by PageRank
+  importance, sliced into one angular sector per facet. Switching layouts
+  morphs smoothly instead of teleporting.
+- **Facet colour engine**: stable golden-angle colours per distinct value — all
+  **34 life-dimensions** (was 4 area buckets), one colour per namespace (was 10
+  cycled), a new **entity type** mode (covers every graph node) and a new
+  **channel** mode. Legends adapt per mode; modes grey out without data.
+- **Channel facet (generic)**: any memory tagged `metadata.channel` (whatsapp,
+  telegram, voice, sessions, …) votes its channel onto the entities it mentions
+  — `store.tagged(ns, key)` + `LogicaMind._entity_facets` accept any metadata
+  key (project/squad/skill/source ready). Nodes carry `channel` in `/api/graph`.
+- **Click-spotlight**: clicking a node dims everything except it + its direct
+  neighbours; clicking a **facet hub** spotlights the whole group (only that
+  channel's / agent's participants stay lit). Hubs are clickable and the
+  selected hub gets a ring.
+- Graph nodes now expose their **entity `type`** (Concept / Product / Person /
+  Organization / Place / Project) in `/api/graph` (per-namespace and `__all__`).
+
+### Performance
+- `/api/node` (hover preview + entity detail) no longer scans the whole
+  namespace: new SQL `store.mentions()` pre-filter, a light `preview=1` path
+  and **lazy unlinked-mentions** (`unlinked=1`). Hover ~23× faster and click
+  ~4× on busy entities; `entity_unlinked()` uses the same pre-filter.
+- Profile / dimensions / calendar / session queries moved to uncapped SQL
+  (`day`, `dimension_counts`, `filter_memories`, `dimensioned`) so older data
+  is never silently truncated by the in-memory candidate window.
+
+### User model
+- `observe_user` on long documents: stores the full source, extracts atomic
+  observations section-by-section **in the document's language**, then
+  synthesizes the profile — no more lossy single-blob ingestion.
+
 ## [0.2.0] — 2026-06-05
 
 ### Graph intelligence

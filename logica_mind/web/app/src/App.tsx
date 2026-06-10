@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ALL, PALETTE, type NsItem, type Memory } from "./api";
+import { api, ALL, valueColor, type NsItem, type Memory } from "./api";
 import { VIEWS, type ViewKey } from "./nav";
 import { LangCtx, makeT, getLang, saveLang, loadLang, type Lang } from "./i18n";
 import { MemoryOpenCtx } from "./memctx";
@@ -71,7 +71,7 @@ export default function App() {
   }, [lang]);
 
   const loadNs = () => api.namespaces().then((d) => {
-    d.namespaces.forEach((n, i) => { if (!(n.namespace in colorsRef.current)) colorsRef.current[n.namespace] = PALETTE[i % PALETTE.length]; });
+    d.namespaces.forEach((n) => { if (!(n.namespace in colorsRef.current)) colorsRef.current[n.namespace] = valueColor(n.namespace); });
     setNamespaces(d.namespaces);
   }).catch(() => {});
   const bump = () => { setRev((r) => r + 1); loadNs(); };   // after a write: refetch view + counts

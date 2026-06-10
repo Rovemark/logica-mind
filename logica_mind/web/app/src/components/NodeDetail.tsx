@@ -26,12 +26,20 @@ export default function NodeDetail({
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
+    setLoading(true); setUnlinked([]);
     api.node(ns, name).then((d) => {
       if (!alive) return;
-      setConnected(d.connected || []); setUnlinked(d.unlinked || []); setMems(d.memories || []);
+      setConnected(d.connected || []); setMems(d.memories || []);
       setInfo({ type: d.type || "", aliases: d.aliases || [] }); setLoading(false);
     }).catch(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [ns, name]);
+
+  // unlinked mentions load lazily (the panel is already open) — a multi-second graph
+  // scan that must never block showing the entity's memories
+  useEffect(() => {
+    let alive = true;
+    api.nodeUnlinked(ns, name).then((d) => { if (alive) setUnlinked(d.unlinked || []); }).catch(() => {});
     return () => { alive = false; };
   }, [ns, name]);
 

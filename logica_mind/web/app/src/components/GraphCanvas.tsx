@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { forceSimulation, forceManyBody, forceLink, forceCollide, forceCenter, forceRadial } from "d3-force";
+import { forceSimulation, forceManyBody, forceLink, forceCollide, forceCenter, forceRadial, forceX, forceY } from "d3-force";
 import { PALETTE, type GraphData } from "../api";
 
 export interface GraphHandle { reheat: () => void; fit: () => void; center: (id: string) => void; }
@@ -32,6 +32,20 @@ interface Props {
   onHover?: (id: string | null, x: number, y: number) => void;
   // ordered node ids of a path to spotlight (everything else dims) — Path mode.
   pathIds?: string[];
+  // ── layout engine ──
+  // "force" = organic web (default) · "orbit" = facet hubs arranged on a circle with
+  // their members orbiting them (the org-map look) · "rings" = concentric tiers by
+  // importance (PageRank), sliced into angular sectors per facet.
+  // groupOf/groupKey pick the facet the hubs/sectors follow (usually the colour facet).
+  layout?: "force" | "orbit" | "rings";
+  groupKey?: string;
+  groupOf?: (n: any) => string | null;
+  // label drawn at the centre of the orbit layout (the photo's company node) —
+  // usually the active namespace / brain name.
+  centerLabel?: string;
+  // persistent click-spotlight: everything except this node + its direct neighbours
+  // goes translucent (the "click a hub → see only who participated" interaction).
+  spotlight?: string | null;
 }
 
 // Live canvas force-simulation (Obsidian-style continuous physics):
@@ -39,7 +53,7 @@ interface Props {
 // interaction. Pan/zoom/drag with mouse AND touch (pinch-zoom). A click/tap on a
 // node calls onPick(name) so the parent can show its memories + relations.
 const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
-  { data, communities, colorFor, onPick, nodeTint, onHover, pathIds }, ref,
+  { data, communities, colorFor, onPick, nodeTint, onHover, pathIds, layout = "force", groupKey, groupOf, spotlight, centerLabel }, ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -49,12 +63,18 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   const tintRef = useRef(nodeTint);
   const hoverCbRef = useRef(onHover);
   const pathRef = useRef(pathIds);
+  const groupRef = useRef(groupOf);
+  const spotRef = useRef(spotlight);
   commRef.current = communities;
   colorRef.current = colorFor;
   pickRef.current = onPick;
   tintRef.current = nodeTint;
   hoverCbRef.current = onHover;
   pathRef.current = pathIds;
+  groupRef.current = groupOf;
+  spotRef.current = spotlight;
+  const centerRef = useRef(centerLabel);
+  centerRef.current = centerLabel;
 
   const G = useRef<any>({ nodes: [], links: [], byId: {}, adj: {}, comp: {}, t: { x: 0, y: 0, k: 1 }, hover: null, drag: null, alpha: 0, raf: 0, W: 0, H: 0, dpr: 1, fitOnce: false });
 
@@ -76,7 +96,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   // don't change `data`, so the data-effect won't re-run and the idle-suspend loop
   // would skip the repaint — leaving Path mode / highlight / community recolour
   // invisible until an unrelated pan/zoom/hover. Force a one-off redraw on change.
-  useEffect(() => { G.current.dirty = true; }, [pathIds, communities, nodeTint]);
+  useEffect(() => { G.current.dirty = true; }, [pathIds, communities, nodeTint, spotlight]);
 
   function computeComponents() {
     const g = G.current, p: Record<string, string> = {};
@@ -108,6 +128,15 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const pids = pathRef.current || [];
     const pathSet = pids.length ? new Set(pids) : null;
     const pathEdges = pathSet ? new Set(pids.slice(0, -1).map((x, i) => [x, pids[i + 1]].sort().join(""))) : null;
+    // click-spotlight: the picked node + direct neighbours stay lit, the rest goes
+    // translucent. Clicking a facet HUB (anchor disc) spotlights the whole group —
+    // "clicou no canal → só quem participou acende".
+    const spot = spotRef.current as string | null;
+    const spotN = spot && g.byId[spot] ? g.byId[spot] : null;
+    const gSpot: string | null = !spotN && g.groupSpot && g.anchors && g.anchors[g.groupSpot] ? g.groupSpot : null;
+    const spotSet = spotN
+      ? new Set<string>([spot as string, ...((g.adj[spot as string] || new Set()) as Set<string>)])
+      : gSpot ? new Set<string>(g.nodes.filter((n: any) => n._g === gSpot).map((n: any) => n.id)) : null;
     // theme-aware ink so labels/edges read on both the light and dark canvas
     const light = document.documentElement.getAttribute("data-theme") === "light";
     const edgeDead = light ? "rgba(120,130,150,.35)" : "rgba(90,100,120,.28)";
@@ -116,6 +145,37 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const edgeLabel = light ? "rgba(70,82,110,.7)" : "rgba(150,165,190,.65)";
     const nodeRing = (shared: boolean) => shared ? (light ? "rgba(60,80,160,.55)" : "rgba(255,255,255,.55)")
                                                  : (light ? "rgba(40,55,90,.3)" : "rgba(10,13,20,.9)");
+    // facet hub discs + labels (orbit/rings layouts) — drawn UNDER everything so the
+    // graph reads like the org-map: each facet value is a visible "department".
+    if (g.anchors) {
+      // centre node (the photo's company disc) — orbit layout only
+      if (g.layoutMode === "orbit" && centerRef.current) {
+        c.beginPath(); c.arc(0, 0, 34, 0, 6.283);
+        c.fillStyle = light ? "rgba(30,40,70,.9)" : "rgba(232,238,247,.92)"; c.fill();
+        c.fillStyle = light ? "#f4f7fb" : "#0a0d14"; c.font = `700 ${15 / Math.max(t.k, 0.5)}px -apple-system,sans-serif`; c.textAlign = "center"; c.textBaseline = "middle";
+        const cl = String(centerRef.current); c.fillText(cl.length > 10 ? cl.slice(0, 9) + "…" : cl, 0, 0);
+        c.textBaseline = "alphabetic";
+      }
+      for (const k in g.anchors) {
+        const a = g.anchors[k]; if (k === "—") continue;
+        if (g.groupSpot === k) {   // selected hub keeps a bright ring
+          c.beginPath(); c.arc(a.x, a.y, (a.disc || 20) + 6, 0, 6.283);
+          c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(124,156,255,.9)"; c.stroke();
+        }
+        const col = a.ref ? nodeColor(a.ref) : "#7c9cff";
+        if (a.disc) {
+          c.beginPath(); c.arc(a.x, a.y, a.disc, 0, 6.283);
+          c.fillStyle = col + "12"; c.fill();
+          c.lineWidth = 1 / t.k; c.strokeStyle = col + "2e"; c.stroke();
+        }
+        if (t.k > 0.22) {
+          c.font = `600 ${13 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
+          c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.fillStyle = col;
+          const ly = a.y - (a.disc ? a.disc + 8 / t.k : 0);
+          c.strokeText(`${k} · ${a.count}`, a.x, ly); c.fillText(`${k} · ${a.count}`, a.x, ly);
+        }
+      }
+    }
     // LOD renderer: for a BIG graph (or while the sim is HOT / panning) draw a cheap
     // frame — every edge in ONE batched path, nodes as plain dots, labels only where
     // they're readable. This is what keeps THOUSANDS of nodes smooth on the 2D canvas;
@@ -162,6 +222,30 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
         c.fillStyle = labelFill; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke;
         const lab = (n: any) => { const ly = n.y - (baseRad(n, n.id === hi) + 5) / t.k; c.strokeText(n.id, n.x, ly); c.fillText(n.id, n.x, ly); };
         lab(H); nb.forEach((id: string) => { const B = g.byId[id]; if (B) lab(B); }); }
+      // click-spotlight in the batched path: a translucent veil over everything, then
+      // the picked node's subgraph redrawn ON TOP — others stay visible but ghosted.
+      if (spotN || gSpot) {
+        c.restore();
+        c.fillStyle = light ? "rgba(244,247,251,0.82)" : "rgba(9,12,18,0.82)";
+        c.fillRect(0, 0, g.W, g.H);
+        c.save(); c.translate(t.x, t.y); c.scale(t.k, t.k);
+        const members: any[] = spotN
+          ? [spotN, ...Array.from((g.adj[spot as string] || new Set()) as Set<string>).map((id) => g.byId[id]).filter(Boolean)]
+          : g.nodes.filter((n: any) => n._g === gSpot);
+        c.strokeStyle = light ? "rgba(40,55,90,.6)" : "rgba(220,230,250,.5)"; c.lineWidth = 1.3 / Math.sqrt(t.k); c.beginPath();
+        if (spotN) {
+          members.forEach((B: any) => { if (B !== spotN) { c.moveTo(spotN.x, spotN.y); c.lineTo(B.x, B.y); } });
+        } else if (spotSet) {                              // hub spotlight: intra-group edges
+          g.links.forEach((l: any) => { if (spotSet.has(l.source) && spotSet.has(l.target)) {
+            const A = g.byId[l.source], B = g.byId[l.target]; if (A && B) { c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); } } });
+        }
+        c.stroke();
+        const dot = (n: any, ring = false) => { c.beginPath(); c.arc(n.x, n.y, (baseRad(n, ring) + (ring ? 2 : 0)) / Math.sqrt(t.k), 0, 6.283); c.fillStyle = nodeColor(n); c.fill(); };
+        members.forEach((B: any) => dot(B, spotN ? B === spotN : false));
+        c.fillStyle = labelFill; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke;
+        const lab2 = (n: any) => { const ly = n.y - (baseRad(n, false) + 5) / t.k; c.strokeText(n.id, n.x, ly); c.fillText(n.id, n.x, ly); };
+        members.slice(0, 80).forEach((B: any) => lab2(B));   // cap labels so a huge group stays readable
+      }
       c.restore(); return;
     }
     g.links.forEach((l: any) => { const A = g.byId[l.source], B = g.byId[l.target]; if (!A || !B) return;
@@ -192,6 +276,11 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       if (pathSet) {                                       // Path-mode spotlight
         if (onPath) { rgb = "251,191,36"; alpha = 0.95; width = Math.max(width, 2.6); }
         else { alpha *= 0.1; arrow = false; }
+      } else if (spotSet) {                                // click-spotlight (node or hub)
+        const lit = spotN ? (l.source === spot || l.target === spot)
+                          : (spotSet.has(l.source) && spotSet.has(l.target));
+        if (lit) { alpha = Math.max(alpha, 0.8); width = Math.max(width, 1.5); }
+        else { alpha *= 0.06; arrow = false; }
       }
       c.strokeStyle = `rgba(${rgb},${alpha})`;
       c.lineWidth = width / Math.sqrt(t.k);
@@ -210,14 +299,16 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       if (t.k > 0.85 && active && l.label) { c.fillStyle = edgeLabel; c.font = `${10 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.fillText(l.label, mx, my - 3 / t.k); }
     });
     g.nodes.forEach((n: any) => { const onP = pathSet ? pathSet.has(n.id) : null;
-      const active = (!hi || n.id === hi || (nbr && nbr.has(n.id))) && onP !== false;
-      const dim = onP === false;
+      const inS = spotSet ? spotSet.has(n.id) : null;
+      const active = (!hi || n.id === hi || (nbr && nbr.has(n.id))) && onP !== false && inS !== false;
+      const dim = onP === false || inS === false;
       const col = nodeColor(n), rad = baseRad(n, n.id === hi);
       if (n.id === hi || (nbr && nbr.has(n.id))) { c.beginPath(); c.arc(n.x, n.y, rad + 7 / t.k, 0, 6.283); c.fillStyle = col + "33"; c.fill(); }
       c.beginPath(); c.arc(n.x, n.y, rad / Math.sqrt(t.k), 0, 6.283);
       c.fillStyle = dim ? col + "1f" : (active ? col : col + "44"); c.fill();
       c.lineWidth = (n.shared ? 2 : 1.4) / t.k; c.strokeStyle = nodeRing(!!n.shared); c.stroke();
       if (onP) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(251,191,36,.95)"; c.stroke(); }
+      else if (spotSet && n.id === spot) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.2 / t.k; c.strokeStyle = "rgba(124,156,255,.95)"; c.stroke(); }
       else if (n.bridge && !dim) { c.beginPath(); c.arc(n.x, n.y, (rad + 2.5) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 1.4 / t.k; c.setLineDash([2 / t.k, 2 / t.k]); c.strokeStyle = "rgba(245,158,11,.85)"; c.stroke(); c.setLineDash([]); }
       if (t.k > 0.6 && (active || onP)) { c.fillStyle = active || onP ? labelFill : labelFillDim; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center";
         c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke; c.strokeText(n.id, n.x, n.y - (rad + 5) / t.k); c.fillText(n.id, n.x, n.y - (rad + 5) / t.k); }
@@ -238,6 +329,15 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   function nodeAt(cx: number, cy: number) {
     const g = G.current, x = (cx - g.t.x) / g.t.k, y = (cy - g.t.y) / g.t.k; let best: any = null, bd = 14 / g.t.k;
     g.nodes.forEach((n: any) => { const dd = Math.hypot(n.x - x, n.y - y); if (dd < bd) { bd = dd; best = n; } }); return best;
+  }
+  // facet hub (anchor disc) under the cursor — hubs are CLICKABLE: clicking one
+  // spotlights its whole group ("clicou no canal → só quem participou acende").
+  function anchorAt(cx: number, cy: number): string | null {
+    const g = G.current; if (!g.anchors) return null;
+    const x = (cx - g.t.x) / g.t.k, y = (cy - g.t.y) / g.t.k;
+    for (const k in g.anchors) { const a = g.anchors[k];
+      if (k !== "—" && a.disc && Math.hypot(a.x - x, a.y - y) <= a.disc) return k; }
+    return null;
   }
 
   // (re)build the simulation whenever the graph data changes
@@ -263,7 +363,67 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // ring radius scales with how many nodes sit on it, so they spread along the
     // circumference instead of piling into a thick crowded band.
     g.ringR = _ringN ? Math.min(2400, Math.max(1100, Math.round(_ringN * 3.2))) : 0;
+    // ── layout targets (orbit / rings) ──────────────────────────────────────────
+    // The alternative layouts are TARGET-driven: every node gets a (_tx,_ty) and a
+    // gentle forceX/forceY pulls it there — so switching layouts MORPHS the graph
+    // smoothly instead of teleporting it. "orbit" = facet hubs on a circle, members
+    // spiralling around their hub (golden angle, best-connected innermost — the
+    // org-map look). "rings" = concentric tiers by PageRank importance (hubs in the
+    // middle, periphery outside), sliced into one angular sector per facet value.
+    const layoutMode = layout || "force";
+    g.layoutMode = layoutMode; g.anchors = null; g.groupSpot = null;
+    if (layoutMode !== "force") {
+      const gidOf = (n: any) => (groupKey === "community")
+        ? "C" + (g.comp[n.id] ?? 0)
+        : ((groupRef.current && groupRef.current(n)) || "—");
+      const groups: Record<string, any[]> = {};
+      g.nodes.forEach((n: any) => { const k = gidOf(n); n._g = k; (groups[k] = groups[k] || []).push(n); });
+      const names = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
+      const N = g.nodes.length;
+      g.anchors = {};
+      if (layoutMode === "orbit") {
+        // the photo look: facet hubs (channels/agents/types…) on an inner circle with
+        // their participants orbiting them; facet-LESS nodes form the outer rim arcs.
+        const real = names.filter((k) => k !== "—");
+        const periph = groups["—"] || [];
+        const R1 = real.length <= 1 ? (real.length ? 0 : 0) : Math.max(340, Math.round(Math.sqrt(N) * 30 + real.length * 26));
+        real.forEach((k, gi) => {
+          const ang = (2 * Math.PI * gi) / Math.max(1, real.length) - Math.PI / 2;
+          const ax = R1 * Math.cos(ang), ay = R1 * Math.sin(ang);
+          const members = groups[k].slice().sort((a, b) => (b.degree || 0) - (a.degree || 0));
+          members.forEach((n: any, j: number) => { const r = 30 * Math.sqrt(j + 0.5), th = j * 2.39996;
+            n._tx = ax + r * Math.cos(th); n._ty = ay + r * Math.sin(th); });
+          g.anchors[k] = { x: ax, y: ay, count: groups[k].length, ref: members[0], disc: 26 + Math.sqrt(groups[k].length) * 9 };
+        });
+        if (periph.length) {
+          const RP = Math.max(R1 * 1.55, 520) + Math.sqrt(periph.length) * 6;
+          periph.forEach((n: any, j: number) => { const a = (2 * Math.PI * j) / periph.length - Math.PI / 2;
+            n._tx = RP * Math.cos(a); n._ty = RP * Math.sin(a); });
+        }
+      } else {
+        const order = g.nodes.slice().sort((a: any, b: any) => (b.centrality || 0) - (a.centrality || 0));
+        const tier: Record<string, number> = {};
+        order.forEach((n: any, i: number) => { const q = i / Math.max(1, order.length);
+          tier[n.id] = q < 0.06 ? 0 : q < 0.30 ? 1 : q < 0.65 ? 2 : 3; });
+        const SC = Math.max(1, Math.sqrt(N / 260));
+        const tierR = [70 * SC, 300 * SC, 560 * SC, 820 * SC];
+        let acc = 0;
+        names.forEach((k) => {
+          const frac = groups[k].length / N, a0 = acc * 2 * Math.PI - Math.PI / 2, a1 = (acc + frac) * 2 * Math.PI - Math.PI / 2; acc += frac;
+          groups[k].forEach((n: any, j: number) => { const a = a0 + ((j + 0.5) / groups[k].length) * (a1 - a0);
+            const R = tierR[tier[n.id]]; n._tx = R * Math.cos(a); n._ty = R * Math.sin(a); });
+          const mid = (a0 + a1) / 2, LR = tierR[3] + 120;
+          g.anchors[k] = { x: LR * Math.cos(mid), y: LR * Math.sin(mid), count: groups[k].length, ref: groups[k][0], disc: 0 };
+        });
+      }
+    }
     g.nodes.forEach((n: any, i: number) => {
+      if (layoutMode !== "force") {
+        // seed NEW nodes right at their layout target; reused nodes keep their spot
+        // and MORPH there via the target forces (smooth layout transition).
+        if (n._new) { n.x = (n._tx || 0) + (Math.random() - 0.5) * 30; n.y = (n._ty || 0) + (Math.random() - 0.5) * 30; }
+        return;
+      }
       // seed NEW nodes by role; also RESEED a reused node whose core membership FLIPPED
       // (toggle/layer change) so forceRadial doesn't fling it across the whole canvas.
       const flip = !n._new && old[n.id] && old[n.id].core !== undefined && old[n.id].core !== n._core;
@@ -287,19 +447,35 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // seconds at a watchable framerate instead of crawling; small graphs keep the
     // higher-quality profile (collide → no overlap, slower cooling → tighter layout).
     const bigG = g.nodes.length > 1200;
-    g.sim = forceSimulation(g.nodes)
-      .force("charge", forceManyBody().strength(bigG ? -260 : -220).distanceMax(bigG ? 650 : 1000).theta(bigG ? 1.5 : 0.85))
-      .force("link", forceLink(g.links.map((l: any) => ({ source: l.source, target: l.target })))
-                       .id((d: any) => d.id).distance(38))
-      // forceCenter locks the centre of mass at the origin (no drift / off-centre
-      // clumping); forceRadial pulls the connected CORE to the centre (radius 0) and
-      // pushes fragments/orphans out to a ring → the Obsidian centred globe.
-      .force("center", forceCenter(0, 0))
-      .force("radial", forceRadial((d: any) => (d._core ? 0 : g.ringR), 0, 0).strength((d: any) => (d._core ? 0.12 : 0.30)))
-      .alphaDecay(bigG ? 0.06 : 0.03)
-      .velocityDecay(bigG ? 0.5 : 0.42)
-      .stop();
-    if (!bigG) g.sim.force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 5));
+    if (layoutMode === "force") {
+      g.sim = forceSimulation(g.nodes)
+        .force("charge", forceManyBody().strength(bigG ? -260 : -220).distanceMax(bigG ? 650 : 1000).theta(bigG ? 1.5 : 0.85))
+        .force("link", forceLink(g.links.map((l: any) => ({ source: l.source, target: l.target })))
+                         .id((d: any) => d.id).distance(38))
+        // forceCenter locks the centre of mass at the origin (no drift / off-centre
+        // clumping); forceRadial pulls the connected CORE to the centre (radius 0) and
+        // pushes fragments/orphans out to a ring → the Obsidian centred globe.
+        .force("center", forceCenter(0, 0))
+        .force("radial", forceRadial((d: any) => (d._core ? 0 : g.ringR), 0, 0).strength((d: any) => (d._core ? 0.12 : 0.30)))
+        .alphaDecay(bigG ? 0.06 : 0.03)
+        .velocityDecay(bigG ? 0.5 : 0.42)
+        .stop();
+      if (!bigG) g.sim.force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 5));
+    } else {
+      // target-driven layouts (orbit/rings): the STRUCTURE comes from the (_tx,_ty)
+      // targets, not from the springs — so links are weak, charge is short-range
+      // breathing room, and a firm x/y pull holds the constellation shape.
+      g.sim = forceSimulation(g.nodes)
+        .force("charge", forceManyBody().strength(-50).distanceMax(260).theta(1.2))
+        .force("link", forceLink(g.links.map((l: any) => ({ source: l.source, target: l.target })))
+                         .id((d: any) => d.id).distance(34).strength(0.03))
+        .force("tx", forceX((d: any) => d._tx || 0).strength(0.22))
+        .force("ty", forceY((d: any) => d._ty || 0).strength(0.22))
+        .alphaDecay(0.05)
+        .velocityDecay(0.5)
+        .stop();
+      if (g.nodes.length <= 2500) g.sim.force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 4));
+    }
     // brief synchronous pre-settle so the first paint is organized — BOUNDED by node
     // count so a large graph doesn't freeze the main thread on load (~constant cap);
     // the rAF loop animates the rest of the settle, re-fitting as the cluster grows.
@@ -330,7 +506,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       // sig so an OS dark/light flip repaints. When idle → draw() never runs, so a
       // 1000-node graph sits at ~0% CPU instead of repainting 60x/second.
       const _light = document.documentElement.getAttribute("data-theme") === "light" ? 1 : 0;
-      const sig = `${g.t.x | 0},${g.t.y | 0},${g.t.k.toFixed(3)},${g.hover},${g.moving ? 1 : 0},${_light}`;
+      const sig = `${g.t.x | 0},${g.t.y | 0},${g.t.k.toFixed(3)},${g.hover},${g.moving ? 1 : 0},${_light},${g.groupSpot || ""}`;
       if (g.hot || g.dirty || sig !== g.lastSig) { draw(); g.lastSig = sig; g.dirty = false; }
       g.raf = requestAnimationFrame(loop);
     }; loop();
@@ -347,13 +523,18 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       else if (mode === "node" && g.drag) { g.drag.fx = (e.clientX - r.left - g.t.x) / g.t.k; g.drag.fy = (e.clientY - r.top - g.t.y) / g.t.k; g.alpha = Math.max(g.alpha, 0.3); }
       else { const n = nodeAt(e.clientX - r.left, e.clientY - r.top); const id = n ? n.id : null;
         if (id !== g.hover) { g.hover = id; hoverCbRef.current?.(id, e.clientX - r.left, e.clientY - r.top); }
-        cv.style.cursor = n ? "pointer" : "grab"; } };
+        cv.style.cursor = n || anchorAt(e.clientX - r.left, e.clientY - r.top) ? "pointer" : "grab"; } };
     const onLeave = () => { if (g.hover) { g.hover = null; hoverCbRef.current?.(null, 0, 0); } };
     cv.addEventListener("mouseleave", onLeave);
     const onUp = (e: MouseEvent) => {
       const moved = downPos && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 5;
       const wasPan = !downNode;
       if (downNode && !moved) pickRef.current(downNode.id);   // click (not drag) → open detail
+      if (!downNode && !moved) {                              // click on a hub → group spotlight; empty space clears it
+        const r2 = cv.getBoundingClientRect(), ak = anchorAt(e.clientX - r2.left, e.clientY - r2.top);
+        const next = ak ? (g.groupSpot === ak ? null : ak) : null;
+        if (next !== g.groupSpot) { g.groupSpot = next; g.dirty = true; }
+      }
       if (g.drag) { g.drag.fx = null; g.drag.fy = null; } mode = null; g.drag = null; downPos = null; downNode = null;
       g.pan = false; g.dirty = true;   // end pan/drag → one rich repaint
       // after a PAN only (not a node drag), the graph slid under a now-stale g.hover →
@@ -403,7 +584,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       window.removeEventListener("resize", onResize);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }, [data, layout, groupKey]);
 
   return (
     <div ref={wrapRef} className="relative w-full h-full overflow-hidden rounded-[14px] border border-[var(--line)]"

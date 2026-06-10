@@ -928,34 +928,51 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     etoks = _tokset(name or "")
                     nlow = (name or "").lower()
                     scan = mind.store.namespaces() if is_all else [ns]
-                    mems, connected = [], {}
-                    for nm in scan:
-                        for m in mind.store.all(nm, with_embeddings=False):
-                            if _is_internal(m):
-                                continue
-                            md = m.metadata or {}
-                            mentions = ((etoks and etoks <= _tokset(m.content))
-                                        or str(md.get("subject", "")).lower() == nlow
-                                        or str(md.get("object", "")).lower() == nlow
-                                        or str(md.get("observed", "")).lower() == nlow)
-                            if not mentions:
-                                continue
-                            mems.append(m)   # everything mentioning it — graph edges + notes, all openable
-                            if m.layer == MemoryLayer.GRAPH and md.get("subject"):
-                                s, o = str(md.get("subject")), str(md.get("object"))
-                                other = o if s.lower() == nlow else s
-                                if other and other.lower() != nlow:
-                                    connected.setdefault(other.lower(), other)
-                    mems.sort(key=lambda m: m.created_at or "", reverse=True)
-                    # first-class entity info (type + aliases) from the resolving ns
-                    ent = mind.for_namespace(ns if not is_all else mind.namespace).entity(name)
-                    base = ns if not is_all else mind.namespace
-                    unlinked = mind.for_namespace(base).entity_unlinked(name, namespaces=scan)
-                    self._json({"name": ent.get("name") or name, "type": ent.get("type", ""),
-                                "aliases": ent.get("aliases", []),
-                                "connected": list(connected.values()),
-                                "unlinked": unlinked,
-                                "memories": [_strip(m.to_dict()) for m in mems[:60]]})
+                    # &unlinked=1: the dashboard fetches the EXPENSIVE unlinked-mentions
+                    # section LAZILY, after the detail panel already opened — so a click is
+                    # instant and this multi-second graph scan never blocks it.
+                    if first(qs, "unlinked"):
+                        base = ns if not is_all else mind.namespace
+                        self._json({"unlinked": mind.for_namespace(base).entity_unlinked(name, namespaces=scan)})
+                    else:
+                        # preview=1 (hover): just the entity's most-recent mentioning memories.
+                        preview = bool(first(qs, "preview"))
+                        cand_cap = 120 if preview else 400      # bound deserialization for busy entities
+                        mems, connected, etype = [], {}, ""
+                        for nm in scan:
+                            # fast SQL LIKE pre-filter (candidates), not a whole-namespace scan
+                            for m in mind.store.mentions(nm, name, limit=cand_cap, with_embeddings=False):
+                                if _is_internal(m):
+                                    continue
+                                md = m.metadata or {}
+                                mentions = ((etoks and etoks <= _tokset(m.content))
+                                            or str(md.get("subject", "")).lower() == nlow
+                                            or str(md.get("object", "")).lower() == nlow
+                                            or str(md.get("observed", "")).lower() == nlow)
+                                if not mentions:
+                                    continue
+                                mems.append(m)   # graph edges + notes, all openable
+                                if not preview and m.layer == MemoryLayer.GRAPH and md.get("subject"):
+                                    s, o = str(md.get("subject")), str(md.get("object"))
+                                    other = o if s.lower() == nlow else s
+                                    if other and other.lower() != nlow:
+                                        connected.setdefault(other.lower(), other)
+                                    # the entity's own type, straight off the edge — avoids the
+                                    # multi-second entity() graph build just to label one node
+                                    if not etype:
+                                        if s.lower() == nlow and md.get("subject_type"): etype = md.get("subject_type")
+                                        elif o.lower() == nlow and md.get("object_type"): etype = md.get("object_type")
+                        mems.sort(key=lambda m: m.created_at or "", reverse=True)
+                        if preview:
+                            self._json({"name": name, "type": "", "aliases": [], "connected": [],
+                                        "unlinked": [], "memories": [_strip(m.to_dict()) for m in mems[:6]]})
+                        else:
+                            # unlinked is fetched lazily via &unlinked=1; aliases dropped from the
+                            # hot path (entity() was a multi-second graph build for one label)
+                            self._json({"name": name, "type": etype, "aliases": [],
+                                        "connected": list(connected.values()),
+                                        "unlinked": [],
+                                        "memories": [_strip(m.to_dict()) for m in mems[:60]]})
 
                 elif path == "/api/contradictions":
                     # aggregate across namespaces in __all__ mode (parity with

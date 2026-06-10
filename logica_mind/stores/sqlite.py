@@ -22,7 +22,7 @@ import threading
 from typing import List, Optional
 
 from ..types import Memory, MemoryLayer, SearchResult
-from .base import Store, rank, apply_filter
+from .base import Store, rank, apply_filter, _tokset
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -369,6 +369,49 @@ class SQLiteStore(Store):
         params += [limit, offset]
         cur = self._conn.execute(sql, params)
         return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
+
+    @_locked
+    def mentions(self, namespace, name, limit=0, with_embeddings=False):
+        """Candidate memories that may mention `name` — a fast SQL LIKE pre-filter so
+        the entity-detail/hover path (/api/node) doesn't load+tokenise the WHOLE
+        namespace (O(N) per hover). Returns a SUPERSET: every token of the name appears
+        as a substring in content, OR the raw name appears in the metadata JSON (graph
+        subject/object). The caller still runs the precise token match on this small
+        set, so correctness is unchanged. namespace=None searches GLOBALLY (__all__)."""
+        if not name or not name.strip():
+            return []
+        toks = list(_tokset(name)) or [name.strip().lower()]
+        sql = "SELECT * FROM memories WHERE 1=1"
+        params: list = []
+        if namespace:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        token_clause = " AND ".join("content LIKE ?" for _ in toks)
+        sql += f" AND (({token_clause}) OR metadata LIKE ?)"
+        params += [f"%{t}%" for t in toks]
+        params.append(f"%{name}%")
+        sql += " ORDER BY created_at DESC, seq DESC, rowid DESC"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        cur = self._conn.execute(sql, params)
+        return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
+
+    @_locked
+    def tagged(self, namespace=None, key="channel"):
+        """(content, value) pairs for memories carrying metadata[key] — fuel for the
+        per-entity facet voting (channel / project / squad / …): whatever tag the host
+        application writes on its memories can colour & organize the graph. Whitelisted
+        keys only (the key is interpolated into the json_extract path)."""
+        if key not in ("channel", "project", "squad", "skill", "source"):
+            return []
+        sql = (f"SELECT content, json_extract(metadata,'$.{key}') v FROM memories "
+               f"WHERE json_extract(metadata,'$.{key}') IS NOT NULL AND content IS NOT NULL")
+        params: list = []
+        if namespace:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        return [(c, v) for c, v in self._conn.execute(sql, params).fetchall() if c and v]
 
     def page(self, namespace=None, layers=None, limit=100, offset=0):
         """A bounded page of memories (newest first) — LIMIT/OFFSET in SQL so a list

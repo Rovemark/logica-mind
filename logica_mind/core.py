@@ -711,10 +711,13 @@ class LogicaMind:
         if namespace and namespace not in ("__all__", "*", "all"):
             viz = TemporalGraph(self.store, namespace, self.embedder).to_viz(include_history, at=at)
             edim = self._entity_dimensions([namespace])
+            ech = self._entity_facets([namespace], [n["id"] for n in viz["nodes"]], "channel")
             for n in viz["nodes"]:
                 n["namespaces"], n["shared"] = [namespace], False
                 if n["id"] in edim:
                     n["dimension"] = edim[n["id"]]
+                if n["id"] in ech:
+                    n["channel"] = ech[n["id"]]
             for l in viz["links"]:
                 l["namespace"] = namespace
             node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth, limit, orphans)
@@ -722,6 +725,7 @@ class LogicaMind:
                     "focus": focus, "depth": depth}
 
         nodes: Dict[str, set] = {}
+        ntypes: Dict[str, str] = {}          # entity → its type (Concept/Product/Person/…) for colouring
         links: List[Dict[str, Any]] = []
         all_ns = self.store.namespaces()
         # __all__ is dominated by opening a TemporalGraph + querying edges for EVERY
@@ -739,17 +743,24 @@ class LogicaMind:
             for e in g.edges(include_history, at=at):
                 nodes.setdefault(e.subject, set()).add(ns)
                 nodes.setdefault(e.object, set()).add(ns)
+                if e.subject_type and e.subject not in ntypes: ntypes[e.subject] = e.subject_type
+                if e.object_type and e.object not in ntypes: ntypes[e.object] = e.object_type
                 links.append({
                     "source": e.subject, "target": e.object, "label": e.predicate,
                     "valid": e.is_valid, "valid_from": e.valid_from, "valid_to": e.valid_to,
                     "confidence": e.confidence, "namespace": ns,
                 })
         edim = self._entity_dimensions(all_ns)
+        ech = self._entity_facets(all_ns, list(nodes.keys()), "channel")
         node_list = []
         for name, nss in nodes.items():
             n = {"id": name, "namespaces": sorted(nss), "shared": len(nss) > 1}
             if name in edim:
                 n["dimension"] = edim[name]
+            if ntypes.get(name):
+                n["type"] = ntypes[name]
+            if name in ech:
+                n["channel"] = ech[name]
             node_list.append(n)
         node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth, limit, orphans)
         return {"nodes": node_list, "links": links, "namespaces": all_ns,
@@ -1040,8 +1051,12 @@ class LogicaMind:
         opat = _re.compile(r"\b(" + "|".join(_re.escape(o) for o in sorted(other, key=len, reverse=True)) + r")\b") if other else None
         counts: Dict[str, int] = {}
         if opat:
+            # only memories that actually mention `name` can have an unlinked co-mention —
+            # use the SQL pre-filter (mentions) instead of scanning the whole namespace
+            _scan = getattr(self.store, "mentions", None)
             for ns in nss:
-                for m in self.store.all(ns):
+                cands = _scan(ns, name) if _scan else self.store.all(ns)
+                for m in cands:
                     if "edge" in (m.tags or []) or "alias" in (m.tags or []):
                         continue
                     low = (m.content or "").lower()
@@ -1210,6 +1225,39 @@ class LogicaMind:
     def graph_nodes(self, include_history: bool = False) -> List[Dict[str, Any]]:
         """Every entity with its degree (how many edges touch it), busiest first."""
         return self.graph.nodes(include_history=include_history)
+
+    def _entity_facets(self, namespaces: List[str], node_names, key: str = "channel") -> Dict[str, str]:
+        """Majority-vote a metadata facet onto graph entities by n-gram mention — the
+        same trick as _entity_dimensions, but for ANY tag the host application writes
+        on its memories (metadata.channel = whatsapp/telegram/voice/sessions/…,
+        metadata.project, squad, …). Generic on purpose: the graph can then be
+        coloured and ORGANIZED by whatever channels/tags the integrator uses."""
+        t = getattr(self.store, "tagged", None)
+        if not callable(t):
+            return {}
+        pairs: List = []
+        for ns in namespaces:
+            try:
+                pairs += t(ns, key)
+            except Exception:
+                continue
+        if not pairs:
+            return {}
+        import re as _re
+        canon = {str(n).lower(): str(n) for n in node_names if n and len(str(n)) > 1}
+        votes: Dict[str, Dict[str, int]] = {}
+        for content, val in pairs:
+            toks = _re.findall(r"[\w][\w'\-]*", str(content or "").lower())
+            L = len(toks)
+            seen: set = set()
+            for size in (1, 2, 3, 4):
+                for i in range(L - size + 1):
+                    cand = " ".join(toks[i:i + size])
+                    if cand in canon and cand not in seen:
+                        seen.add(cand)
+                        d = votes.setdefault(canon[cand], {})
+                        d[str(val)] = d.get(str(val), 0) + 1
+        return {e: max(v, key=lambda k: v[k]) for e, v in votes.items()}
 
     def _entity_dimensions(self, namespaces: List[str]) -> Dict[str, str]:
         """Map each graph entity to its DOMINANT life/work dimension, so the

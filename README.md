@@ -41,7 +41,7 @@ or Redis whenever you want them.
 <div align="center">
   <img src="docs/img/dashboard-graph.png" alt="Logica Mind dashboard — the intelligent temporal knowledge graph" width="100%">
   <br>
-  <em>The built-in dashboard: edges hued by relation type, nodes sized by centrality, emergent co-mentions, a full filter bar, point-in-time replay — and intelligence (path-finding, bridges, suggested links) a hand-linked note graph can't have.</em>
+  <em>The built-in dashboard: edges hued by relation type, nodes sized by centrality, emergent co-mentions, a full filter bar, point-in-time replay — and intelligence (path-finding, bridges, suggested links) a hand-linked note graph can't have. Organize it as an organic <b>web</b>, as <b>facet orbits</b> (hubs with their members around them — by channel, agent, life-area or entity type) or as concentric <b>importance rings</b>; click a hub and only its participants stay lit.</em>
 </div>
 
 ---
@@ -263,6 +263,20 @@ Bahasa Indonesia, Русский, 한국어, 中文, 日本語, हिन्द�
 each **lazy-loaded** so the bundle stays lean — even the graph's relationship
 labels localize, and a first visit auto-matches the browser language.
 
+The **graph explorer** is a full instrument: three **organisation modes** —
+organic **Web** (force), **Orbits** (facet hubs on a circle with their members
+around them, the org-map look) and **Rings** (concentric tiers by PageRank
+importance) — and six **colour facets**: agent/namespace, community, life-area
+(every one of the 34 dimensions gets its own stable colour), entity type,
+**channel** and centrality. The channel facet is generic: any memory your app
+tags with `metadata.channel` (whatsapp, telegram, voice, sessions, slack — your
+call) votes its channel onto the entities it mentions, so the graph organizes
+itself around *where things were talked about*. Hubs are **clickable**: click a
+channel/agent hub and everything else goes translucent — only that hub's
+participants stay lit; click a node for the same spotlight on its direct
+neighbourhood, hover for an instant preview of its memories. Full guide:
+**[Graph explorer](docs/graph-explorer.md)**.
+
 <div align="center">
   <img src="docs/img/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
   <br>
@@ -299,7 +313,7 @@ Full guides live in [`docs/`](docs/):
 | [Installation](docs/installation.md) | [Quickstart](docs/quickstart.md) | [Core concepts](docs/concepts.md) |
 | [Fact categorization](docs/categorization.md) | [Connections (derived backlinks)](docs/connections.md) | [LLM providers & auto-detection](docs/providers.md) |
 | [How memory is learned](docs/memory-extraction.md) | [Stores](docs/stores.md) | [Embeddings & reranking](docs/embeddings-and-reranking.md) |
-| [Knowledge graph](docs/knowledge-graph.md) | [Graph intelligence](docs/graph-intelligence.md) | |
+| [Knowledge graph](docs/knowledge-graph.md) | [Graph intelligence](docs/graph-intelligence.md) | [Graph explorer (layouts & facets)](docs/graph-explorer.md) |
 | [Dreaming & lifecycle](docs/dreaming.md) | [User model & peers](docs/user-model-and-peers.md) | [Sessions & run records](docs/sessions-and-records.md) |
 | [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
 | [Dashboard](docs/dashboard.md) | [Internationalization](docs/internationalization.md) | [Portability & privacy](docs/portability-and-privacy.md) |

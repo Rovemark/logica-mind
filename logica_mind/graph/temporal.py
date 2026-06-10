@@ -420,8 +420,10 @@ class TemporalGraph:
         edges = self.edges(include_history, at=at)
         nodes = {}
         for e in edges:
-            nodes.setdefault(e.subject, {"id": e.subject})
-            nodes.setdefault(e.object, {"id": e.object})
+            s = nodes.setdefault(e.subject, {"id": e.subject})
+            if e.subject_type and "type" not in s: s["type"] = e.subject_type
+            o = nodes.setdefault(e.object, {"id": e.object})
+            if e.object_type and "type" not in o: o["type"] = e.object_type
         links = [
             {
                 "source": e.subject,

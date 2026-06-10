@@ -176,6 +176,18 @@ class MultiStore(Store):
                                          session, limit, offset, with_embeddings)
         return []
 
+    def mentions(self, namespace, name, limit=0, with_embeddings=False):
+        for s in self.stores:
+            if hasattr(s, "mentions"):
+                return s.mentions(namespace, name, limit=limit, with_embeddings=with_embeddings)
+        return self.all(namespace, with_embeddings=with_embeddings)   # correct (slow) fallback
+
+    def tagged(self, namespace=None, key="channel"):
+        for s in self.stores:
+            if hasattr(s, "tagged"):
+                return s.tagged(namespace, key)
+        return []
+
     def dimensioned(self, namespace=None):
         for s in self.stores:
             if hasattr(s, "dimensioned"):

@@ -8,6 +8,18 @@ export const PALETTE = [
   "#22d3ee", "#fb7185", "#a3e635", "#e879f9", "#38bdf8",
 ];
 
+// Stable, maximally-separated colour for a distinct facet value (agent/clone,
+// dimension, project, entity type…). Golden-angle hue assignment by first-seen
+// order gives many well-spread hues that don't drift across renders — the
+// Obsidian "colour group" look, generalised to any facet. Empty value → neutral.
+const _facetHue: Record<string, number> = {};
+let _facetHueN = 0;
+export function valueColor(value?: string | null): string {
+  if (!value) return "var(--dim2)";
+  if (!(value in _facetHue)) { _facetHue[value] = (_facetHueN * 137.508) % 360; _facetHueN++; }
+  return `hsl(${_facetHue[value].toFixed(1)}, 67%, 61%)`;
+}
+
 export interface Memory {
   id: string; namespace: string; content: string; layer: Layer;
   importance?: number; tags?: string[]; metadata?: Record<string, any>;
@@ -16,7 +28,7 @@ export interface Memory {
 export interface Stats { episodic: number; semantic: number; graph: number; user: number; total: number; }
 export interface NsItem { namespace: string; total: number; stats: Stats; }
 export type LinkKind = "relation" | "co_mention" | "semantic" | "suggested";
-export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; dimension?: string; degree?: number; centrality?: number; bridge?: boolean; }
+export interface GraphNode { id: string; shared?: boolean; namespaces?: string[]; dimension?: string; type?: string; channel?: string; degree?: number; centrality?: number; bridge?: boolean; }
 export interface GraphLink { source: string; target: string; label: string; confidence?: number; valid?: boolean; kind?: LinkKind; weight?: number; directed?: boolean; pclass?: string; }
 export interface SuggestedLink { a: string; b: string; common_neighbors: number; score: number; via: string[]; }
 export interface GraphData { nodes: GraphNode[]; links: GraphLink[]; namespaces?: string[]; focus?: string | null; depth?: number; }
@@ -91,8 +103,11 @@ export const api = {
   calendar: (ns: string): Promise<{ days: Record<string, Stats> }> => j(`/api/calendar?${nsq(ns)}`),
   day: (ns: string, date: string): Promise<{ date: string; memories: Memory[] }> =>
     j(`/api/day?${nsq(ns)}&date=${date}`),
-  node: (ns: string, name: string): Promise<{ name: string; type: string; aliases: string[]; connected: string[]; unlinked?: { entity: string; count: number }[]; memories: Memory[] }> =>
-    j(`/api/node?${nsq(ns)}&name=${encodeURIComponent(name)}`),
+  node: (ns: string, name: string, preview = false): Promise<{ name: string; type: string; aliases: string[]; connected: string[]; unlinked?: { entity: string; count: number }[]; memories: Memory[] }> =>
+    j(`/api/node?${nsq(ns)}&name=${encodeURIComponent(name)}${preview ? "&preview=1" : ""}`),
+  // unlinked mentions are expensive (full graph scan) — fetched lazily, after the panel opens
+  nodeUnlinked: (ns: string, name: string): Promise<{ unlinked: { entity: string; count: number }[] }> =>
+    j(`/api/node?${nsq(ns)}&name=${encodeURIComponent(name)}&unlinked=1`),
   sessions: (ns: string): Promise<{ sessions: SessionItem[] }> => j(`/api/sessions?${nsq(ns)}`),
   sessionMemories: (ns: string, session: string): Promise<{ memories: Memory[] }> =>
     j(`/api/memories?${nsq(ns)}&session=${encodeURIComponent(session)}`),

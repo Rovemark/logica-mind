@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb, Spline } from "lucide-react";
-import { api, tShort, type GraphData, type PathResult, type SuggestedLink } from "../api";
+import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb, Spline, Orbit } from "lucide-react";
+import { api, tShort, valueColor, type GraphData, type PathResult, type SuggestedLink } from "../api";
 import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
 import NodeDetail from "../components/NodeDetail";
 import { useI18n } from "../i18n";
-import { AREAS, dimArea, dimColor, type Area } from "../lifearea";
+import { AREAS, dimArea, type Area } from "../lifearea";
 import { predLabel } from "../predlabel";
 
-type ColorBy = "namespace" | "community" | "area" | "centrality";
+type ColorBy = "namespace" | "community" | "area" | "type" | "channel" | "centrality";
+// graph ORGANISATION (layout engine): organic web · facet orbits (hubs with their
+// members around them — the org-map look) · concentric rings by importance.
+type LayoutMode = "force" | "orbit" | "rings";
+const LAYOUTS: LayoutMode[] = ["force", "orbit", "rings"];
 
 // predicate-class palette — must match the canvas edge grammar (PCLASS_RGB)
 const PCLASS_HEX: Record<string, string> = {
@@ -16,6 +20,8 @@ const PCLASS_HEX: Record<string, string> = {
 };
 // node tint for the Centrality colour mode: cool (low) → hot (high)
 const centColor = (c: number) => `hsl(${Math.round(210 - 210 * Math.min(1, Math.max(0, c)))},72%,55%)`;
+// human-readable label for a dimension id (strip the area prefix, spaces for _)
+const dimLabel = (d: string) => d.replace(/^(biz|project|org)_/, "").replace(/_/g, " ");
 
 export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: { ns: string; colorFor: (n: string) => string; onOpenMemory?: (m: any) => void; focusEntity?: { name: string; n: number } | null }) {
   const { t } = useI18n();
@@ -26,6 +32,13 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const reqRef = useRef(0);                           // stale-guard: ignore out-of-order responses
   const [history, setHistory] = useState(true);
   const [colorBy, setColorBy] = useState<ColorBy>("area");   // colour by life-area when available (multi-colour + meaningful); falls back to namespace if the data has no dimensions
+  // layout/organisation mode — persisted so the user's preferred view sticks
+  const [layout, setLayout] = useState<LayoutMode>(() => {
+    const v = localStorage.getItem("graph_layout") as LayoutMode | null;
+    return v && LAYOUTS.includes(v) ? v : "force";
+  });
+  const [layoutMenu, setLayoutMenu] = useState(false);
+  useEffect(() => { localStorage.setItem("graph_layout", layout); }, [layout]);
   const [coMention, setCoMention] = useState(true);
   const [semantic, setSemantic] = useState(false);
   const [suggest, setSuggest] = useState(false);
@@ -82,7 +95,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     const id = hover.id, cached = hoverCache.current[id];
     if (cached) { setHoverInfo(cached); return; }
     let alive = true;
-    api.node(ns, id).then((d) => { if (!alive) return; const info = { name: id, type: d.type || "", mems: (d.memories || []).slice(0, 3) }; hoverCache.current[id] = info; setHoverInfo(info); }).catch(() => {});
+    const nodeType = data.nodes.find((n) => n.id === id)?.type || "";
+    // preview=true → fast path (top mentioning memories only, no heavy graph scan)
+    api.node(ns, id, true).then((d) => { if (!alive) return; const info = { name: id, type: nodeType || d.type || "", mems: (d.memories || []).slice(0, 3) }; hoverCache.current[id] = info; setHoverInfo(info); }).catch(() => {});
     return () => { alive = false; };
   }, [hover?.id, ns]);
 
@@ -95,6 +110,27 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     return s;
   }, [data]);
   const hasAreas = areasPresent.size > 0;
+  // distinct dimensions present, grouped by life-area — each dimension now gets its
+  // OWN colour (34 of them), not just the 4 area buckets, so the legend mirrors that
+  const dimsByArea = useMemo(() => {
+    const by: Record<string, string[]> = {}; const seen = new Set<string>();
+    data.nodes.forEach((n) => { if (n.dimension && !seen.has(n.dimension)) { seen.add(n.dimension); (by[dimArea(n.dimension)] ||= []).push(n.dimension); } });
+    for (const k in by) by[k].sort();
+    return by;
+  }, [data]);
+  // entity types present (Concept/Product/Person/Organization/Place/Project) — covers
+  // ALL graph nodes (unlike dimensions, which only the semantic layer carries)
+  const typesPresent = useMemo(() => {
+    const s = new Set<string>(); data.nodes.forEach((n) => { if (n.type) s.add(n.type); });
+    return [...s].sort();
+  }, [data]);
+  const hasTypes = typesPresent.length > 0;
+  // channels present (whatsapp/telegram/voice/sessions/… — whatever the host app tags)
+  const channelsPresent = useMemo(() => {
+    const s = new Set<string>(); data.nodes.forEach((n) => { if (n.channel) s.add(n.channel); });
+    return [...s].sort();
+  }, [data]);
+  const hasChannels = channelsPresent.length > 0;
   // default is "area" (colourful + meaningful); if this dataset has no life-areas
   // yet, fall back to namespace colouring so it isn't an all-grey graph.
   useEffect(() => { if (loaded && !hasAreas && colorBy === "area") setColorBy("namespace"); }, [loaded, hasAreas]);
@@ -152,10 +188,23 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   // canvas keys a repaint on nodeTint identity, so an unstable closure would defeat
   // idle-suspend by repainting on every render.
   const tint = useMemo(() => tq ? (n: any) => (n.id.toLowerCase().includes(tq) ? "#fbbf24" : "var(--dim2)")
-    : colorBy === "area" ? (n: any) => (n.dimension ? dimColor(n.dimension) : "var(--dim2)")
+    : colorBy === "area" ? (n: any) => (n.dimension ? valueColor(n.dimension) : "var(--dim2)")
+    : colorBy === "type" ? (n: any) => valueColor(n.type)
+    : colorBy === "channel" ? (n: any) => (n.channel ? valueColor(n.channel) : "var(--dim2)")
     : colorBy === "centrality" ? (n: any) => centColor(n.centrality || 0)
     : undefined, [tq, colorBy]);
   const communities = colorBy === "community" && !tq;
+  // facet→group mapping for the orbit/rings layouts: hubs/sectors follow the ACTIVE
+  // colour facet — "colour by agent" + orbit = one orbit per agent, by type = one per
+  // entity type, by life-area = one per dimension. Community grouping is resolved
+  // inside the canvas (it owns the connected components).
+  const groupOf = useMemo(() => {
+    if (colorBy === "area") return (n: any) => (n.dimension ? dimLabel(n.dimension) : null);
+    if (colorBy === "type") return (n: any) => n.type || null;
+    if (colorBy === "channel") return (n: any) => n.channel || null;
+    if (colorBy === "community") return undefined;
+    return (n: any) => (n.namespaces && n.namespaces[0]) || null;
+  }, [colorBy]);
 
   async function toggleScrub() {
     if (scrub) { setScrub(false); setAt(null); return; }
@@ -190,6 +239,8 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     { id: "namespace", key: "graph_color_namespace" },
     { id: "community", key: "graph_color_community" },
     { id: "area", key: "graph_color_area", disabled: !hasAreas },
+    { id: "type", key: "graph_color_type", disabled: !hasTypes },
+    { id: "channel", key: "graph_color_channel", disabled: !hasChannels },
     { id: "centrality", key: "graph_color_centrality" },
   ];
   const legendNs = useMemo(() => {
@@ -229,6 +280,24 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
             <Search size={12} className="text-[var(--dim2)]" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runSearch(query)}
               placeholder={t("graph_search")} className="bg-transparent outline-none w-[120px] py-[7px] text-[var(--txt)]" />
+          </div>
+          {/* layout / organisation */}
+          <div className="relative">
+            <Btn on={layoutMenu || layout !== "force"} onClick={() => setLayoutMenu((v) => !v)} icon={Orbit} title={t("tip_layout")}>
+              {t(("graph_layout_" + layout) as any)}
+            </Btn>
+            {layoutMenu && (
+              <div className="absolute right-0 mt-1 glass border border-[var(--line)] rounded-[11px] p-1.5 w-[170px] shadow-[var(--shadow)]">
+                <div className="text-[var(--dim2)] text-[10px] uppercase tracking-[.6px] px-2 py-1">{t("graph_layout_by")}</div>
+                {LAYOUTS.map((m) => (
+                  <button key={m} onClick={() => { setLayout(m); setLayoutMenu(false); }}
+                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[12.5px] flex items-center gap-2
+                      ${layout === m ? "bg-[var(--panel2)] text-[var(--txt)]" : "text-[var(--dim)] hover:text-[var(--txt)] hover:bg-[var(--panel2)]"}`}>
+                    {layout === m ? <Check size={13} /> : <span className="w-[13px]" />}{t(("graph_layout_" + m) as any)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           {/* colour-by */}
           <div className="relative">
@@ -354,7 +423,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("graph_empty")}</div>
         ) : (
           <GraphCanvas ref={gref} data={shown} communities={communities} colorFor={colorFor} onPick={setPicked} nodeTint={tint}
-            onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} pathIds={pathIds} />
+            onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} pathIds={pathIds}
+            layout={layout} groupKey={colorBy} groupOf={groupOf} spotlight={picked}
+            centerLabel={ns === "__all__" ? "✦" : ns} />
         )}
 
         {/* hover preview — the entity's top facts without a click (Obsidian-style) */}
@@ -396,13 +467,39 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                     <div className="h-2 rounded-full" style={{ background: "linear-gradient(90deg, hsl(210,72%,55%), hsl(120,72%,55%), hsl(40,72%,55%), hsl(0,72%,55%))" }} />
                     <div className="flex justify-between text-[10px] text-[var(--dim2)]"><span>{t("cent_low")}</span><span>{t("cent_hub")}</span></div>
                   </div>
-                ) : colorBy === "area" ? (
+                ) : colorBy === "type" ? (
                   <div className="flex flex-col gap-1.5">
-                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_area")}</div>
-                    {AREAS.filter((a) => areasPresent.has(a.id)).map((a) => (
-                      <span key={a.id} className="inline-flex items-center gap-2 text-[var(--dim)]">
-                        <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: a.color }} /> {a.label}
+                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_type")}</div>
+                    {typesPresent.map((ty) => (
+                      <span key={ty} className="inline-flex items-center gap-2 text-[var(--dim)]">
+                        <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(ty) }} />
+                        <span className="truncate">{ty}</span>
                       </span>
+                    ))}
+                  </div>
+                ) : colorBy === "channel" ? (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_channel")}</div>
+                    {channelsPresent.map((ch) => (
+                      <span key={ch} className="inline-flex items-center gap-2 text-[var(--dim)]">
+                        <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(ch) }} />
+                        <span className="truncate">{ch}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : colorBy === "area" ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_area")}</div>
+                    {AREAS.filter((a) => dimsByArea[a.id]?.length).map((a) => (
+                      <div key={a.id} className="flex flex-col gap-1">
+                        <span className="text-[var(--dim2)] text-[10px] uppercase tracking-[.5px]" style={{ color: a.color }}>{a.label}</span>
+                        {dimsByArea[a.id].map((dim) => (
+                          <span key={dim} className="inline-flex items-center gap-2 text-[var(--dim)] pl-1">
+                            <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(dim) }} />
+                            <span className="truncate capitalize">{dimLabel(dim)}</span>
+                          </span>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 ) : (
