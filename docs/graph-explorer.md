@@ -74,6 +74,16 @@ The same voting machinery (`store.tagged(namespace, key)` +
 `LogicaMind._entity_facets`) accepts other metadata keys (`project`, `squad`,
 `skill`, `source`), so new facets are one tag away.
 
+## Facet filters (keep only what you want)
+
+Whenever a categorical facet is active (namespace, life-area, entity type or
+channel), a row of **filter chips** appears — one per value, with its node
+count. Chips are **multi-select toggles**: click `voice` and `sessions` off and
+the graph keeps **only telegram + whatsapp**, links to hidden nodes included.
+A *show all* chip restores everything; switching facet or namespace resets the
+filter. Chips and graph share the same colours, so the filter reads like the
+legend.
+
 ## Spotlight (click interactions)
 
 - **Click a node** → its detail panel opens *and* the canvas spotlights it:

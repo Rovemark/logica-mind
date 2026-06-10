@@ -131,6 +131,8 @@ const d: Record<string, string> = {
   "graph_color_channel": "Canal",
   "graph_colored_by_channel": "colorido por canal",
   "graph_color_centrality": "Centralidade",
+  "graph_filter_show_all": "mostrar tudo",
+  "tip_facet_chip": "Clique pra ocultar/mostrar este valor — deixe só os canais/agentes/áreas que quiser",
   "graph_layout_by": "Organizar",
   "graph_layout_force": "Teia",
   "graph_layout_orbit": "Órbitas",

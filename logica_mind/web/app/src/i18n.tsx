@@ -154,6 +154,8 @@ const EN: Record<string, string> = {
   "graph_color_channel": "Channel",
   "graph_colored_by_channel": "coloured by channel",
   "graph_color_centrality": "Centrality",
+  "graph_filter_show_all": "show all",
+  "tip_facet_chip": "Click to hide/show this value — keep only the channels/agents/areas you want",
   "graph_layout_by": "Organize",
   "graph_layout_force": "Web",
   "graph_layout_orbit": "Orbits",

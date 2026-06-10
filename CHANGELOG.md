@@ -3,6 +3,16 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.2.30] — 2026-06-10
+
+### Facet filters
+- **Generic facet-value filter chips** on the graph: one chip per value of the
+  active colour facet (channels, agents, life-dimensions, entity types) with
+  node counts. **Multi-select toggles** — switch values off to keep only the
+  ones you want (e.g. only `telegram` + `whatsapp`); a *show all* chip resets.
+  Replaces the old single-select, area-only filter. Chips share the graph's
+  golden-angle colours and scroll when a facet has many values.
+
 ## [0.2.29] — 2026-06-10
 
 ### Graph explorer: layouts, facets & spotlight

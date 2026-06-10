@@ -44,7 +44,11 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   const [suggest, setSuggest] = useState(false);
   const [suggestedLinks, setSuggestedLinks] = useState<SuggestedLink[]>([]);
   const [tintQuery, setTintQuery] = useState("");
-  const [areaFilter, setAreaFilter] = useState<Area | null>(null);
+  // generic facet-value filter (multi-select): chips for every value of the ACTIVE
+  // colour facet (channels, agents, areas, types…) — toggle values OFF to keep only
+  // the ones you want (e.g. "só telegram + whatsapp"). Reset when the facet changes.
+  const [facetOff, setFacetOff] = useState<Set<string>>(new Set());
+  useEffect(() => { setFacetOff(new Set()); }, [colorBy]);
   const [minConf, setMinConf] = useState(0);
   const [predOff, setPredOff] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -81,7 +85,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   }, [ns, history, at, coMention, semantic, focusNode, depth]);
 
   // reset transient view state when switching namespace
-  useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); setPathRes(null); }, [ns]);
+  useEffect(() => { setPicked(null); setScrub(false); setAt(null); setFacetOff(new Set()); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); setPathRes(null); }, [ns]);
 
   // suggested links (predicted-but-missing edges) — opt-in overlay
   useEffect(() => {
@@ -131,6 +135,22 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     return [...s].sort();
   }, [data]);
   const hasChannels = channelsPresent.length > 0;
+  // RAW facet value of a node under the active colour facet ("—" = no value) —
+  // null facet (community/centrality) means the chip filter doesn't apply.
+  const facetVal = useMemo(() => {
+    if (colorBy === "namespace") return (n: any) => (n.namespaces && n.namespaces[0]) || "—";
+    if (colorBy === "area") return (n: any) => n.dimension || "—";
+    if (colorBy === "type") return (n: any) => n.type || "—";
+    if (colorBy === "channel") return (n: any) => n.channel || "—";
+    return null;
+  }, [colorBy]);
+  // distinct values of the active facet with counts (chips), busiest first
+  const facetValues = useMemo(() => {
+    if (!facetVal) return [] as { v: string; n: number }[];
+    const c: Record<string, number> = {};
+    data.nodes.forEach((n) => { const v = facetVal(n); c[v] = (c[v] || 0) + 1; });
+    return Object.entries(c).map(([v, n]) => ({ v, n })).sort((a, b) => b.n - a.n);
+  }, [data, facetVal]);
   // default is "area" (colourful + meaningful); if this dataset has no life-areas
   // yet, fall back to namespace colouring so it isn't an all-grey graph.
   useEffect(() => { if (loaded && !hasAreas && colorBy === "area") setColorBy("namespace"); }, [loaded, hasAreas]);
@@ -142,12 +162,13 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     return [...s];
   }, [data]);
 
-  // apply the filters: life-area subset (drops nodes), then per-link min-confidence
-  // + relation-type (drops links only, so node positions stay put)
+  // apply the filters: facet-value subset (drops nodes — e.g. keep only the
+  // telegram + whatsapp channels), then per-link min-confidence + relation-type
+  // (drops links only, so node positions stay put)
   const shown: GraphData = useMemo(() => {
     let nodes = data.nodes, links = data.links;
-    if (colorBy === "area" && areaFilter) {
-      const keep = new Set(nodes.filter((n) => n.dimension && dimArea(n.dimension) === areaFilter).map((n) => n.id));
+    if (facetVal && facetOff.size) {
+      const keep = new Set(nodes.filter((n) => !facetOff.has(facetVal(n))).map((n) => n.id));
       nodes = nodes.filter((n) => keep.has(n.id));
       links = links.filter((l) => keep.has(l.source) && keep.has(l.target));
     }
@@ -172,7 +193,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
       nodes = nodes.filter((n) => deg.has(n.id));
     }
     return { nodes, links };
-  }, [data, colorBy, areaFilter, minConf, predOff, t, suggest, suggestedLinks, showOrphans]);
+  }, [data, colorBy, facetVal, facetOff, minConf, predOff, t, suggest, suggestedLinks, showOrphans]);
 
   // how many link-less nodes the graph currently holds (for the toggle's count badge)
   const orphanCount = useMemo(() => {
@@ -308,7 +329,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
               <div className="absolute right-0 mt-1 glass border border-[var(--line)] rounded-[11px] p-1.5 w-[170px] shadow-[var(--shadow)]">
                 <div className="text-[var(--dim2)] text-[10px] uppercase tracking-[.6px] px-2 py-1">{t("graph_color_by")}</div>
                 {COLOR_OPTS.map((o) => (
-                  <button key={o.id} disabled={o.disabled} onClick={() => { setColorBy(o.id); setColorMenu(false); if (o.id !== "area") setAreaFilter(null); }}
+                  <button key={o.id} disabled={o.disabled} onClick={() => { setColorBy(o.id); setColorMenu(false); }}
                     className={`w-full text-left px-2 py-1.5 rounded-lg text-[12.5px] flex items-center gap-2 disabled:opacity-30
                       ${colorBy === o.id ? "bg-[var(--panel2)] text-[var(--txt)]" : "text-[var(--dim)] hover:text-[var(--txt)] hover:bg-[var(--panel2)]"}`}>
                     {colorBy === o.id ? <Check size={13} /> : <span className="w-[13px]" />}{t(o.key as any)}
@@ -401,16 +422,28 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           </div>
         )}
 
-        {/* life-area filter chips — only in the Life-area colour mode */}
-        {colorBy === "area" && hasAreas && (
-          <div className="absolute top-[52px] right-3 flex gap-1.5 z-[3] flex-wrap justify-end max-w-[78%]">
-            {AREAS.filter((a) => areasPresent.has(a.id)).map((a) => {
-              const on = areaFilter === a.id;
+        {/* facet-value filter chips — one per value of the ACTIVE colour facet
+            (channels, agents, areas, types…). Multi-select: click to hide/show a
+            value, so "keep only telegram + whatsapp" is just switching the rest off. */}
+        {facetVal && facetValues.length > 1 && (
+          <div className="absolute top-[52px] right-3 flex gap-1.5 z-[3] flex-wrap justify-end max-w-[78%] max-h-[96px] overflow-y-auto">
+            {facetOff.size > 0 && (
+              <button onClick={() => setFacetOff(new Set())}
+                className="glass border border-[var(--accent)]/60 rounded-full px-2.5 py-[5px] text-[11px] text-[var(--accent)] inline-flex items-center gap-1">
+                <X size={11} /> {t("graph_filter_show_all")}
+              </button>
+            )}
+            {facetValues.map(({ v, n }) => {
+              const on = !facetOff.has(v);
+              const col = v === "—" ? "var(--dim2)" : valueColor(v);
+              const label = colorBy === "area" && v !== "—" ? dimLabel(v) : v;
               return (
-                <button key={a.id} onClick={() => setAreaFilter(on ? null : a.id)}
-                  className="glass border rounded-full px-2.5 py-[5px] text-[11px] inline-flex items-center gap-1.5"
-                  style={{ borderColor: on ? a.color : "var(--line)", color: on ? a.color : "var(--dim)", background: on ? `${a.color}1a` : undefined }}>
-                  <span className="w-2 h-2 rounded-full" style={{ background: a.color }} /> {a.label}
+                <button key={v} title={t("tip_facet_chip")}
+                  onClick={() => setFacetOff((s) => { const ns2 = new Set(s); if (ns2.has(v)) ns2.delete(v); else ns2.add(v); return ns2; })}
+                  className={`glass border rounded-full px-2.5 py-[5px] text-[11px] inline-flex items-center gap-1.5 ${on ? "" : "opacity-40 line-through"}`}
+                  style={{ borderColor: on ? col : "var(--line)", color: on ? col : "var(--dim)", background: on ? undefined : undefined }}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: col }} /> {label}
+                  <span className="tabular-nums opacity-60">{n}</span>
                 </button>
               );
             })}
