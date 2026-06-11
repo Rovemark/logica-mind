@@ -1503,6 +1503,41 @@ def test_web_writes_are_per_request_not_per_bind():
     assert post(ro_h, "/api/remember", "127.0.0.1") == 403        # even loopback
 
 
+def test_mcp_remote_dispatch_forwards_to_brain_server():
+    """Cluster mode: an MCP with LOGICA_MIND_URL forwards memory tools to the
+    brain server's /api/mcp/dispatch (same dispatch, real store/embedder) while
+    LOCAL_TOOLS (scan/git/execute…) keep running on the client machine."""
+    import threading, time
+    from http.server import ThreadingHTTPServer
+    from logica_mind.web.server import make_handler
+    from logica_mind.mcp_server import MCPServer
+
+    brain = LogicaMind(namespace="root", store=InMemoryStore())
+    srv = ThreadingHTTPServer(("127.0.0.1", 8779), make_handler(brain, allow_writes=True))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    time.sleep(0.2)
+    try:
+        client = LogicaMind(namespace="root", store=InMemoryStore())   # empty local store
+        mcp = MCPServer(client, remote_url="http://127.0.0.1:8779")
+        out = mcp._dispatch("lm_remember", {"text": "The deploy runs on Fridays."})
+        assert out["count"] >= 1                                        # stored REMOTELY
+        assert len(brain.store.all("root")) >= 1                        # …on the brain
+        assert len(client.store.all("root")) == 0                       # …not locally
+        hits = mcp._dispatch("lm_recall", {"query": "deploy", "limit": 4})
+        assert any("Friday" in h["content"] for h in hits)              # recall round-trips
+        scan = mcp._dispatch("lm_scan", {})                             # devtools stay local
+        assert isinstance(scan, dict)
+        # the server refuses client-machine tools (defense in depth)
+        try:
+            mcp._remote_dispatch("lm_scan", {})
+            assert False, "server should reject LOCAL_TOOLS"
+        except RuntimeError as e:
+            assert "400" in str(e)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_graph_alias_resolution_invalidates():
     m = mk()
     m.graph.ingest("Bob", "lives_in", "Paris")

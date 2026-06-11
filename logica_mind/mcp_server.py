@@ -19,6 +19,11 @@ from . import devtools
 PROTOCOL_VERSION = "2024-11-05"
 SUPPORTED_VERSIONS = {PROTOCOL_VERSION}  # extend as new revisions are implemented
 
+# Tools that act on the MACHINE THE CLIENT RUNS ON (sandboxed execute, repo scan,
+# git context, token budget…). They are never forwarded to a remote brain — the
+# repo being scanned is the local one, not the server's.
+LOCAL_TOOLS = {"lm_execute", "lm_scan", "lm_git", "lm_mcp", "lm_budget"}
+
 TOOLS = [
     {
         "name": "lm_remember",
@@ -324,13 +329,20 @@ TOOLS = [
 
 
 class MCPServer:
-    def __init__(self, mind, name: str = "logica-mind"):
+    def __init__(self, mind, name: str = "logica-mind", remote_url: Optional[str] = None):
         self.mind = mind
         self.name = name
         self._team = None  # memoized remote team mind (or None)
         # the connecting client (e.g. 'claude-code', 'cursor', 'chatgpt'), learned
         # from the MCP initialize handshake; tags captured memories with their origin
         self.source = os.environ.get("LOGICA_MIND_SOURCE")
+        # CLUSTER MODE: when the brain lives on another machine (one server, many
+        # clients), LOGICA_MIND_URL points the MCP at it — every memory tool is
+        # forwarded to the server's /api/mcp/dispatch (which runs the SAME dispatch
+        # against the real store + embedder), while LOCAL_TOOLS keep running here.
+        if remote_url is None:
+            remote_url = os.environ.get("LOGICA_MIND_URL", "")
+        self.remote_url = (remote_url or "").rstrip("/") or None
 
     # ---- JSON-RPC plumbing -------------------------------------------------
     @staticmethod
@@ -406,7 +418,32 @@ class MCPServer:
         except Exception as e:  # surface tool errors as isError content, not RPC error
             return self._result(rid, self._text(f"{type(e).__name__}: {e}", is_error=True))
 
+    def _remote_dispatch(self, name: str, args: Dict[str, Any]) -> Any:
+        """Forward one memory-tool call to the remote brain's /api/mcp/dispatch."""
+        import urllib.error
+        import urllib.request
+        body = json.dumps({"name": name, "args": args, "source": self.source,
+                           "namespace": getattr(self.mind, "namespace", None)}).encode()
+        headers = {"Content-Type": "application/json"}
+        token = os.environ.get("LOGICA_MIND_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(f"{self.remote_url}/api/mcp/dispatch",
+                                     data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.load(r).get("result")
+        except urllib.error.HTTPError as e:
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = json.loads(e.read()).get("error", "")
+            raise RuntimeError(f"remote brain rejected {name}: HTTP {e.code} {detail}".strip())
+        except Exception as e:
+            raise RuntimeError(f"remote brain unreachable at {self.remote_url}: {e}")
+
     def _dispatch(self, name: str, args: Dict[str, Any]) -> Any:
+        if self.remote_url and name not in LOCAL_TOOLS:
+            return self._remote_dispatch(name, args)
         m = self.mind
         src_meta = {"source": self.source} if self.source else None
         if name == "lm_remember":

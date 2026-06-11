@@ -3,6 +3,20 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.3] — 2026-06-11
+
+### MCP in cluster mode — full 32-tool parity against a remote brain
+- **`LOGICA_MIND_URL` turns the MCP server into a cluster client**: every memory
+  tool (27 of 32) is forwarded to the brain server's new `POST /api/mcp/dispatch`
+  endpoint, which runs the exact same tool dispatch against the server's own
+  store and embedder — so a workstation's Claude Code/Cursor sees the SAME brain
+  as every other node, instead of an empty local store. The 5 coding-context
+  devtools (`lm_execute`, `lm_scan`, `lm_git`, `lm_mcp`, `lm_budget`) keep
+  running on the client machine, where the repo actually lives.
+- Auth follows the per-request model: loopback callers trusted, remote callers
+  send the `LOGICA_MIND_TOKEN` bearer automatically when set. The server refuses
+  client-machine tools (defense in depth). Regression-tested end to end.
+
 ## [0.3.2] — 2026-06-10
 
 ### Fixed — memory writes behind a public bind (cluster mode)
