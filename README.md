@@ -39,7 +39,7 @@ this page in five minutes. It then lights up Voyage, OpenAI, Supabase, Postgres
 or Redis whenever you want them.
 
 <div align="center">
-  <img src="docs/img/dashboard-graph.png" alt="Logica Mind dashboard — the intelligent temporal knowledge graph" width="100%">
+  <img src="docs/img/demo.gif" alt="Logica Mind dashboard — live tour: faceted filter sidebar, orbit and ring layouts, hover previews" width="100%">
   <br>
   <em>The built-in dashboard: edges hued by relation type, nodes sized by centrality, emergent co-mentions, a full filter bar, point-in-time replay — and intelligence (path-finding, bridges, suggested links) a hand-linked note graph can't have. Organize it as an organic <b>web</b>, as <b>facet orbits</b> (hubs with their members around them — by channel, agent, life-area or entity type) or as concentric <b>importance rings</b>; click a hub and only its participants stay lit.</em>
 </div>
