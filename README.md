@@ -129,6 +129,12 @@ mind.dimensions()   # the whole profile, grouped by dimension + Maslow tier
 ```
 
 <div align="center">
+  <img src="docs/img/demo-learn.gif" alt="Adding a memory live — extracted, checked against memory, stored and indexed" width="100%">
+  <br>
+  <em>Live: hand it a messy sentence and watch it extract the fact, check it against what it already believes, and index it — no save button for each fact, no schema.</em>
+</div>
+
+<div align="center">
   <img src="docs/img/dashboard-profile.png" alt="Profile — every fact categorized by life & work dimension, mapped to Maslow" width="100%">
   <br>
   <em>The Profile view: a person <b>and</b> their work, organized — personal facts up Maslow's pyramid, plus Projects, Organization, and Business & Finance. The same animation shows it learning each categorized fact live.</em>
@@ -156,7 +162,7 @@ mind.suggested_links()    # predict the missing edge: pairs with a strong shared
 - **A professional canvas** — edges hued by relation type with arrows + confidence-weighted width, nodes sized by **PageRank centrality**, a local/ego graph with a depth slider, hover previews, and a top filter bar (colour-by, layers, search-focus, min-confidence, per-relation-type). Full guide: **[Graph intelligence](docs/graph-intelligence.md)**.
 
 <div align="center">
-  <img src="docs/img/dashboard-graph-path.png" alt="Path mode — how is A related to B?, traced and spotlighted on the graph" width="100%">
+  <img src="docs/img/demo-path.gif" alt="Path mode live — how is A related to B?, traced and spotlighted on the graph" width="100%">
   <br>
   <em>Path mode answers "how is A related to B?" — a typed, narrated chain, spotlighted on the canvas while the rest dims.</em>
 </div>
@@ -372,7 +378,7 @@ instant preview of its memories. Full guide:
     <td width="50%"><img src="docs/img/dashboard-analytics.png" alt="Analytics — usage, activity and reliability"><br><sub><b>Analytics</b> — usage, activity and reliability: added-over-time, distribution by layer / source / agent, real request latency and error rate.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/img/dashboard-spotlight.png" alt="Spotlight — global ⌘K search"><br><sub><b>⌘K Spotlight</b> — one box over everything: jump to any view, agent, memory or graph entity, keyboard-first.</sub></td>
+    <td width="50%"><img src="docs/img/demo-spotlight.gif" alt="Spotlight — global ⌘K search, live"><br><sub><b>⌘K Spotlight</b> — one box over everything: jump to any view, agent, memory or graph entity, keyboard-first.</sub></td>
     <td width="50%"><img src="docs/img/dashboard-integrations.png" alt="Integrations — the live stack with provider auto-detection"><br><sub><b>Integrations</b> — the live stack (store + redundancy, embedder, LLM, reranker) and every backend you can plug in, auto-detected from your environment.</sub></td>
   </tr>
   <tr>
