@@ -8,7 +8,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-200%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
+[![Tests](https://img.shields.io/badge/tests-202%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
 [![MCP](https://img.shields.io/badge/MCP-32%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-orange.svg)](CONTRIBUTING.md)
 
@@ -34,7 +34,7 @@ mind.contradictions()            # every belief that changed value — and exact
 ```
 
 It runs fully offline on the standard library — **zero dependencies, no API key
-to start** — and is covered by **200 tests**, so you can verify every claim on
+to start** — and is covered by **202 tests**, so you can verify every claim on
 this page in five minutes. It then lights up Voyage, OpenAI, Supabase, Postgres
 or Redis whenever you want them.
 
@@ -406,7 +406,7 @@ Full guides live in [`docs/`](docs/):
 ```bash
 git clone https://github.com/Rovemark/logica-mind.git
 cd logica-mind
-pip install -e ".[dev]" && pytest -q          # 200 tests, fully offline
+pip install -e ".[dev]" && pytest -q          # 202 tests, fully offline
 
 # rebuild the dashboard (only if you change the UI)
 cd logica_mind/web/app && npm ci && npm run build
@@ -418,7 +418,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ## 📦 Status
 
-**v0.3.0 — Beta.** The full feature set above is shipped and covered by 200 tests.
+**v0.3.0 — Beta.** The full feature set above is shipped and covered by 202 tests.
 Episodic, semantic, temporal-graph and dialectic user memory; automatic
 extraction; embeddings + reranking; a temporal knowledge graph; sleep-time
 consolidation; an MCP server and a self-hosted dashboard — one cohesive library,
