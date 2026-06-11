@@ -42,6 +42,12 @@ def _embedder(kind: str):
     if kind == "local":
         from logica_mind.embeddings import LocalEmbedder
         return LocalEmbedder()
+    if kind == "openai":
+        # text-embedding-3-small — the embedder the published RAG baselines and
+        # most vendor pipelines use (needs OPENAI_API_KEY; ~$0.02 for all of LoCoMo)
+        from logica_mind.embeddings import OpenAIEmbedder
+        from logica_mind.embeddings import BatchedEmbedder
+        return BatchedEmbedder(OpenAIEmbedder(), batch_size=128)
     from logica_mind.embeddings import HashingEmbedder
     return HashingEmbedder()
 
@@ -71,11 +77,16 @@ def run(samples=None, ks=(5, 10), embedder="hashing"):
         for key, val in conv.items():
             if not isinstance(val, list):
                 continue                                   # session_N only (skip *_date_time)
+            # session timestamp rides on every turn — LoCoMo is full of temporal
+            # questions, and a memory system that drops WHEN something was said
+            # can't answer them (the same reason the real graph is temporal).
+            dt = conv.get(f"{key}_date_time") or ""
+            prefix = f"[{dt}] " if dt else ""
             for turn in val:
                 txt = (turn.get("text") or "").strip()
                 if not txt:
                     continue
-                mind.log(f"{turn.get('speaker', '?')}: {txt}",
+                mind.log(f"{prefix}{turn.get('speaker', '?')}: {txt}",
                          metadata={"dia_id": turn.get("dia_id"), "session": key})
                 n_turns += 1
         for qa in sample.get("qa", []):
@@ -108,6 +119,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--samples", type=int, default=None, help="cap samples (default: all 10)")
     ap.add_argument("--k", type=int, nargs="+", default=[5, 10])
-    ap.add_argument("--embedder", choices=["hashing", "onnx", "local"], default="hashing")
+    ap.add_argument("--embedder", choices=["hashing", "onnx", "local", "openai"], default="hashing")
     a = ap.parse_args()
     run(samples=a.samples, ks=tuple(a.k), embedder=a.embedder)

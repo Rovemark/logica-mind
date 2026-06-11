@@ -30,12 +30,17 @@ New here? Start with **[Installation](installation.md)** → **[Quickstart](quic
 - [Auto-capture hooks](hooks.md) — capture memory automatically across a session
 - [Integrations & SDKs](integrations.md) — LangChain, LlamaIndex, the provider adapter, the TypeScript SDK
 - [Dashboard](dashboard.md) — the self-hosted web UI
-- [Internationalization](internationalization.md) — the 12 UI languages (incl. RTL Arabic)
+- [Internationalization](internationalization.md) — the 15 UI languages (incl. RTL Arabic)
 - [CLI](cli.md) — the `logica-mind` command line
 
 ### Operations
 - [Portability & privacy](portability-and-privacy.md) — signed bundles, GDPR erase, PII redaction
 - [API reference](api-reference.md) — every public method of the `LogicaMind` class
+
+### Benchmarks
+- [Benchmarks for agent memory](../BENCHMARKS.md) — LoCoMo results, why we win,
+  and a sourced comparison with Mem0, Zep, Letta and LangMem
+- [Reproduce the runs](../bench/README.md) — the two harnesses (recall@k and J score)
 
 ---
 

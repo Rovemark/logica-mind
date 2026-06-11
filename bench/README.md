@@ -1,8 +1,14 @@
 # Benchmarks
 
-Honest, reproducible, judge-free. The harness measures the one thing a memory
-library actually controls — **retrieving the right memories** — so no LLM judge
-(and no judge bias / API cost) is involved.
+Two harnesses live here:
+
+- **`locomo.py`** — judge-free *evidence recall@k*: measures the one thing a
+  memory library actually controls — retrieving the right memories — with no
+  LLM judge (no judge bias, no API cost).
+- **`locomo_judge.py`** — the industry-standard *J score* (LLM-as-a-judge
+  end-to-end QA accuracy) under the same published protocol the Mem0 paper
+  used. Headline results, per-category accuracy and the full market
+  comparison live in **[BENCHMARKS.md](../BENCHMARKS.md)**.
 
 ## LoCoMo — evidence recall@k
 
@@ -35,5 +41,19 @@ Notes:
   default for ~50MB of wheels and zero API calls — that's the recommended
   upgrade for any client that can spare the download.
 - `local` (sentence-transformers) produces the same vectors as `onnx` (same
-  model) at ~40× the install weight; `voyage`/`openai` embeders are stronger
+  model) at ~40× the install weight; `voyage`/`openai` embedders are stronger
   still but need keys. Contributions of runs on other setups are welcome.
+
+## LoCoMo — J score (LLM-as-a-judge)
+
+The metric vendors publish: recall → a gpt-4o-mini answerer writes an answer
+from only the retrieved memories → a gpt-4o-mini judge grades it against the
+gold label. Adversarial category excluded, exactly like Mem0's published
+evaluation code. Checkpointed — a flaky run never loses paid calls.
+
+```bash
+OPENAI_API_KEY=… python bench/locomo_judge.py --embedder onnx                  # zero-LLM writes
+OPENAI_API_KEY=… python bench/locomo_judge.py --ingest full --k 30             # full pipeline
+```
+
+Results and methodology: **[BENCHMARKS.md](../BENCHMARKS.md)**.

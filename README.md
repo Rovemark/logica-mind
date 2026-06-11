@@ -8,7 +8,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-189%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
+[![Tests](https://img.shields.io/badge/tests-200%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
 [![MCP](https://img.shields.io/badge/MCP-32%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-orange.svg)](CONTRIBUTING.md)
 
@@ -34,7 +34,7 @@ mind.contradictions()            # every belief that changed value — and exact
 ```
 
 It runs fully offline on the standard library — **zero dependencies, no API key
-to start** — and is covered by **189 tests**, so you can verify every claim on
+to start** — and is covered by **200 tests**, so you can verify every claim on
 this page in five minutes. It then lights up Voyage, OpenAI, Supabase, Postgres
 or Redis whenever you want them.
 
@@ -213,6 +213,72 @@ assistant's context layer.
 
 ---
 
+## 📊 Benchmarks
+
+Measured on **LoCoMo** (1,540 scored questions) under the *same published
+protocol as the [Mem0 paper](https://arxiv.org/abs/2504.19413)* — gpt-4o-mini
+answerer **and** judge, adversarial category excluded. Full methodology, every
+competitor number with its primary source, and one-command reproduction:
+**[BENCHMARKS.md](BENCHMARKS.md)**.
+
+| Mode | **accuracy (J)** | **retrieval latency** | **median context** |
+|---|---|---|---|
+| **full pipeline** (1 LLM call per *session* at write) | **72.5%** | 1.6 / 2.9 s p50/p95 (network ×2) | 3,525 tokens |
+| zero-LLM writes, `openai` embedder | **67.3%** | 584 / 1,452 ms p50/p95 (network) | 2,648 tokens |
+| zero-LLM writes, `onnx` embedder — **no API keys at all** | **60.9%** | 87 / 338 ms p50/p95 (local) | 2,738 tokens |
+
+How that places against the market, in the published protocol (every number
+sourced in [BENCHMARKS.md](BENCHMARKS.md)):
+
+| System | LoCoMo J | LLM at write time? |
+|---|---|---|
+| Letta (filesystem agent) | 74.0% | agent-managed |
+| Full-context baseline (no memory system) | 72.9% | — |
+| **Logica Mind — full pipeline** | **72.5%** | **1 call per session (~35× fewer)** |
+| Mem0ᵍ (graph variant) | 68.4% | every write |
+| **Logica Mind — zero-LLM writes** | **67.3%** | **none** |
+| Mem0 | 66.9% | every write |
+| Zep | 66.0% | every write |
+| Best RAG baseline | 61.0% | none |
+| **Logica Mind — fully keyless (onnx)** | **60.9%** | **none** |
+| LangMem | 58.1% | every write |
+| OpenAI Memory | 52.9% | every write |
+
+**The full pipeline beats every memory system in the published protocol** —
+4.1pts above Mem0ᵍ, within 0.4pt of reading the entire conversation into
+context — at one LLM call per *session* instead of per memory written, and
+~39% less answer context than Zep reports. Even storing raw turns with **zero
+write-time LLM**, Logica Mind lands above Mem0 and Zep, pipelines that pay an
+LLM on every memory written (~26,000 calls to ingest this benchmark; we pay
+zero). Why it wins:
+
+- **Distillation loses detail; raw turns keep it.** Extraction pipelines store
+  an LLM's summary of each message; when the answer sits verbatim in one turn,
+  the summary has often thrown it away. *Retrieve precise, read wide*: each
+  turn is its own memory, and the answer context expands every hit with its
+  neighbouring turns. Single-hop: **82.9% vs Mem0's 67.1%**.
+- **Time is a first-class column.** Every memory carries its session date and
+  relative expressions get resolved against it. Temporal: **60.4% vs 55.5%** —
+  temporal memory is literally the product Zep sells.
+- **The economics.** $0 and 0ms of LLM at write time, in-process retrieval,
+  no per-call billing — the cost curve per-write pipelines don't put on their
+  landing page.
+
+```text
+full pipeline · accuracy by category
+single-hop    █████████████████░░░  83.5%   ← Mem0 published: 67.1%
+temporal      ██████████████░░░░░░  70.7%   ← Mem0 published: 55.5%
+multi-hop     ███████████░░░░░░░░░  53.2%   ← Mem0 published: 51.2%
+open-domain   ███████░░░░░░░░░░░░░  37.0%   ← Mem0's stronghold (72.9%) — see BENCHMARKS.md
+```
+
+Vendor sites advertise much bigger LoCoMo numbers (Zep 94.7%, Mem0 91.6%) —
+those are **self-reported under each vendor's own methodology** and not
+comparable to the published protocol above; [BENCHMARKS.md](BENCHMARKS.md)
+unpacks that, with sources, including the public Mem0×Zep dispute.
+
+---
+
 ## 🧱 Core, done right
 
 | | |
@@ -331,7 +397,7 @@ Full guides live in [`docs/`](docs/):
 | [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
 | [Dashboard](docs/dashboard.md) | [Internationalization](docs/internationalization.md) | [Portability & privacy](docs/portability-and-privacy.md) |
 | [CLI](docs/cli.md) | [Graph intelligence](docs/graph-intelligence.md) | [Connections](docs/connections.md) |
-| [API reference](docs/api-reference.md) | [Benchmarks (LoCoMo)](bench/README.md) | [TypeScript client](clients/typescript/src/index.ts) |
+| [API reference](docs/api-reference.md) | [Benchmarks for agent memory](BENCHMARKS.md) | [TypeScript client](clients/typescript/src/index.ts) |
 
 ---
 
@@ -340,7 +406,7 @@ Full guides live in [`docs/`](docs/):
 ```bash
 git clone https://github.com/Rovemark/logica-mind.git
 cd logica-mind
-pip install -e ".[dev]" && pytest -q          # 189 tests, fully offline
+pip install -e ".[dev]" && pytest -q          # 200 tests, fully offline
 
 # rebuild the dashboard (only if you change the UI)
 cd logica_mind/web/app && npm ci && npm run build
@@ -352,7 +418,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ## 📦 Status
 
-**v0.2.0 — Beta.** The full feature set above is shipped and covered by 189 tests.
+**v0.3.0 — Beta.** The full feature set above is shipped and covered by 200 tests.
 Episodic, semantic, temporal-graph and dialectic user memory; automatic
 extraction; embeddings + reranking; a temporal knowledge graph; sleep-time
 consolidation; an MCP server and a self-hosted dashboard — one cohesive library,
