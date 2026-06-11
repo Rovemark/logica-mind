@@ -3,6 +3,14 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.4] — 2026-06-11
+
+### Fixed
+- **README images and links on PyPI**: relative paths became absolute GitHub
+  URLs, so the project page renders the demo GIFs and benchmark links.
+- **Leaner sdist** (30MB → ~2MB): documentation images are no longer packed
+  into the source distribution.
+
 ## [0.3.3] — 2026-06-11
 
 ### MCP in cluster mode — full 32-tool parity against a remote brain
