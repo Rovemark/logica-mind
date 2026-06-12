@@ -31,7 +31,10 @@ _SYSTEM = (
     'Use "noop" if the fact is already represented in existing memories. '
     "Extract only meaningful, lasting facts — skip greetings, filler and transient chatter. "
     "Be thorough: a single sentence often carries several facts across different dimensions. "
-    "If the message contains no durable fact, return [].\n\n"
+    "If the message contains no durable fact, return [].\n"
+    "LANGUAGE: write \"content\" and \"category\" in the SAME LANGUAGE as the message — "
+    "preserve the person's language, never translate it to English. (The \"dimension\" id "
+    "stays as-is from the list; it's a fixed key, not display text.)\n\n"
     + prompt_guidance()
 )
 _DIMS = set(DIM_IDS)

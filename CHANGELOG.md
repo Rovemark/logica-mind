@@ -3,6 +3,17 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.5] — 2026-06-11
+
+### Fixed — memory now speaks the user's language
+- **Extraction kept its language**: the LLM extractor and the four sleep-time
+  generators (inference, user-model derivation, insight synthesis, peer cards)
+  normalized everything to English. They now write `content`/`category` and all
+  generated strings in the **same language as the source** — a Portuguese
+  conversation produces Portuguese facts, German produces German, etc. The
+  `dimension` id stays a fixed key (the dashboard already localizes it to all
+  15 UI languages).
+
 ## [0.3.4] — 2026-06-11
 
 ### Fixed

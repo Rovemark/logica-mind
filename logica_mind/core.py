@@ -59,6 +59,7 @@ _INFER_SYSTEM = (
     "connecting them (transitive or combined). Return ONLY JSON: a list of short "
     "fact strings, third person. Be conservative — only high-confidence inferences. "
     "If nothing solid follows, return []."
+    "Write every string in the SAME LANGUAGE as the source facts/conversation — preserve the person's language, never translate to English."
 )
 
 _DERIVE_SYSTEM = (
@@ -68,6 +69,7 @@ _DERIVE_SYSTEM = (
     '["Prefers concise answers", "Works in fintech"]). '
     "Skip transient chatter and anything already covered by the existing "
     "observations. If nothing durable is revealed, return []."
+    "Write every string in the SAME LANGUAGE as the source facts/conversation — preserve the person's language, never translate to English."
 )
 
 
@@ -1734,7 +1736,7 @@ class LogicaMind:
                 text = self.llm.complete(
                     f"Recent things learned:\n{facts}\n\nWrite 2-3 concise insights about "
                     f"what changed or what's notable.",
-                    system="You synthesize concise insights from a set of recent memories.",
+                    system="You synthesize concise insights from a set of recent memories." + " Write every string in the SAME LANGUAGE as the source facts/conversation — preserve the person's language, never translate to English.",
                 ).strip()
             except Exception as e:
                 print(f"[logica-mind] reflect fell back ({e})", file=sys.stderr)
@@ -1903,7 +1905,7 @@ class LogicaMind:
                 return self.llm.complete(
                     f"OBSERVATIONS that {observer} has of {observed}:\n{facts}\n\n"
                     f"Write a concise card describing what {observer} knows/believes about {observed}.",
-                    system="You build a concise directional profile of one party as seen by another.",
+                    system="You build a concise directional profile of one party as seen by another." + " Write every string in the SAME LANGUAGE as the source facts/conversation — preserve the person's language, never translate to English.",
                 ).strip()
             except Exception as e:
                 print(f"[logica-mind] peer_card fell back ({e})", file=sys.stderr)
