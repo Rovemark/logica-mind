@@ -3,6 +3,17 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.6] — 2026-06-11
+
+### Language detection reinforces the extractor
+- A **deterministic, zero-dependency language detector** (Unicode-script +
+  stop-word voting, stdlib only) now names the message's language explicitly in
+  the extraction prompt — so even a short or ambiguous sentence is pinned to the
+  right language instead of drifting to English. When detection isn't confident
+  it stays silent and the LLM's own "preserve the language" instruction (0.3.5)
+  takes over. Covers Latin-script (pt/en/es/fr/de/it…) and non-Latin scripts
+  (Japanese, Chinese, Korean, Russian, Arabic, Hindi, Hebrew, Greek, Thai).
+
 ## [0.3.5] — 2026-06-11
 
 ### Fixed — memory now speaks the user's language
