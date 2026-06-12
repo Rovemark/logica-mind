@@ -1731,3 +1731,40 @@ if __name__ == "__main__":
             print(f"  FAIL  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{passed}/{len(fns)} passed")
     raise SystemExit(0 if passed == len(fns) else 1)
+
+
+def test_web_public_mode_is_read_only_even_over_loopback(monkeypatch):
+    """LOGICA_MIND_PUBLIC opens reads but writes must carry an explicit token —
+    loopback is NOT trusted, because a reverse proxy (HF Spaces, nginx) forwards
+    traffic and can look like a local peer. Without a token, the demo is unwriteable."""
+    import io
+    monkeypatch.setenv("LOGICA_MIND_PUBLIC", "1")
+    from importlib import reload
+    from logica_mind.web import server as S
+    reload(S)
+    m = mk(); m.remember("seed", extract=False)
+    H = S.make_handler(m, allow_writes=True)   # no LOGICA_MIND_TOKEN
+
+    def hit(method, path, peer, body=b""):
+        class R:
+            client_address = (peer, 1)
+            def __init__(s):
+                s.path = path; s.command = method
+                s.headers = {"Content-Length": str(len(body))}
+                s.rfile = io.BytesIO(body); s.wfile = io.BytesIO(); s._st = None
+            def send_response(s, c): s._st = c
+            def send_header(s, k, v): pass
+            def end_headers(s): pass
+            def log_message(s, *a): pass
+        r = R()
+        for n in dir(H):
+            if n.startswith(("do_", "_")) and callable(getattr(H, n, None)):
+                try: setattr(r, n, getattr(H, n).__get__(r, R))
+                except Exception: pass
+        getattr(r, "do_" + method)(); return r._st
+
+    assert hit("GET", "/api/memories?namespace=" + m.namespace, "10.0.0.9") == 200   # reads open
+    assert hit("POST", "/api/remember", "127.0.0.1", b'{"text":"x"}') == 403          # loopback write BLOCKED
+    assert hit("POST", "/api/remember", "10.0.0.9", b'{"text":"x"}') == 403           # remote write blocked
+    monkeypatch.delenv("LOGICA_MIND_PUBLIC", raising=False)
+    reload(S)

@@ -313,7 +313,16 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             path = parsed.path
             if not allow_writes:
                 return self._json({"error": "writes disabled"}, 403)
-            if not self._authed():  # loopback-trusted or constant-time bearer check
+            if _PUBLIC_READ:
+                # public demo: reads are open but writes must carry an explicit
+                # bearer token — loopback is NOT trusted here, because a reverse
+                # proxy (HF Spaces, nginx…) forwards traffic and can appear as a
+                # loopback/local peer. Without LOGICA_MIND_TOKEN set, no one writes.
+                auth = self.headers.get("Authorization", "")
+                if not (token and auth.startswith("Bearer ")
+                        and hmac.compare_digest(auth[7:], token)):
+                    return self._json({"error": "read-only public deployment"}, 403)
+            elif not self._authed():  # loopback-trusted or constant-time bearer check
                 return self._json({"error": "unauthorized"}, 401)
             body = self._body()
             ns = (body.get("namespace") or mind.namespace)

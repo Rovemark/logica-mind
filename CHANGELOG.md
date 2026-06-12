@@ -3,6 +3,14 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.8] — 2026-06-11
+
+### Hardened public mode
+- In `LOGICA_MIND_PUBLIC` mode, writes now require an explicit bearer token and
+  **loopback is no longer trusted for writes** — a reverse proxy (HF Spaces,
+  nginx) forwards traffic and can appear as a local peer, so a public read-only
+  deployment without a token is now genuinely unwriteable. Reads stay open.
+
 ## [0.3.7] — 2026-06-11
 
 ### Public read-only mode (shareable live dashboard)
