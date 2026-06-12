@@ -6,11 +6,14 @@
 
 **Long-term memory for AI agents — episodic, semantic, a temporal knowledge graph & a dialectic user model in one library.**
 
+[![Live demo on HF Spaces](https://img.shields.io/badge/🤗%20Live%20Demo-try%20it%20now-ffce1c.svg)](https://huggingface.co/spaces/rovemark/logica-mind-demo)
+[![PyPI](https://img.shields.io/pypi/v/logica-mind.svg?color=3775A9&label=pip%20install%20logica-mind)](https://pypi.org/project/logica-mind/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/Rovemark/logica-mind/blob/main/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-202%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
+[![Tests](https://img.shields.io/badge/tests-203%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
 [![MCP](https://img.shields.io/badge/MCP-32%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-orange.svg)](https://github.com/Rovemark/logica-mind/blob/main/CONTRIBUTING.md)
+
+**▶ [Try the live demo](https://huggingface.co/spaces/rovemark/logica-mind-demo) — explore the temporal graph in your browser, nothing to install.**
 
 </div>
 
