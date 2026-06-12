@@ -3,6 +3,14 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.7] — 2026-06-11
+
+### Public read-only mode (shareable live dashboard)
+- **`LOGICA_MIND_PUBLIC=1`** opens every `GET /api/*` so the dashboard can be
+  served as a public live demo or a read-only board, while **writes stay gated**
+  exactly as before (remote POSTs still get 401). Off by default — opt-in for a
+  deployment you want to share. This is what powers the hosted demo.
+
 ## [0.3.6] — 2026-06-11
 
 ### Language detection reinforces the extractor

@@ -236,6 +236,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
     # the SPA shell and static assets aren't under /api/ so they stay open too.
     _PUBLIC_GET = {"/api/namespaces", "/api/health"}
     _LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+    # public READ-ONLY mode (LOGICA_MIND_PUBLIC=1): every GET /api is open so the
+    # dashboard works as a public live demo / read-only board, while writes stay
+    # gated exactly as before. Off by default — opt-in for a shareable deployment.
+    _PUBLIC_READ = os.environ.get("LOGICA_MIND_PUBLIC", "").lower() in ("1", "true", "yes")
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -521,7 +525,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             # any /api read that can return memory content requires auth on a
             # non-loopback caller (loopback trusted); namespace list is the only
             # anonymous /api endpoint
-            if path.startswith("/api/") and path not in _PUBLIC_GET and not self._authed():
+            if (path.startswith("/api/") and path not in _PUBLIC_GET
+                    and not _PUBLIC_READ and not self._authed()):
                 return self._json({"error": "unauthorized"}, 401)
             try:
                 if path in ("/", "/index.html"):
