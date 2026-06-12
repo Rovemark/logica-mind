@@ -549,8 +549,16 @@ const LKEY = "lm-lang";
 export function getLang(): Lang {
   const s = localStorage.getItem(LKEY) as Lang;
   if (LANGS.some((x) => x.code === s)) return s;
-  // first visit: match the browser's language (e.g. 'pt-BR' → pt, 'zh-CN' → zh)
-  const nav = (typeof navigator !== "undefined" ? navigator.language || "" : "").slice(0, 2).toLowerCase();
-  return LANGS.some((x) => x.code === nav) ? (nav as Lang) : "en";   // else English
+  // first visit: match the browser's preferred languages (the FULL ordered list,
+  // not just navigator.language) — picks the first the dashboard supports, so a user
+  // whose top language is e.g. Catalan still gets Spanish if that's next in line
+  const prefs = (typeof navigator !== "undefined"
+    ? (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ""])
+    : [""]);
+  for (const p of prefs) {
+    const code = (p || "").slice(0, 2).toLowerCase();
+    if (LANGS.some((x) => x.code === code)) return code as Lang;
+  }
+  return "en";   // else English
 }
 export function saveLang(l: Lang) { localStorage.setItem(LKEY, l); }

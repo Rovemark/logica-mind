@@ -3,6 +3,16 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.3.9] — 2026-06-12
+
+### Improved
+- **Dashboard language detection** now reads the browser's full ordered
+  `navigator.languages` list (not just `navigator.language`) and picks the first
+  supported language — a user whose top preference isn't one of the 15 UI
+  languages still gets their next preference instead of falling straight to English.
+- `HeuristicExtractor` is now exported from `logica_mind.extract` (was only
+  reachable via the submodule path).
+
 ## [0.3.8] — 2026-06-11
 
 ### Hardened public mode
