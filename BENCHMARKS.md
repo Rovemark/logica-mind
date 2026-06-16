@@ -243,5 +243,28 @@ every write: that's the cost curve they don't put on the landing page).
   that is the trade those rows sell (free, private, local writes). The **full
   pipeline** rows measure what the optional write-time extraction buys back,
   at 1 LLM call per session instead of per memory.
+- **Two retrieval paths, both measurable.** The numbers above grade
+  `recall()` / the supplement path — the raw search the score has always
+  tracked. The 0.4.x injection features (performance profiles, the `safe=True`
+  instruction frame, pin/snooze, the ratio cutoff) shape `context()`, the
+  *assembled* block a hook injects into a prompt — a different path. So the
+  judge harness takes `--via context --profile {speed,balanced,deep}` and grades
+  that assembled block directly, otherwise injection-side changes would be
+  invisible to the score.
+- **The injection path costs no measurable accuracy, at ~27% fewer tokens.**
+  On a keyless control (onnx embedder, a Claude-Haiku judge through a local
+  Anthropic gateway, **180 paired questions**), `context()` at the `balanced`
+  profile is statistically indistinguishable from raw recall — **38.9% vs 42.2%,
+  McNemar p≈0.44** (24 questions flip one way, 18 the other: chance) — while the
+  assembled block carries **~27% fewer context tokens** (≈920 vs ≈1,260). The
+  safety frame and the low-score-tail cutoff buy that token saving without a
+  significant hit to answer quality; the only mild skew is open-domain, which
+  rewards a larger window. (This control uses a Claude judge and the keyless
+  embedder, so its absolute J sits below the gpt-4o-mini headline rows — what it
+  isolates is the *delta* between the two retrieval paths, not the leaderboard
+  number.)
 - Reproduce everything: `bench/locomo.py` (retrieval, free) and
-  `bench/locomo_judge.py` (J score, needs an OpenAI key).
+  `bench/locomo_judge.py` (J score). With an OpenAI key it runs the published
+  protocol; with `BENCH_LLM=anthropic` (any Anthropic Messages endpoint, incl. a
+  self-hosted or proxy gateway) it reproduces a keyless J — no OpenAI key needed.
+  The injection path: `bench/locomo_judge.py --via context --profile balanced`.

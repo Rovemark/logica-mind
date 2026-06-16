@@ -30,6 +30,10 @@ from logica_mind.stores import SQLiteStore                 # noqa: E402
 from locomo import _load, _embedder                        # noqa: E402
 
 MODEL = os.environ.get("BENCH_MODEL", "gpt-4o-mini")
+# Answerer+judge backend. "openai" (default, the published protocol) or
+# "anthropic" to drive the same harness through any Anthropic Messages-compatible
+# endpoint — reproduce the J score without an OpenAI key.
+LLM_BACKEND = os.environ.get("BENCH_LLM", "openai").lower()
 CKPT = None  # set per-config in run() — one checkpoint per embedder+ingest mode
 
 ANSWER_SYS = ("You answer questions about a long conversation using ONLY the provided "
@@ -47,6 +51,8 @@ JUDGE_SYS = ("You grade an answer against the gold label for a question about a 
 
 
 def _chat(system: str, user: str, retries: int = 3) -> str:
+    if LLM_BACKEND == "anthropic":
+        return _chat_anthropic(system, user, retries)
     key = os.environ.get("OPENAI_API_KEY", "")
     if not key:
         raise SystemExit("OPENAI_API_KEY required (answerer + judge calls)")
@@ -61,6 +67,35 @@ def _chat(system: str, user: str, retries: int = 3) -> str:
                 method="POST")
             with urllib.request.urlopen(req, timeout=90) as r:
                 return json.load(r)["choices"][0]["message"]["content"].strip()
+        except Exception:
+            if attempt == retries - 1:
+                raise
+            time.sleep(2.0 * (attempt + 1))
+    return ""
+
+
+def _chat_anthropic(system: str, user: str, retries: int = 3) -> str:
+    """Answerer/judge through any Anthropic Messages-compatible endpoint
+    (`BENCH_LLM=anthropic`). Lets the J harness run with no OpenAI key — set
+    ANTHROPIC_API_KEY, and ANTHROPIC_BASE_URL to point at a self-hosted or proxy
+    gateway instead of the public API."""
+    base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1/messages")
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not key:
+        raise SystemExit("ANTHROPIC_API_KEY required for the anthropic backend")
+    body = json.dumps({"model": MODEL, "max_tokens": 256, "temperature": 0,
+                       "system": system,
+                       "messages": [{"role": "user", "content": user}]}).encode()
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(
+                base, data=body,
+                headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=90) as r:
+                data = json.load(r)
+                return "".join(b.get("text", "") for b in data.get("content", [])
+                               if b.get("type") == "text").strip()
         except Exception:
             if attempt == retries - 1:
                 raise
@@ -94,9 +129,10 @@ def _session_facts(cache, si, sess_key, dt, turns):
 
 
 def run(samples=None, limit_qa=None, k=10, embedder="onnx", workers=8, ingest="raw",
-        radius=2, only_cats=None):
+        radius=2, only_cats=None, via="manual", profile="balanced"):
     global CKPT
-    CKPT = os.path.join(_HERE, "data", f"judge-checkpoint-{embedder}-{ingest}.json")
+    _tag = ingest if via == "manual" else f"ctx-{profile}"
+    CKPT = os.path.join(_HERE, "data", f"judge-checkpoint-{embedder}-{_tag}.json")
     data = _load()
     if samples:
         data = data[:samples]
@@ -171,6 +207,19 @@ def run(samples=None, limit_qa=None, k=10, embedder="onnx", workers=8, ingest="r
             q = str(qa.get("question", ""))
             gold = str(qa.get("answer", ""))
             t1 = time.time()
+            if via == "context":
+                # CONTEXT-MODE: grade the block the PRODUCT actually injects via
+                # mind.context() — exercising the whole injection path (instruction
+                # frame, ratio threshold, profile, graph beam search). This is what
+                # the hooks feed an agent, so it measures the injection-side wins the
+                # recall-only benchmark can't see.
+                mems = mind.context(q, token_budget=1800, profile=profile)
+                lat_ms = (time.time() - t1) * 1000.0
+                ans = _chat(ANSWER_SYS, f"{mems}\n\nQuestion: {q}")
+                verdict = _chat(JUDGE_SYS, f"Question: {q}\nGold label: {gold}\nAnswer: {ans}")
+                ok2 = verdict.upper().startswith("CORRECT")
+                return qid, {"correct": ok2, "category": qa.get("category"),
+                             "lat_ms": round(lat_ms, 1), "ctx_tokens": len(mems) // 4}
             if ingest == "supplement":
                 # facts SUPPLEMENT the dialogue instead of competing with it for the
                 # same top-k: the episodic retrieval is identical to raw mode, and the
@@ -218,7 +267,8 @@ def run(samples=None, limit_qa=None, k=10, embedder="onnx", workers=8, ingest="r
     ctxs = sorted(v.get("ctx_tokens", 0) for v in results.values() if v.get("ctx_tokens"))
     pct = lambda arr, q: (arr[min(len(arr) - 1, int(q * len(arr)))] if arr else None)
     out = {
-        "dataset": "LoCoMo (locomo10)", "metric": f"LLM-judge accuracy (J), {MODEL} answerer+judge, k={k}, ingest={ingest}",
+        "dataset": "LoCoMo (locomo10)", "metric": (f"LLM-judge accuracy (J), {MODEL} answerer+judge, "
+                   + (f"via=context profile={profile}" if via == "context" else f"k={k}, ingest={ingest}")),
         "embedder": embedder, "questions": len(results),
         "J": round(ok / max(1, len(results)), 4),
         "J_by_category": {c: {"acc": round(a / max(1, b), 4), "n": b} for c, (a, b) in sorted(by_cat.items())},
@@ -243,7 +293,12 @@ if __name__ == "__main__":
     ap.add_argument("--radius", type=int, default=2, help="neighbouring turns around each hit")
     ap.add_argument("--only-cats", type=str, default=None,
                     help="comma-separated category ids to score (cheap targeted runs)")
+    ap.add_argument("--via", choices=["manual", "context"], default="manual",
+                    help="manual = hand-assembled context (recall path); context = grade the "
+                         "block mind.context() actually injects (the injection path the hooks feed)")
+    ap.add_argument("--profile", choices=["speed", "balanced", "deep"], default="balanced",
+                    help="context() profile when --via context")
     a = ap.parse_args()
     run(samples=a.samples, limit_qa=a.limit_qa, k=a.k, embedder=a.embedder, workers=a.workers,
-        ingest=a.ingest, radius=a.radius,
+        ingest=a.ingest, radius=a.radius, via=a.via, profile=a.profile,
         only_cats=set(a.only_cats.split(",")) if a.only_cats else None)

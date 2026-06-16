@@ -3,6 +3,28 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.8] — 2026-06-16
+
+### Measuring the injection path
+- **Context-mode judge harness**: `bench/locomo_judge.py` gained
+  `--via context --profile {speed,balanced,deep}`, so the benchmark can grade the
+  *assembled* `context()` block a hook injects — not only `recall()`. The 0.4.x
+  injection work (profiles, the `safe=True` instruction frame, pin/snooze, the
+  ratio cutoff) shapes that block; without this path those changes were invisible
+  to the score. First result on a keyless control (180 paired questions): the
+  injection path is statistically indistinguishable from raw recall (McNemar
+  p≈0.44) at **~27% fewer context tokens** — the safety frame and tail cutoff are
+  a free token saving, not an accuracy tax.
+- **Keyless benchmark reproduction**: the J harness now drives any Anthropic
+  Messages-compatible endpoint via `BENCH_LLM=anthropic` (answerer + judge,
+  honouring `ANTHROPIC_BASE_URL` for self-hosted or proxy gateways), so the J
+  score is reproducible with no OpenAI key. The published rows still use the
+  gpt-4o-mini protocol; this only lowers the barrier to re-run it.
+- **Docs**: new [Retrieval profiles, injection safety & lifecycle](docs/retrieval-and-injection.md)
+  guide covering profiles, hooks-first hardening, pin/snooze, type-aware
+  forgetting, neighbor evolution, the anti-contamination guardrail and read/write
+  context isolation. BENCHMARKS.md now documents the two retrieval paths.
+
 ## [0.4.7] — 2026-06-12
 
 ### Self-organizing memory (Wave 3)

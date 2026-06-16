@@ -17,6 +17,7 @@ New here? Start with **[Installation](installation.md)** → **[Quickstart](quic
 ### Building blocks
 - [Stores](stores.md) — the 7 storage backends and when to use each
 - [Embeddings & reranking](embeddings-and-reranking.md) — embedders and rerankers
+- [Retrieval profiles, injection safety & lifecycle](retrieval-and-injection.md) — profiles, hooks-first hardening, pin/snooze, type-aware forgetting, neighbor evolution
 - [Knowledge graph](knowledge-graph.md) — the temporal graph, entities, point-in-time
 - [Graph intelligence](graph-intelligence.md) — path-finding, bridges, suggested links, layers, centrality
 - [Fact categorization](categorization.md) — categories + the 34-dimension life/work taxonomy
