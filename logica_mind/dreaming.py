@@ -57,6 +57,7 @@ class DreamReport:
     forgotten: int = 0
     derived: int = 0
     inferred: int = 0
+    evolved: int = 0
     user_synthesized: bool = False
     timestamp: str = field(default_factory=now_iso)
     namespace: str = ""
@@ -130,6 +131,7 @@ class Dreamer:
         synthesize_user: bool = True,
         derive_user: bool = True,
         infer_links: bool = False,
+        evolve: bool = False,
         extract_graph: bool = False,
         prune_layers: Optional[List[MemoryLayer]] = None,
     ):
@@ -141,6 +143,7 @@ class Dreamer:
         self.do_user = synthesize_user
         self.do_derive = derive_user
         self.do_infer = infer_links
+        self.do_evolve = evolve
         self.extract_graph = extract_graph
         # which layers decay/forget (configurable per-layer policy); episodic by
         # default. GRAPH and USER are NEVER raw-pruned here: hard-deleting graph
@@ -168,6 +171,8 @@ class Dreamer:
             report.derived = self.mind.derive()
         if self.do_infer:
             report.inferred = self.mind.infer_links()
+        if self.do_evolve:
+            self._evolve(report)
         if self.do_user:
             report.user_synthesized = bool(self.mind.user.synthesize())
         save_dream(report, self.mind.store)
@@ -249,6 +254,39 @@ class Dreamer:
             report.reinforced = len(changed)
 
     # ---- 3. decay / forget -------------------------------------------------
+    def _evolve(self, report: DreamReport, limit: int = 40) -> None:
+        """A-MEM-style self-organizing metadata: a memory with no life/work
+        dimension inherits one from its nearest neighbours (majority vote over the
+        k most similar memories that DO have a dimension). Fully offline and
+        deterministic — it lets the keyless path acquire categorization over time
+        without an LLM. Fail-soft: a memory with no embedding is skipped."""
+        from collections import Counter
+        m = self.mind
+        sem = m.store.all(m.namespace, [MemoryLayer.SEMANTIC])
+        undimensioned = [x for x in sem if not (x.metadata or {}).get("dimension")]
+        for mem in undimensioned[:limit]:
+            if not mem.embedding:
+                continue
+            try:
+                hits = m.store.search(m.namespace, mem.embedding, mem.content,
+                                      [MemoryLayer.SEMANTIC], 6)
+            except Exception:
+                continue
+            votes = Counter()
+            for h in hits:
+                if h.memory.id == mem.id:
+                    continue
+                d = (h.memory.metadata or {}).get("dimension")
+                if d and h.score >= 0.45:                 # only confident neighbours vote
+                    votes[d] += 1
+            if votes:
+                md = dict(mem.metadata or {})
+                md["dimension"] = votes.most_common(1)[0][0]
+                md["dimension_source"] = "neighbor-evolved"
+                mem.metadata = md
+                m.store.add([mem])                        # upsert by id
+                report.evolved += 1
+
     def _prune(self, report: DreamReport) -> None:
         m = self.mind
         # decay/forget the configured layers (episodic by default; semantic too if

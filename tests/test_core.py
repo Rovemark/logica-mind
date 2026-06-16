@@ -425,6 +425,22 @@ def test_context_is_injection_framed_and_sanitized():
     assert frame("") == ""                                       # empty stays empty
 
 
+def test_neighbor_evolution_inherits_dimension():
+    """A-MEM-style self-organizing metadata: an undimensioned memory inherits its
+    life/work dimension from confident nearest neighbours during a dream(evolve)."""
+    from logica_mind.dreaming import Dreamer
+    m = mk()
+    a = m.remember("The user loves health and fitness routines", extract=False)[0]
+    m._set_meta(a.id, dimension="health")
+    b = m.remember("User health and fitness is a daily priority", extract=False)[0]
+    m._set_meta(b.id, dimension="health")
+    c = m.remember("health and fitness matters to the user a lot", extract=False)[0]
+    rep = Dreamer(m, evolve=True, prune=False, reinforce=False,
+                  synthesize_user=False, derive_user=False).run()
+    assert rep.evolved >= 1
+    assert (m.store.get(m.namespace, c.id).metadata or {}).get("dimension") == "health"
+
+
 def test_infer_links_blocks_hallucinated_entities():
     """The anti-contamination guardrail must drop any inferred fact that introduces
     a proper noun absent from the source facts (hallucinated entity), while keeping

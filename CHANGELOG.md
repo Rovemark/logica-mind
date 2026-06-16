@@ -3,6 +3,14 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.7] — 2026-06-12
+
+### Self-organizing memory (Wave 3)
+- **Neighbor evolution** (`dream(evolve=True)`): an undimensioned memory inherits
+  its life/work dimension from a majority vote of its confident nearest
+  neighbours. Fully offline and deterministic, so the keyless path gradually
+  acquires categorization without any LLM. Off by default; fail-soft.
+
 ## [0.4.6] — 2026-06-12
 
 ### Safer synthesis (Wave 3)
