@@ -3,6 +3,16 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.2] — 2026-06-12
+
+### Retrieval & cost
+- **Lexical MMR fallback**: when there's no query embedding (the keyless/hashing
+  path), the MMR reranker now de-duplicates via bigram-Jaccard diversity instead
+  of passing candidates through unchanged — no more three phrasings of the same
+  fact in the keyless default.
+- **`compact` on `lm_recall`**: returns bare content lines (~3x cheaper tokens for
+  the agent). `lm_context` gained the `profile` arg (speed/balanced/deep).
+
 ## [0.4.1] — 2026-06-12
 
 ### Performance profiles for context()

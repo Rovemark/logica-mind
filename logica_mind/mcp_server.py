@@ -46,6 +46,7 @@ TOOLS = [
                 "query": {"type": "string"},
                 "limit": {"type": "integer", "default": 8},
                 "session": {"type": "string"},
+                "compact": {"type": "boolean", "description": "return bare content lines (token-cheap)"},
             },
             "required": ["query"],
         },
@@ -57,6 +58,8 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
+                "profile": {"type": "string", "enum": ["speed", "balanced", "deep"],
+                            "description": "speed = sub-second (skip graph), deep = wider pool"},
                 "token_budget": {"type": "integer", "default": 1500},
             },
             "required": ["query"],
@@ -454,6 +457,9 @@ class MCPServer:
                                "dimension": (c.metadata or {}).get("dimension")} for c in created]}
         if name == "lm_recall":
             hits = m.recall(args["query"], limit=int(args.get("limit", 8)), session=args.get("session"))
+            # compact=true → bare content lines, ~3x cheaper tokens for the agent
+            if args.get("compact"):
+                return [h.memory.content for h in hits]
             return [{"score": round(h.score, 4), "layer": h.memory.layer.value,
                      "content": h.memory.content,
                      "category": (h.memory.metadata or {}).get("category"),
@@ -469,7 +475,8 @@ class MCPServer:
         if name == "lm_suggested_links":
             return {"suggested": m.suggested_links()}
         if name == "lm_context":
-            return m.context(args["query"], token_budget=int(args.get("token_budget", 1500)))
+            return m.context(args["query"], token_budget=int(args.get("token_budget", 1500)),
+                             profile=args.get("profile", "balanced"))
         if name == "lm_ask_about_user":
             return m.ask_about_user(args["question"])
         if name == "lm_observe_user":

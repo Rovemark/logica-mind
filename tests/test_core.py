@@ -425,6 +425,31 @@ def test_context_is_injection_framed_and_sanitized():
     assert frame("") == ""                                       # empty stays empty
 
 
+def test_mmr_lexical_dedup_without_embeddings():
+    """The keyless path (no query embedding) still de-duplicates via bigram-Jaccard
+    MMR instead of returning near-paraphrases back to back."""
+    from logica_mind.rerank.mmr import MMRReranker
+    from logica_mind.types import SearchResult, Memory, MemoryLayer
+    mkr = lambda c: SearchResult(memory=Memory(id=c[:6], content=c, layer=MemoryLayer.SEMANTIC), score=1.0)
+    res = [mkr("The launch is on Friday"), mkr("The launch is on Friday afternoon"),
+           mkr("The database is Postgres"), mkr("Likes flat whites")]
+    out = MMRReranker(lambda_=0.6).rerank("launch", res, top_k=3, query_embedding=None)
+    # the second near-duplicate must not sit right behind the first
+    assert out[1].memory.content != "The launch is on Friday afternoon"
+    assert len(out) == 3
+
+
+def test_context_profiles_change_cost():
+    m = mk()
+    for i in range(8):
+        m.remember(f"Fact number {i} about the project and its many details.")
+    speed = m.context("project", profile="speed", safe=False)
+    balanced = m.context("project", profile="balanced", safe=False)
+    assert speed and balanced
+    # speed retrieves fewer memories, so its block is no larger than balanced's
+    assert LogicaMind._approx_tokens(speed) <= LogicaMind._approx_tokens(balanced) + 1
+
+
 def test_ingest_document_chunks():
     m = mk()
     # distinct sentences so chunks aren't deduped as near-identical

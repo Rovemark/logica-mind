@@ -22,10 +22,44 @@ class MMRReranker(Reranker):
     def __init__(self, lambda_: float = 0.7):
         self.lmbda = lambda_
 
+    @staticmethod
+    def _bigrams(text):
+        t = "".join(c if c.isalnum() else " " for c in (text or "").lower())
+        toks = "  " + " ".join(t.split()) + "  "
+        return {toks[i:i + 2] for i in range(len(toks) - 1)}
+
+    def _rerank_lexical(self, results, top_k):
+        """Diversity without embeddings: penalize a candidate by its max bigram
+        Jaccard overlap with what's already chosen — keeps the keyless/hashing
+        path from returning three phrasings of the same fact."""
+        grams = {id(r): self._bigrams(r.memory.content) for r in results}
+        n = max(1, len(results) - 1)
+        ranks = {id(r): i for i, r in enumerate(results)}      # input order = relevance proxy
+        selected: List[SearchResult] = []
+        pool = list(results)
+        while pool and len(selected) < top_k:
+            best, best_score = None, -1e9
+            for r in pool:
+                rel = 1.0 - ranks[id(r)] / n
+                if selected:
+                    g = grams[id(r)]
+                    div = max(len(g & grams[id(s)]) / max(1, len(g | grams[id(s)])) for s in selected)
+                else:
+                    div = 0.0
+                score = self.lmbda * rel - (1 - self.lmbda) * div
+                if score > best_score:
+                    best, best_score = r, score
+            selected.append(best)
+            pool.remove(best)
+        return selected[:top_k]
+
     def rerank(self, query, results, top_k, query_embedding=None) -> List[SearchResult]:
         usable = [r for r in results if r.memory.embedding]
+        # no query vector or too few embedded candidates → fall back to a lexical
+        # (bigram-Jaccard) MMR instead of a plain passthrough, so the keyless path
+        # still gets de-duplicated
         if query_embedding is None or len(usable) < 2:
-            return results[:top_k]
+            return self._rerank_lexical(results, top_k) if len(results) > 1 else results[:top_k]
 
         rel = {id(r): max(0.0, cosine(query_embedding, r.memory.embedding)) for r in usable}
         selected: List[SearchResult] = []
