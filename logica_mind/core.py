@@ -679,21 +679,64 @@ class LogicaMind:
             pass
         return names
 
-    def _graph_neighborhood(self, names: List[str], max_per_entity: int = 10):
-        """1-hop expansion: (neighbour token-sets, rendered facts) for the given
-        entity names. This is what makes recall GRAPH-AWARE — things connected to
-        what you asked about rank up, and context() can inject the graph's own
-        knowledge as compact fact lines."""
+    def _graph_neighborhood(self, names: List[str], max_per_entity: int = 10,
+                            depth: int = 1, beam: int = 5, node_budget: int = 30):
+        """Expansion: (neighbour token-sets, rendered facts) for the given entity
+        names. This is what makes recall GRAPH-AWARE — things connected to what you
+        asked about rank up, and context() injects the graph's own facts.
+
+        depth=1 (default) is the fast 1-hop path, unchanged. depth>1 runs a bounded
+        BEAM SEARCH (beam nodes/level, node_budget total) so relational questions
+        ('how does A connect to C') reach facts two hops out without the cost
+        exploding — used only on the 'deep' profile."""
         nbrs: set = set()
-        facts: List[str] = []
+        if depth <= 1:
+            facts: List[str] = []
+            try:
+                for name in names:
+                    for e in self.graph.query(name)[:max_per_entity]:
+                        other = e.object if e.subject.lower() == name.lower() else e.subject
+                        t = entity_tokset(other)
+                        if t:
+                            nbrs.add(t)
+                        facts.append(f"{e.subject} {e.predicate.replace('_', ' ')} {e.object}")
+            except Exception:
+                pass
+            return nbrs, facts
+
+        # multi-hop beam search (bounded)
+        from collections import Counter
+        seen_nodes = {n.lower() for n in names}
+        seen_facts: set = set()
+        facts = []
+        frontier = list(names)
+        visited = 0
         try:
-            for name in names:
-                for e in self.graph.query(name)[:max_per_entity]:
-                    other = e.object if e.subject.lower() == name.lower() else e.subject
-                    t = entity_tokset(other)
-                    if t:
-                        nbrs.add(t)
-                    facts.append(f"{e.subject} {e.predicate.replace('_', ' ')} {e.object}")
+            for _ in range(depth):
+                degree: Counter = Counter()
+                for name in frontier:
+                    if visited >= node_budget:
+                        break
+                    visited += 1
+                    for e in self.graph.query(name)[:max_per_entity]:
+                        other = e.object if e.subject.lower() == name.lower() else e.subject
+                        t = entity_tokset(other)
+                        if t:
+                            nbrs.add(t)
+                        fact = f"{e.subject} {e.predicate.replace('_', ' ')} {e.object}"
+                        if fact not in seen_facts:
+                            seen_facts.add(fact)
+                            facts.append(fact)
+                        on = other.lower()
+                        if on not in seen_nodes:
+                            degree[other] += 1                    # rank next hop by how connected it is
+                # beam: only the best-connected nodes advance to the next level
+                frontier = []
+                for node, _c in degree.most_common(beam):
+                    seen_nodes.add(node.lower())
+                    frontier.append(node)
+                if not frontier:
+                    break
         except Exception:
             pass
         return nbrs, facts
@@ -1645,7 +1688,10 @@ class LogicaMind:
         # cheap tokens; goes before the prose memories.
         qnames = self._query_entity_names(query) if use_graph else []
         if qnames:
-            _, facts = self._graph_neighborhood(qnames, max_per_entity=6)
+            # deep profile reaches two hops out via bounded beam search; speed/
+            # balanced stay at the cheap 1-hop expansion
+            _gdepth = 2 if profile == "deep" else 1
+            _, facts = self._graph_neighborhood(qnames, max_per_entity=6, depth=_gdepth)
             flines: List[str] = []
             for f in dict.fromkeys(facts):               # dedup, keep order
                 line = f"- {f}"

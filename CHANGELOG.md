@@ -3,6 +3,15 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.5] — 2026-06-12
+
+### Relational recall (Wave 3)
+- **Bounded beam search over the graph**: the `deep` profile expands two hops out
+  through a bounded beam (beam width, total node budget), so relational questions
+  ("how does A connect to C?") reach facts two hops away without the cost
+  exploding. The default 1-hop path is unchanged, so the published benchmark is
+  unaffected; deep is opt-in.
+
 ## [0.4.4] — 2026-06-12
 
 ### Lifecycle & ranking (Wave 2)

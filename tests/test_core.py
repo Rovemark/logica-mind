@@ -425,6 +425,16 @@ def test_context_is_injection_framed_and_sanitized():
     assert frame("") == ""                                       # empty stays empty
 
 
+def test_graph_beam_search_reaches_two_hops():
+    m = mk()
+    m.graph.ingest("Alice", "works_at", "Acme")
+    m.graph.ingest("Acme", "uses", "Postgres")
+    _, one = m._graph_neighborhood(["Alice"], depth=1)
+    _, two = m._graph_neighborhood(["Alice"], depth=2)
+    assert any("Postgres" in f for f in two)            # beam reaches the 2-hop fact
+    assert not any("Postgres" in f for f in one)        # 1-hop (default) doesn't — benchmark path unchanged
+
+
 def test_recency_intent_and_frequency_are_noop_by_default():
     """The score-formula additions must not move ranking on a plain query / fresh
     store (so the published benchmark is unaffected); they only fire on recency
