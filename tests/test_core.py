@@ -425,6 +425,25 @@ def test_context_is_injection_framed_and_sanitized():
     assert frame("") == ""                                       # empty stays empty
 
 
+def test_infer_links_blocks_hallucinated_entities():
+    """The anti-contamination guardrail must drop any inferred fact that introduces
+    a proper noun absent from the source facts (hallucinated entity), while keeping
+    inferences built only from known entities."""
+    m = mk()
+    m.graph.ingest("Alice", "works_at", "Acme")
+    m.graph.ingest("Acme", "uses", "Postgres")
+
+    class FakeLLM:
+        available = True
+        def complete_json(self, prompt, system=None):
+            return ["Alice uses Postgres at Acme", "Acme was acquired by Google"]
+    m.llm = FakeLLM()
+    m.infer_links(max_new=5)
+    stored = [x.content for x in m.store.all(m.namespace) if "inferred" in (x.tags or [])]
+    assert any("Postgres" in s for s in stored)          # legit inference kept
+    assert not any("Google" in s for s in stored)        # hallucinated entity dropped
+
+
 def test_graph_beam_search_reaches_two_hops():
     m = mk()
     m.graph.ingest("Alice", "works_at", "Acme")

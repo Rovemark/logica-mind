@@ -3,6 +3,15 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.6] — 2026-06-12
+
+### Safer synthesis (Wave 3)
+- **Anti-contamination guardrail on inductive inference**: `infer_links()` now
+  drops any synthesized fact that introduces a proper noun absent from the source
+  facts (fail-closed), blocking the most dangerous failure mode of generative
+  memory — the LLM hallucinating a new entity into a conclusion. Legitimate
+  inferences built only from known entities are kept.
+
 ## [0.4.5] — 2026-06-12
 
 ### Relational recall (Wave 3)

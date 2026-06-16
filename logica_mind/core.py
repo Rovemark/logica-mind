@@ -2334,12 +2334,33 @@ class LogicaMind:
             return 0
         if not isinstance(data, list):
             return 0
+        # ANTI-CONTAMINATION guardrail (fail-closed): every proper noun in an
+        # inferred fact must already appear in the source facts. This blocks the
+        # LLM from hallucinating a NEW entity into a synthesized conclusion — the
+        # single most dangerous failure mode of generative memory.
+        known_tokens: set = set()
+        for e in edges:
+            for w in (e.subject + " " + e.object).split():
+                known_tokens.add(w.lower().strip(".,;:'\"()[]"))
+
+        def _has_foreign_entity(fact: str) -> bool:
+            words = fact.split()
+            for i, w in enumerate(words):
+                clean = w.strip(".,;:'\"()[]")
+                # a capitalized, non-sentence-start, 4+ char token not seen in any
+                # source is a hallucinated entity → reject the whole fact
+                if i > 0 and len(clean) >= 4 and clean[:1].isupper() and clean.lower() not in known_tokens:
+                    return True
+            return False
+
         seen = {_norm(m.content) for m in self.store.all(self.namespace, [MemoryLayer.SEMANTIC])}
         n = 0
         for item in data:
             f = (item if isinstance(item, str) else str((item or {}).get("content", ""))).strip()
             if not f or _norm(f) in seen:
                 continue
+            if _has_foreign_entity(f):
+                continue                          # contaminated → drop, don't store a hallucination
             seen.add(_norm(f))
             self.remember(f, importance=0.4, tags=["inferred"], extract=False)
             n += 1
