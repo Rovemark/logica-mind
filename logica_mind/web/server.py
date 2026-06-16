@@ -630,6 +630,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # pool (with which ones made the cut) and the assembled block.
                     q = first(qs, "q") or ""
                     budget = _int(qs, "budget", 1200)
+                    profile = first(qs, "profile") or "balanced"
                     if is_all:
                         # context() is per-namespace; show the busiest one so the
                         # block is populated, and let the UI switch namespaces.
@@ -638,8 +639,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     else:
                         tgt = ns
                     sub = mind.for_namespace(tgt)
-                    cands = sub.recall(q, limit=20) if q.strip() else []
-                    block = sub.context(q, token_budget=budget) if q.strip() else ""
+                    block = sub.context(q, token_budget=budget, profile=profile) if q.strip() else ""
+                    # the candidate pool is only for the dashboard's ranked-list UI;
+                    # skip that second recall on the speed path (hook injection)
+                    cands = sub.recall(q, limit=20) if (q.strip() and profile != "speed") else []
                     tokens = mind._approx_tokens(block) if block else 0
                     items = []
                     for r in cands:

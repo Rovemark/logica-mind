@@ -3,6 +3,16 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.1] — 2026-06-12
+
+### Performance profiles for context()
+- `context(query, profile=...)`: **speed** skips the knowledge-graph hop and
+  retrieves fewer memories (sub-second on large stores — right for per-prompt
+  hook injection), **balanced** is the default (graph + 20 memories), **deep**
+  widens the pool. On a 12k-memory store, speed cut context assembly ~2.3x.
+- `GET /api/context?profile=speed` skips the dashboard's extra candidate recall,
+  halving latency on the injection path.
+
 ## [0.4.0] — 2026-06-12
 
 ### Injection hardening (security) — memory can't become a system instruction

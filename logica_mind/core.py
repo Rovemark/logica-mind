@@ -1548,6 +1548,7 @@ class LogicaMind:
         session: Optional[str] = None,
         include_user: bool = True,
         safe: bool = True,
+        profile: str = "balanced",
     ) -> str:
         """Assemble a ready-to-inject context block for `query`, fitted to a
         token budget (Context endpoint): user model first, then the
@@ -1555,8 +1556,16 @@ class LogicaMind:
 
         With safe=True (default) the result is sanitized and wrapped in an
         instruction frame so injected memory can't act as a prompt-injection
-        vector (a poisoned note can't become a system instruction)."""
+        vector (a poisoned note can't become a system instruction).
+
+        profile trades latency for depth on large stores:
+          speed    — skip the knowledge-graph hop, fewer memories. Sub-second,
+                     right for per-keystroke hook injection.
+          balanced — graph facts + up to 20 memories (default).
+          deep     — balanced + a wider memory pool (reranker if configured)."""
         budget = max(0, token_budget)
+        use_graph = profile != "speed"
+        recall_limit = {"speed": 8, "balanced": 20, "deep": 30}.get(profile, 20)
         blocks: List[str] = []
 
         # measure the FULL assembled candidate (headers + bodies + separators)
@@ -1571,7 +1580,7 @@ class LogicaMind:
         # knowledge-graph facts about the query's entities — the graph's OWN
         # knowledge injected as compact fact lines (graph-aware context). Dense,
         # cheap tokens; goes before the prose memories.
-        qnames = self._query_entity_names(query)
+        qnames = self._query_entity_names(query) if use_graph else []
         if qnames:
             _, facts = self._graph_neighborhood(qnames, max_per_entity=6)
             flines: List[str] = []
@@ -1586,7 +1595,7 @@ class LogicaMind:
                 blocks.append("## Knowledge graph\n" + "\n".join(flines))
 
         chosen: List[str] = []
-        for h in self.recall(query, layers=layers, limit=20, session=session):
+        for h in self.recall(query, layers=layers, limit=recall_limit, session=session):
             line = f"- {h.memory.content}"
             candidate = blocks + ["## Relevant memory\n" + "\n".join(chosen + [line])]
             if self._approx_tokens("\n\n".join(candidate)) <= budget:
