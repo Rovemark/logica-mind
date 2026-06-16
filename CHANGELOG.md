@@ -3,6 +3,17 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.3] — 2026-06-12
+
+### Lifecycle controls + cleaner injection
+- **Pin / snooze**: `mind.pin(id)` floats a memory to the top of recall;
+  `mind.snooze(id, until)` hides it until a date; `unpin`/`unsnooze` reverse them.
+  Exposed as `lm_pin` / `lm_snooze` MCP tools.
+- **Adaptive ratio threshold in `context()`**: injected memories are kept relative
+  to the top hit's score (not an absolute floor), fixing the hashing-vs-OpenAI
+  score-scale mismatch and trimming the irrelevant tail from injected context.
+  `recall()` is untouched, so the published benchmark is unaffected.
+
 ## [0.4.2] — 2026-06-12
 
 ### Retrieval & cost

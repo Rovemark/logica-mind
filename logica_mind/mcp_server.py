@@ -150,6 +150,19 @@ TOOLS = [
         },
     },
     {
+        "name": "lm_pin",
+        "description": "Pin a memory by id so it always surfaces first in recall (or unpin it).",
+        "inputSchema": {"type": "object", "properties": {
+            "id": {"type": "string"}, "unpin": {"type": "boolean"}}, "required": ["id"]},
+    },
+    {
+        "name": "lm_snooze",
+        "description": "Hide a memory from recall until a date (ISO), or wake it now.",
+        "inputSchema": {"type": "object", "properties": {
+            "id": {"type": "string"}, "until": {"type": "string"}, "wake": {"type": "boolean"}},
+            "required": ["id"]},
+    },
+    {
         "name": "lm_stats",
         "description": "Per-layer counts of stored memories.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -502,6 +515,13 @@ class MCPServer:
             return m.diff(args["since"], until=args.get("until"))
         if name == "lm_forget":
             return {"deleted": m.forget(memory_id=args.get("id"), query=args.get("query"))}
+        if name == "lm_pin":
+            ok = m.unpin(args["id"]) if args.get("unpin") else m.pin(args["id"])
+            return {"ok": ok, "pinned": not args.get("unpin")}
+        if name == "lm_snooze":
+            if args.get("wake"):
+                return {"ok": m.unsnooze(args["id"]), "snoozed": False}
+            return {"ok": m.snooze(args["id"], args.get("until", "")), "snoozed": True}
         if name == "lm_stats":
             return m.stats()
 

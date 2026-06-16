@@ -556,13 +556,23 @@ class LogicaMind:
         if boost_ents and self.graph_boost > 0:
             nbr_ents = self._graph_neighborhood(self._query_entity_names(query))[0] - boost_ents
 
+        from .types import now_iso
+        _now = now_iso()
         reranked: List[SearchResult] = []
         for r in raw:
+            md = r.memory.metadata or {}
+            # snoozed memories are hidden until their wake date
+            su = md.get("snooze_until")
+            if su and str(su) > _now:
+                continue
             sim = r.components.get("similarity", r.score)
             rec = recency_score(_age_seconds(r.memory.created_at), self.half_life_days)
             imp = r.memory.importance
             final = self.w_sim * sim + self.w_imp * imp + self.w_rec * rec
             comps = {"similarity": round(sim, 4), "importance": round(imp, 4), "recency": round(rec, 4)}
+            if md.get("pinned"):                 # user-pinned → always float to the top
+                final += 1.0                     # base score is ~0..1, so +1 guarantees the top
+                comps["pinned"] = 1.0
             if boost_ents or nbr_ents:
                 ctoks = _tokset(r.memory.content)
                 if boost_ents and any(e <= ctoks for e in boost_ents):   # entity tokens present in content
@@ -1221,6 +1231,36 @@ class LogicaMind:
             return n
         return 0
 
+    # ---- lifecycle controls (pin / snooze) ---------------------------------
+    def _set_meta(self, memory_id: str, **kv) -> bool:
+        """Patch a memory's metadata in place (None value removes the key)."""
+        mem = self.store.get(self.namespace, memory_id)
+        if not mem:
+            return False
+        md = dict(mem.metadata or {})
+        for k, v in kv.items():
+            if v is None:
+                md.pop(k, None)
+            else:
+                md[k] = v
+        mem.metadata = md
+        self.store.add([mem])                    # add() is an upsert keyed by id
+        return True
+
+    def pin(self, memory_id: str) -> bool:
+        """Pin a memory so it always floats to the top of recall."""
+        return self._set_meta(memory_id, pinned=True)
+
+    def unpin(self, memory_id: str) -> bool:
+        return self._set_meta(memory_id, pinned=None)
+
+    def snooze(self, memory_id: str, until: str) -> bool:
+        """Hide a memory from recall until `until` (ISO date/datetime)."""
+        return self._set_meta(memory_id, snooze_until=until)
+
+    def unsnooze(self, memory_id: str) -> bool:
+        return self._set_meta(memory_id, snooze_until=None)
+
     # ---- user model --------------------------------------------------------
     def observe_user(self, text: str) -> Optional[Memory]:
         return self.user.observe(text)
@@ -1594,8 +1634,17 @@ class LogicaMind:
             if flines:
                 blocks.append("## Knowledge graph\n" + "\n".join(flines))
 
+        # adaptive ratio threshold: keep memories scored within a fraction of the
+        # top hit rather than against an absolute floor. Fixes the hashing-vs-voyage
+        # score-scale mismatch and trims the irrelevant tail from the INJECTED block
+        # (recall() itself is untouched, so the published benchmark is unaffected).
+        hits = self.recall(query, layers=layers, limit=recall_limit, session=session)
+        if hits:
+            cutoff = hits[0].score * 0.35
+            kept = [h for h in hits if h.score >= cutoff] or hits[:3]
+            hits = kept
         chosen: List[str] = []
-        for h in self.recall(query, layers=layers, limit=recall_limit, session=session):
+        for h in hits:
             line = f"- {h.memory.content}"
             candidate = blocks + ["## Relevant memory\n" + "\n".join(chosen + [line])]
             if self._approx_tokens("\n\n".join(candidate)) <= budget:

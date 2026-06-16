@@ -425,6 +425,21 @@ def test_context_is_injection_framed_and_sanitized():
     assert frame("") == ""                                       # empty stays empty
 
 
+def test_pin_and_snooze_lifecycle():
+    m = mk()
+    a = m.remember("The database is Postgres")[0]
+    b = m.remember("A minor side note about colours")[0]
+    # pin floats a memory to the top regardless of query relevance
+    assert m.pin(b.id)
+    assert m.recall("database", limit=2)[0].memory.id == b.id
+    assert m.unpin(b.id)
+    # snooze hides until a future date; unsnooze brings it back
+    assert m.snooze(a.id, "2099-01-01T00:00:00Z")
+    assert not any("Postgres" in h.memory.content for h in m.recall("database postgres", limit=5))
+    assert m.unsnooze(a.id)
+    assert any("Postgres" in h.memory.content for h in m.recall("database postgres", limit=5))
+
+
 def test_mmr_lexical_dedup_without_embeddings():
     """The keyless path (no query embedding) still de-duplicates via bigram-Jaccard
     MMR instead of returning near-paraphrases back to back."""
