@@ -3,6 +3,20 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.4] — 2026-06-12
+
+### Lifecycle & ranking (Wave 2)
+- **Content-type-aware forgetting**: the dream cycle now decays memories on a
+  half-life that depends on their type (decisions/identity never decay; handoffs
+  in 30 days; transient in 7), and frequent recall extends a memory's life up to
+  3x (access-reinforcement). Replaces the single global half-life in pruning.
+- **Score-formula additions** (no-op on a fresh store, so the benchmark is
+  unaffected): a recency-intent weight swap when the query asks for the "latest"
+  state, and a log-leveled frequency boost for often-recalled memories.
+- **Read/write context isolation**: `LOGICA_MIND_CONTEXT=secondary` lets a cron or
+  background subagent READ shared memory without writing to the dialectic user
+  model, so automated turns can't drown the real owner's profile.
+
 ## [0.4.3] — 2026-06-12
 
 ### Lifecycle controls + cleaner injection

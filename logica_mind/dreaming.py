@@ -25,6 +25,28 @@ from .core import _age_seconds
 if TYPE_CHECKING:
     from .core import LogicaMind
 
+# content-type → forgetting half-life in days. None = permanent (never decays).
+# A decision is load-bearing and should survive; a handoff is transient. Type is
+# read from metadata["type"] or any matching tag; unknown types use the global HL.
+_HALF_LIVES = {
+    "decision": None, "milestone": None, "identity": None, "preference": None,
+    "project": 120.0, "feature": 120.0, "bugfix": 90.0, "discovery": 90.0,
+    "note": 60.0, "problem": 45.0, "handoff": 30.0, "status": 14.0, "transient": 7.0,
+}
+
+
+def _half_life_for(mem, default_days):
+    """Resolve a memory's forgetting half-life from its type. Returns None to mean
+    'permanent' (skip pruning), a float of days, or the global default if unknown."""
+    md = mem.metadata or {}
+    t = (md.get("type") or md.get("content_type") or "").lower().strip()
+    if t in _HALF_LIVES:
+        return _HALF_LIVES[t]
+    for tag in (mem.tags or []):
+        if str(tag).lower() in _HALF_LIVES:
+            return _HALF_LIVES[str(tag).lower()]
+    return default_days
+
 
 @dataclass
 class DreamReport:
@@ -238,7 +260,16 @@ class Dreamer:
                 continue
             if mem.layer == MemoryLayer.GRAPH and (mem.metadata or {}).get("valid_to") is None:
                 continue
-            rec = recency_score(_age_seconds(mem.created_at), m.half_life_days)
+            # content-type-aware half-life: a recorded decision should outlive a
+            # transient handoff. The type comes from metadata/tags; durable types
+            # decay slowly (or never), ephemeral ones fast. Falls back to the global
+            # half-life when no type is known.
+            hl = _half_life_for(mem, m.half_life_days)
+            if hl is None:                       # type marked permanent → never decays
+                continue
+            # frequent recall extends a memory's life (access-reinforcement), up to 3x
+            hl *= min(3.0, 1.0 + 0.5 * mem.access_count)
+            rec = recency_score(_age_seconds(mem.created_at), hl)
             strength = mem.importance * rec
             if mem.access_count == 0 and strength < self.prune_floor:
                 if m.store.delete(m.namespace, mem.id):

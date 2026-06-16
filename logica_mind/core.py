@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 import re as _re
 import sys
 import time
@@ -557,7 +558,15 @@ class LogicaMind:
             nbr_ents = self._graph_neighborhood(self._query_entity_names(query))[0] - boost_ents
 
         from .types import now_iso
+        import math
         _now = now_iso()
+        # recency-intent weight swap: when the query explicitly asks for the latest
+        # state, favour recency over raw similarity. Inert on queries without these
+        # cues (e.g. the whole LoCoMo set), so the published benchmark is unaffected.
+        _recency_intent = bool(_re.search(
+            r"(?i)\b(latest|most recent|recently|newest|currently|right now|nowadays|"
+            r"these days|último|ultima|recente|atualmente|agora)\b", query))
+        w_sim, w_imp, w_rec = (0.10, 0.20, 0.70) if _recency_intent else (self.w_sim, self.w_imp, self.w_rec)
         reranked: List[SearchResult] = []
         for r in raw:
             md = r.memory.metadata or {}
@@ -568,7 +577,11 @@ class LogicaMind:
             sim = r.components.get("similarity", r.score)
             rec = recency_score(_age_seconds(r.memory.created_at), self.half_life_days)
             imp = r.memory.importance
-            final = self.w_sim * sim + self.w_imp * imp + self.w_rec * rec
+            final = w_sim * sim + w_imp * imp + w_rec * rec
+            # frequency boost — often-recalled memories rank up. log-leveled and
+            # zero when never accessed, so it's a no-op on a fresh store (benchmark)
+            if r.memory.access_count:
+                final += 0.05 * math.log1p(r.memory.access_count)
             comps = {"similarity": round(sim, 4), "importance": round(imp, 4), "recency": round(rec, 4)}
             if md.get("pinned"):                 # user-pinned → always float to the top
                 final += 1.0                     # base score is ~0..1, so +1 guarantees the top
@@ -1262,7 +1275,17 @@ class LogicaMind:
         return self._set_meta(memory_id, snooze_until=None)
 
     # ---- user model --------------------------------------------------------
+    @staticmethod
+    def _is_secondary_context() -> bool:
+        """Read/write isolation: a secondary context (a cron, a background subagent,
+        a tool run) READS the shared memory but must NOT write to the dialectic user
+        model, or many automated turns would drown the real owner's profile. Set
+        LOGICA_MIND_CONTEXT=secondary (or read-only) on those processes."""
+        return os.environ.get("LOGICA_MIND_CONTEXT", "").lower() in ("secondary", "read-only", "readonly", "ro")
+
     def observe_user(self, text: str) -> Optional[Memory]:
+        if self._is_secondary_context():
+            return None                          # don't let background writers shape the user model
         return self.user.observe(text)
 
     def ingest_conversation(self, messages: List[Dict[str, Any]], session: Optional[str] = None,

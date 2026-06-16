@@ -425,6 +425,40 @@ def test_context_is_injection_framed_and_sanitized():
     assert frame("") == ""                                       # empty stays empty
 
 
+def test_recency_intent_and_frequency_are_noop_by_default():
+    """The score-formula additions must not move ranking on a plain query / fresh
+    store (so the published benchmark is unaffected); they only fire on recency
+    cues or accessed memories."""
+    m = mk()
+    m.remember("The project ships on Friday")
+    m.remember("The database is Postgres")
+    plain = [h.memory.content for h in m.recall("project schedule", limit=2)]
+    assert plain[0] == "The project ships on Friday"            # similarity still wins
+    # a recency-cued query swaps weights (just assert it runs and ranks)
+    cued = m.recall("what is the latest status", limit=2)
+    assert cued and all("recency" in (h.components or {}) for h in cued)
+
+
+def test_type_aware_half_life_keeps_decisions_drops_handoffs():
+    from logica_mind.dreaming import _half_life_for
+    from logica_mind.types import Memory, MemoryLayer
+    decision = Memory(id="d", content="We chose Postgres.", layer=MemoryLayer.SEMANTIC,
+                      metadata={"type": "decision"})
+    handoff = Memory(id="h", content="Pick up the deploy tomorrow.", layer=MemoryLayer.SEMANTIC,
+                     metadata={"type": "handoff"})
+    assert _half_life_for(decision, 7.0) is None                # permanent
+    assert _half_life_for(handoff, 7.0) == 30.0                 # ephemeral
+    assert _half_life_for(Memory(id="x", content="?", layer=MemoryLayer.SEMANTIC), 7.0) == 7.0  # fallback
+
+
+def test_secondary_context_does_not_write_user_model(monkeypatch):
+    m = mk()
+    monkeypatch.setenv("LOGICA_MIND_CONTEXT", "secondary")
+    assert m.observe_user("The user prefers dark mode") is None   # background writer is muted
+    monkeypatch.delenv("LOGICA_MIND_CONTEXT", raising=False)
+    assert m.observe_user("The user prefers dark mode") is not None
+
+
 def test_pin_and_snooze_lifecycle():
     m = mk()
     a = m.remember("The database is Postgres")[0]
