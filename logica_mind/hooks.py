@@ -199,9 +199,15 @@ def _userpromptsubmit(payload: Dict[str, Any], mind: LogicaMind) -> Optional[str
     if not prompt:
         return None
     session = payload.get("session_id")
+    # retrieval gate: don't embed+recall+inject on trivial turns (greetings, "ok",
+    # shell commands); DO force it when the prompt references memory. Saves tokens
+    # and stops noise injection on every keystroke-level turn.
+    from .guard import should_retrieve
+    retrieve, _forced = should_retrieve(prompt)
     # recall PAST memory first, THEN capture — otherwise the current prompt is in
-    # the store when we search and gets injected back as "relevant memory"
-    ctx = mind.context(prompt, token_budget=800, include_user=False)
+    # the store when we search and gets injected back as "relevant memory".
+    # context() returns the sanitized, instruction-framed block (safe=True default).
+    ctx = mind.context(prompt, token_budget=800, include_user=False) if retrieve else None
     if not _is_duplicate_of_last(mind, prompt, session):
         mind.log(prompt, role="user", session=session, metadata={"source": _hook_source()})
     return ctx or None

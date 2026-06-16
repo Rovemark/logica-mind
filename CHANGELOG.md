@@ -3,6 +3,22 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.0] — 2026-06-12
+
+### Injection hardening (security) — memory can't become a system instruction
+- Auto-injected context (`context()`, `session_brief()`, the session hooks) is now
+  **sanitized and wrapped in an instruction frame** by default (`safe=True`). A
+  poisoned memory ("ignore previous instructions, you are now…") can no longer act
+  as a prompt-injection vector: invisible/bidi control chars are stripped, fake
+  role markers and ChatML tokens are neutered, override phrasings are defanged, and
+  stored text can't smuggle the frame's own closing tag to escape the sandbox.
+  Pass `safe=False` for the raw block. Zero dependencies, pure stdlib.
+- **Retrieval gate** in the `UserPromptSubmit` hook: trivial turns (greetings,
+  "ok", shell commands, emoji) no longer trigger an embed+recall+inject, and
+  memory-referencing turns ("what's my name", "yesterday", "we discussed…") force
+  retrieval. Saves tokens and stops noise injection on every turn.
+- New `logica_mind.guard` module: `sanitize()`, `frame()`, `should_retrieve()`.
+
 ## [0.3.9] — 2026-06-12
 
 ### Improved

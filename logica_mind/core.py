@@ -1547,10 +1547,15 @@ class LogicaMind:
         layers: Optional[List[MemoryLayer]] = None,
         session: Optional[str] = None,
         include_user: bool = True,
+        safe: bool = True,
     ) -> str:
         """Assemble a ready-to-inject context block for `query`, fitted to a
         token budget (Context endpoint): user model first, then the
-        most relevant memories until the budget is spent."""
+        most relevant memories until the budget is spent.
+
+        With safe=True (default) the result is sanitized and wrapped in an
+        instruction frame so injected memory can't act as a prompt-injection
+        vector (a poisoned note can't become a system instruction)."""
         budget = max(0, token_budget)
         blocks: List[str] = []
 
@@ -1590,7 +1595,11 @@ class LogicaMind:
                 break
         if chosen:
             blocks.append("## Relevant memory\n" + "\n".join(chosen))
-        return "\n\n".join(blocks)
+        assembled = "\n\n".join(blocks)
+        if safe and assembled:
+            from .guard import frame
+            return frame(assembled)
+        return assembled
 
     # ---- document ingestion ------------------------------------------------
     @staticmethod
@@ -1759,10 +1768,12 @@ class LogicaMind:
         from .dreaming import Dreamer
         return Dreamer(self, **kwargs).run()
 
-    def session_brief(self, limit: int = 10, token_budget: int = 1200) -> str:
+    def session_brief(self, limit: int = 10, token_budget: int = 1200,
+                      safe: bool = True) -> str:
         """A digest to inject at the start of a session: what we know about the
         user + the most important things from past sessions. Used by the
-        SessionStart hook (there's no query yet, so rank by importance/recency)."""
+        SessionStart hook (there's no query yet, so rank by importance/recency).
+        safe=True sanitizes + instruction-frames the block (injection-safe)."""
         budget = max(0, token_budget)
         blocks: List[str] = []
 
@@ -1813,7 +1824,11 @@ class LogicaMind:
         if ep_block:
             blocks.append(ep_block)
 
-        return "\n\n".join(blocks)
+        assembled = "\n\n".join(blocks)
+        if safe and assembled:
+            from .guard import frame
+            return frame(assembled)
+        return assembled
 
     # ---- introspection -----------------------------------------------------
     def stats(self) -> Dict[str, int]:
