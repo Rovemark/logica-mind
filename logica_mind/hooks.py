@@ -46,12 +46,28 @@ EVENT_NAMES = {
 }
 
 _PROVIDER_DOWN_TTL = 300.0  # seconds a provider stays marked-down before re-probe
+_MIN_TURN_LEN = 12          # skip trivial turns ("hi", "ok") when capturing
+_CATCHUP_WINDOW = 800       # lines scanned from the transcript tail on every Stop
 
 
 def _root_dir() -> str:
     d = os.path.expanduser("~/.logica-mind")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def _capture_log_path() -> str:
+    return os.path.join(_root_dir(), "capture.log")
+
+
+def _log_failure(msg: str) -> None:
+    """Capture is fail-soft, so a broken capture path would otherwise lose memory
+    silently. Append failures to a log so they can be noticed and fixed."""
+    try:
+        with open(_capture_log_path(), "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}\n")
+    except Exception:
+        pass
 
 
 def default_db_path(fingerprint: str = "default") -> str:
@@ -228,41 +244,130 @@ def _is_duplicate_of_last(mind: LogicaMind, prompt: str, session: Optional[str])
     return " ".join(rows[0].content.lower().split()) == norm
 
 
-def _last_assistant_text(transcript_path: str, max_chars: int = 4000) -> Optional[str]:
+def _norm(s: str) -> str:
+    return " ".join((s or "").split()).lower()
+
+
+def _turn_hash(text: str) -> str:
+    return hashlib.sha1(_norm(text).encode("utf-8")).hexdigest()
+
+
+def _iter_transcript_turns(transcript_path: str, window: Optional[int] = None):
+    """Yield (role, text) for every user/assistant TEXT turn in the transcript.
+    Tool-result turns, slash commands and injected blocks are skipped. `window`
+    bounds the scan to the last N lines (None = whole file, used by backfill)."""
     try:
         with open(transcript_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
     except OSError:
-        return None
-    for line in reversed(lines[-400:]):
+        return
+    if window:
+        lines = lines[-window:]
+    for line in lines:
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
         msg = obj.get("message", obj)
-        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role") or obj.get("type")
+        if role not in ("user", "assistant"):
             continue
         content = msg.get("content")
-        text = None
         if isinstance(content, str):
             text = content
         elif isinstance(content, list):
-            parts = [c.get("text", "") for c in content
-                     if isinstance(c, dict) and c.get("type") == "text"]
-            text = "\n".join(p for p in parts if p)
-        if text and text.strip():
-            return text.strip()[:max_chars]
-    return None
+            text = "\n".join(c.get("text", "") for c in content
+                             if isinstance(c, dict) and c.get("type") == "text")
+        else:
+            text = ""
+        text = (text or "").strip()
+        if len(text) < _MIN_TURN_LEN:
+            continue
+        # skip slash commands and host-injected blocks (e.g. <logica-memory>…)
+        if role == "user" and (text.startswith("/") or text.startswith("<")):
+            continue
+        yield role, text[:4000]
+
+
+def _session_seen_hashes(mind: LogicaMind, session: Optional[str]) -> set:
+    """Normalized-content hashes already stored for this session, so catch-up
+    never double-logs what UserPromptSubmit (or a prior Stop) already captured."""
+    from .types import MemoryLayer
+    seen = set()
+    try:
+        for m in mind.store.all(mind.namespace, [MemoryLayer.EPISODIC]):
+            if not session or (m.metadata or {}).get("session") == session:
+                seen.add(_turn_hash(m.content))
+    except Exception:
+        pass
+    return seen
+
+
+def _capture_turns(mind: LogicaMind, transcript_path: str, session: Optional[str],
+                   window: Optional[int] = None) -> int:
+    """Reconcile a transcript against the store: log every user/assistant turn
+    not already captured. This is the self-healing core — it recovers turns whose
+    live capture failed and whole sessions that predate the hook. Returns the
+    number of new turns stored."""
+    seen = _session_seen_hashes(mind, session)
+    n = 0
+    for role, text in _iter_transcript_turns(transcript_path, window):
+        h = _turn_hash(text)
+        if h in seen:
+            continue
+        seen.add(h)
+        try:
+            mind.log(text, role=role, session=session, metadata={"source": _hook_source()})
+            n += 1
+        except Exception as e:
+            # leave the rest for the next Stop to retry, but record why
+            _log_failure(f"capture failed (session={session}, role={role}): {e}")
+            break
+    return n
 
 
 def _stop(payload: Dict[str, Any], mind: LogicaMind) -> None:
+    """Capture the whole turn (user + assistant), reconciling against the store so
+    nothing is double-logged and any previously-missed turn is recovered."""
     tp = payload.get("transcript_path")
-    if not tp:
+    if not tp or not os.path.exists(tp):
         return
-    text = _last_assistant_text(tp)
-    if text:
-        mind.log(text, role="assistant", session=payload.get("session_id"),
-                 metadata={"source": _hook_source()})
+    try:
+        _capture_turns(mind, tp, payload.get("session_id"), window=_CATCHUP_WINDOW)
+    except Exception as e:
+        _log_failure(f"stop catch-up failed: {e}")
+
+
+def _transcript_cwd(transcript_path: str) -> Optional[str]:
+    """The working directory recorded in a transcript, so a backfill lands in the
+    SAME namespace the live hook would have used (not the transcript's folder)."""
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    o = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(o, dict) and o.get("cwd"):
+                    return o["cwd"]
+    except OSError:
+        pass
+    return None
+
+
+def backfill(transcript_path: str, db_override: Optional[str] = None,
+             namespace_override: Optional[str] = None) -> Dict[str, Any]:
+    """Import a past transcript into memory (whole file, dedup-aware). For sessions
+    that predate the hook or ran while capture was down. Idempotent: re-running
+    only adds turns not already stored."""
+    transcript_path = os.path.expanduser(transcript_path)
+    cwd = _transcript_cwd(transcript_path) or os.path.dirname(os.path.abspath(transcript_path))
+    mind = _build_mind({"cwd": cwd}, db_override, namespace_override)
+    session = os.path.splitext(os.path.basename(transcript_path))[0]
+    n = _capture_turns(mind, transcript_path, session, window=None)
+    return {"transcript": transcript_path, "namespace": mind.namespace, "captured": n}
 
 
 def _precompact(payload: Dict[str, Any], mind: LogicaMind) -> None:

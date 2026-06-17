@@ -3,6 +3,23 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.9] — 2026-06-16
+
+### Capture that heals itself
+- **Self-healing `Stop` reconcile**: the `Stop` hook no longer just saves the last
+  assistant message — it reconciles the recent transcript against the store and
+  captures every user/assistant turn that is missing, deduplicated by normalized
+  content. A turn whose live capture failed (store briefly unreachable), or a whole
+  session where hooks were enabled midway, is now recovered at the end of the turn
+  instead of being lost forever.
+- **Failures are logged, not swallowed**: capture is still fail-soft, but every
+  failure is now appended to `~/.logica-mind/capture.log` with a timestamp, so a
+  broken capture path is visible instead of silently dropping memory.
+- **`logica-mind backfill <path>`**: import past transcripts (a file or a folder
+  scanned recursively) that predate the hooks. Idempotent and dedup-aware, it lands
+  each turn in the namespace the live hook would have used (read from the
+  transcript's recorded working directory). New `hooks.backfill()` API.
+
 ## [0.4.8] — 2026-06-16
 
 ### Measuring the injection path

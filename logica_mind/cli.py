@@ -64,6 +64,9 @@ def main(argv=None):
     s_inst.add_argument("--settings", default="~/.claude/settings.json",
                         help="target settings.json (default: ~/.claude/settings.json)")
 
+    s_bf = sub.add_parser("backfill", help="import a past transcript (or a folder of them) into memory")
+    s_bf.add_argument("path", help="a transcript .jsonl file, or a directory scanned recursively")
+
     args = p.parse_args(argv)
 
     # hooks manage their own store/namespace (per the host's cwd) — handle first
@@ -80,6 +83,29 @@ def main(argv=None):
         path, added = install(args.settings)
         print(f"hooks installed in {path}")
         print("added: " + (", ".join(added) if added else "(already present)"))
+        return
+    if args.cmd == "backfill":
+        import os as _os
+        import glob as _glob
+        from .hooks import backfill
+        target = _os.path.expanduser(args.path)
+        if _os.path.isfile(target):
+            files = [target]
+        else:
+            files = sorted(_glob.glob(_os.path.join(target, "**", "*.jsonl"), recursive=True))
+        if not files:
+            print(f"no .jsonl transcripts found at {target}")
+            return
+        total = 0
+        for fp in files:
+            try:
+                res = backfill(fp, db_override=args.db, namespace_override=args.namespace)
+                if res["captured"]:
+                    print(f"  +{res['captured']:>4} → {res['namespace']}  ({_os.path.basename(fp)})")
+                total += res["captured"]
+            except Exception as e:                       # noqa: BLE001
+                print(f"  !     {_os.path.basename(fp)}: {e}")
+        print(f"backfilled {total} turn(s) from {len(files)} transcript(s)")
         return
 
     mind = _mind(args)

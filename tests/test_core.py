@@ -764,6 +764,79 @@ def test_hook_stop_saves_assistant_turn():
     assert any("refactored the auth" in e.content for e in eps)
 
 
+def _write_transcript(lines):
+    import tempfile
+    tf = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False)
+    tf.write("\n".join(json.dumps(x) for x in lines))
+    tf.close()
+    return tf.name
+
+
+def test_hook_stop_catchup_recovers_missed_user_turn():
+    # a session where UserPromptSubmit never captured (hook enabled mid-session,
+    # or its live capture failed): Stop must reconcile and capture BOTH turns.
+    import os as _os
+    path = _write_transcript([
+        {"type": "user", "message": {"role": "user", "content": "please refactor the billing module today"}},
+        {"type": "assistant", "message": {"role": "assistant",
+         "content": [{"type": "text", "text": "Done, I split billing into invoice and ledger."}]}},
+    ])
+    m = LogicaMind(namespace="t", store=InMemoryStore())
+    hooks.handle("stop", {"transcript_path": path, "session_id": "s1"}, m)
+    _os.unlink(path)
+    eps = m.store.all("t", [MemoryLayer.EPISODIC])
+    assert any("refactor the billing" in e.content for e in eps)   # user turn recovered
+    assert any("invoice and ledger" in e.content for e in eps)     # assistant turn captured
+
+
+def test_hook_stop_catchup_is_idempotent():
+    import os as _os
+    path = _write_transcript([
+        {"type": "user", "message": {"role": "user", "content": "what database are we using here"}},
+        {"type": "assistant", "message": {"role": "assistant",
+         "content": [{"type": "text", "text": "Postgres, with a read replica."}]}},
+    ])
+    m = LogicaMind(namespace="t", store=InMemoryStore())
+    hooks.handle("stop", {"transcript_path": path, "session_id": "s1"}, m)
+    n1 = len(m.store.all("t", [MemoryLayer.EPISODIC]))
+    hooks.handle("stop", {"transcript_path": path, "session_id": "s1"}, m)   # run again
+    n2 = len(m.store.all("t", [MemoryLayer.EPISODIC]))
+    _os.unlink(path)
+    assert n1 == n2 and n1 == 2     # no duplicates on the second Stop
+
+
+def test_backfill_imports_and_dedups():
+    import os as _os
+    path = _write_transcript([
+        {"cwd": "/tmp/proj-x", "type": "user", "message": {"role": "user", "content": "set up the tarot reading flow"}},
+        {"type": "assistant", "message": {"role": "assistant",
+         "content": [{"type": "text", "text": "I drew three cards and read them."}]}},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "x"}]}},  # skipped
+    ])
+    res = hooks.backfill(path, namespace_override="bf")
+    assert res["captured"] == 2 and res["namespace"] == "bf"
+    res2 = hooks.backfill(path, namespace_override="bf")   # idempotent
+    _os.unlink(path)
+    assert res2["captured"] == 0
+
+
+def test_capture_failure_is_logged(monkeypatch, tmp_path):
+    logf = tmp_path / "capture.log"
+    monkeypatch.setattr(hooks, "_capture_log_path", lambda: str(logf))
+    path = _write_transcript([
+        {"type": "assistant", "message": {"role": "assistant",
+         "content": [{"type": "text", "text": "this turn will fail to store"}]}},
+    ])
+    m = LogicaMind(namespace="t", store=InMemoryStore())
+    def _boom(*a, **k):
+        raise RuntimeError("store offline")
+    monkeypatch.setattr(m, "log", _boom)
+    hooks._capture_turns(m, path, "s1")
+    import os as _os
+    _os.unlink(path)
+    assert logf.exists() and "store offline" in logf.read_text()
+
+
 def test_hook_run_smoke_with_patched_mind():
     m = LogicaMind(namespace="t", store=InMemoryStore())
     m.remember("The deploy script lives in scripts/deploy.sh.")
