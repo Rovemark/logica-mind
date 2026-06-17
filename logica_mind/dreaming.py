@@ -214,6 +214,10 @@ class Dreamer:
             e for e in m.store.all(m.namespace, [MemoryLayer.EPISODIC])
             if not (e.metadata or {}).get("consolidated")
         ]
+        # distill the most RECENT unconsolidated turns first: fresh content yields
+        # new facts, instead of re-chewing the oldest turns whose facts the store
+        # already holds (which read as distilled=0 on a mature store).
+        episodic.sort(key=lambda e: e.created_at or "", reverse=True)
         batch = episodic[: self.episodic_batch]
         if not batch:
             return

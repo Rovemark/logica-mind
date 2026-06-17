@@ -3,6 +3,15 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.16] — 2026-06-17
+
+### Consolidation distills fresh content first
+- Sleep-time consolidation now processes the **most recent** unconsolidated turns
+  first, instead of the oldest. On a mature store the oldest turns are already
+  distilled, so oldest-first read as `distilled=0`; recent-first surfaces new facts
+  from fresh content promptly. (The benchmark harness distills per-session at
+  ingest and is unaffected.)
+
 ## [0.4.15] — 2026-06-17
 
 ### Dreams page shows real totals
