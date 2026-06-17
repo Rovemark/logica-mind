@@ -820,6 +820,27 @@ def test_backfill_imports_and_dedups():
     assert res2["captured"] == 0
 
 
+def test_session_names_path_resolves_through_multistore(tmp_path):
+    from logica_mind.web import server as websrv
+
+    class _Child:                       # a real store with a path
+        path = str(tmp_path / "memory.db")
+
+    class _Multi:                        # MultiStore: no .path, has .stores
+        stores = [_Child()]
+
+    p = websrv._session_names_path(_Multi())
+    assert p and p.endswith("memory_session_names.json")   # falls back to the child
+
+    class _Sqlite:
+        path = str(tmp_path / "m2.db")
+    assert websrv._session_names_path(_Sqlite()).endswith("m2_session_names.json")
+
+    class _Bare:                         # nothing usable → no naming file
+        stores = []
+    assert websrv._session_names_path(_Bare()) is None
+
+
 def test_capture_failure_is_logged(monkeypatch, tmp_path):
     logf = tmp_path / "capture.log"
     monkeypatch.setattr(hooks, "_capture_log_path", lambda: str(logf))

@@ -29,6 +29,15 @@ from ..stores.base import _tokset
 def _session_names_path(store) -> str | None:
     p = getattr(store, "path", None)
     if not p or p in (":memory:", ""):
+        # MultiStore (and other wrappers) have no .path of their own — fall back
+        # to the first child store that has one, so session names persist next to
+        # the db instead of silently no-op'ing (rename / Claude-import).
+        for child in getattr(store, "stores", None) or []:
+            cp = getattr(child, "path", None)
+            if cp and cp not in (":memory:", ""):
+                p = cp
+                break
+    if not p or p in (":memory:", ""):
         return None
     return os.path.splitext(p)[0] + "_session_names.json"
 
@@ -263,18 +272,24 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
         def _send(self, code, body: bytes, ctype):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            # never let the browser serve a STALE /api response, nor a stale app
-            # shell (index.html) that would reference an old JS bundle — both must
-            # always be fresh. The hashed JS/CSS assets can cache forever (their
-            # name changes on rebuild), so only /api and HTML get no-store.
-            if self.path.startswith("/api/") or "text/html" in ctype:
-                self.send_header("Cache-Control", "no-store")
-            self._cors()
-            self.end_headers()
-            self.wfile.write(body)
+            # a client that hangs up mid-response (closed tab, timed-out caller)
+            # must not raise out of the handler — swallow the dropped-connection
+            # errors so one disconnect can never crash the worker.
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                # never let the browser serve a STALE /api response, nor a stale app
+                # shell (index.html) that would reference an old JS bundle — both must
+                # always be fresh. The hashed JS/CSS assets can cache forever (their
+                # name changes on rebuild), so only /api and HTML get no-store.
+                if self.path.startswith("/api/") or "text/html" in ctype:
+                    self.send_header("Cache-Control", "no-store")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
 
         def do_OPTIONS(self):
             # CORS preflight — browsers send this before a cross-origin POST/custom

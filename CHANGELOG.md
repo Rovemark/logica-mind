@@ -3,6 +3,19 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.10] — 2026-06-16
+
+### Dashboard & server robustness
+- **Session names persist with a MultiStore**: renaming a session (and the
+  "import from Claude Code" naming button) silently no-op'd when the dashboard
+  ran on a `MultiStore` (e.g. SQLite + Obsidian), because the names file was
+  derived from `store.path`, which a MultiStore does not have. It now falls back
+  to the first child store that has a path, so names save next to the db.
+- **A dropped client can't crash the server**: the response writer now swallows
+  `BrokenPipeError` / `ConnectionReset` / `ConnectionAborted`, so a caller that
+  hangs up mid-response (closed tab, timed-out request) no longer raises out of
+  the worker thread.
+
 ## [0.4.9] — 2026-06-16
 
 ### Capture that heals itself
