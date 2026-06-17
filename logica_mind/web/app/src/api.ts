@@ -55,6 +55,7 @@ export interface IntegrationsData {
   available: { llm: IntegrationOption[]; embedders: IntegrationOption[]; rerankers: IntegrationOption[]; stores: IntegrationOption[] };
 }
 export interface DreamCadence { interval_hours: number; batch: number; auto: boolean; }
+export interface DreamSummary { cycles: number; distilled: number; reinforced: number; forgotten: number; derived: number; inferred: number; graph_edges: number; ops: number; }
 export interface PathHop { subject: string; predicate: string; object: string; confidence: number; }
 export interface PathResult { from: string; to: string; found: boolean; path: string[]; hops: PathHop[]; }
 export interface ConnEntity { name: string; degree: number; type?: string; dimension?: string | null; }
@@ -135,7 +136,7 @@ export const api = {
   contradictions: (ns: string): Promise<{ contradictions: Contradiction[] }> => j(`/api/contradictions?${nsq(ns)}`),
   diff: (ns: string, since: string): Promise<{ diff: DiffItem[] }> => j(`/api/diff?${nsq(ns)}&since=${since}`),
 
-  dreams: (ns: string, limit = 50): Promise<{ dreams: DreamReport[] }> =>
+  dreams: (ns: string, limit = 50): Promise<{ dreams: DreamReport[]; summary: DreamSummary }> =>
     j(`/api/dreams?${nsq(ns)}&limit=${limit}`),
   contested: (ns: string): Promise<{ contested: ContestedPair[] }> => j(`/api/contested?${nsq(ns)}`),
   surprises: (ns: string): Promise<{ surprises: SurpriseEvent[] }> => j(`/api/surprises?${nsq(ns)}`),

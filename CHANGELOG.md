@@ -3,6 +3,14 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.15] — 2026-06-17
+
+### Dreams page shows real totals
+- The Dreams summary (cycle count, distilled, forgotten, total ops) now reflects
+  **all retained cycles**, not just the fetched page — `/api/dreams` returns a
+  `dream_summary()` aggregate alongside the page of reports. (The journal keeps the
+  last 200 cycles; the UI was counting only the 50 it fetched.)
+
 ## [0.4.14] — 2026-06-17
 
 ### Translations & local-model detection

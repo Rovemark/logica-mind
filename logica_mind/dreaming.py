@@ -120,6 +120,29 @@ def load_dreams(store, namespace: Optional[str] = None, limit: int = 50) -> List
         return []
 
 
+def dream_summary(store, namespace: Optional[str] = None) -> dict:
+    """Aggregate totals across ALL retained dream cycles (namespace-filtered), so
+    the UI summary shows real numbers, not just the fetched page."""
+    out = {"cycles": 0, "distilled": 0, "reinforced": 0, "forgotten": 0,
+           "derived": 0, "inferred": 0, "graph_edges": 0, "ops": 0}
+    path = _journal_path(store)
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            reports = json.load(f)
+        if namespace:
+            reports = [r for r in reports if r.get("namespace") == namespace or not r.get("namespace")]
+        out["cycles"] = len(reports)
+        for r in reports:
+            for k in ("distilled", "reinforced", "forgotten", "derived", "inferred", "graph_edges"):
+                out[k] += int(r.get(k) or 0)
+        out["ops"] = sum(out[k] for k in ("distilled", "reinforced", "forgotten", "derived", "inferred", "graph_edges"))
+    except Exception:
+        pass
+    return out
+
+
 class Dreamer:
     def __init__(
         self,

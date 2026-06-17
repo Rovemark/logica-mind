@@ -1211,10 +1211,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
 
                 # ---- new moats ----
                 elif path == "/api/dreams":
-                    from ..dreaming import load_dreams
+                    from ..dreaming import load_dreams, dream_summary
                     tgt_ns = ns if not is_all else None
-                    self._json({"dreams": load_dreams(mind.store, tgt_ns,
-                                                      limit=_int(qs, "limit", 50))})
+                    self._json({"dreams": load_dreams(mind.store, tgt_ns, limit=_int(qs, "limit", 50)),
+                                "summary": dream_summary(mind.store, tgt_ns)})
 
                 elif path == "/api/contested":
                     thresh = _float(qs, "threshold", 0.65)

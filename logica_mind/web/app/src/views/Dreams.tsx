@@ -3,7 +3,7 @@ import {
   Moon, Layers, Zap, Scissors, GitMerge, Brain, Network,
   AlertTriangle, TrendingDown, ChevronDown, ChevronUp, Activity, Sparkles
 } from "lucide-react";
-import { api, tShort, type DreamReport, type ContestedPair, type ForgetCurveEntry, type SurpriseEvent, type DreamCadence } from "../api";
+import { api, tShort, type DreamReport, type ContestedPair, type ForgetCurveEntry, type SurpriseEvent, type DreamCadence, type DreamSummary } from "../api";
 import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
 
@@ -326,32 +326,35 @@ function DreamSettings() {
 export default function Dreams({ ns }: { ns: string }) {
   const { t } = useI18n();
   const [dreams, setDreams] = useState<DreamReport[]>([]);
+  const [summary, setSummary] = useState<DreamSummary | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    api.dreams(ns).then(d => { setDreams(d.dreams || []); setLoaded(true); }).catch(() => setLoaded(true));
+    api.dreams(ns).then(d => { setDreams(d.dreams || []); setSummary(d.summary || null); setLoaded(true); }).catch(() => setLoaded(true));
     setPage(1);
   }, [ns]);
   const dpg = paginate(dreams, page, 8);
 
-  const totalOps  = dreams.reduce((a, r) => a + r.distilled + r.reinforced + r.forgotten + r.derived + r.inferred, 0);
-  const totalForgotten = dreams.reduce((a, r) => a + r.forgotten, 0);
-  const totalDistilled = dreams.reduce((a, r) => a + r.distilled, 0);
+  // real totals across ALL retained cycles (from the server), not just the page
+  const cycles         = summary?.cycles ?? dreams.length;
+  const totalOps       = summary?.ops ?? dreams.reduce((a, r) => a + r.distilled + r.reinforced + r.forgotten + r.derived + r.inferred, 0);
+  const totalForgotten = summary?.forgotten ?? dreams.reduce((a, r) => a + r.forgotten, 0);
+  const totalDistilled = summary?.distilled ?? dreams.reduce((a, r) => a + r.distilled, 0);
 
   return (
     <div className="fadein">
       <div className="flex items-center gap-3 mb-5">
         <h2 className="m-0 text-[18px] font-bold tracking-tight">{t("dream_journal")}</h2>
-        {dreams.length > 0 && (
-          <span className="text-[var(--dim2)] text-[12px]">{dreams.length} {t("dream_cycle").toLowerCase()}s</span>
+        {cycles > 0 && (
+          <span className="text-[var(--dim2)] text-[12px]">{cycles} {t("dream_cycle").toLowerCase()}s</span>
         )}
       </div>
 
       {/* summary strip — always visible */}
       {loaded && (
         <div className="flex gap-3 mb-4 flex-wrap max-[640px]:grid max-[640px]:grid-cols-2">
-          <StatCard icon={Moon}     value={dreams.length}    label={t("dream_cycle") + "s"} color="var(--accent2)"  />
+          <StatCard icon={Moon}     value={cycles}           label={t("dream_cycle") + "s"} color="var(--accent2)"  />
           <StatCard icon={Layers}   value={totalDistilled}   label={t("distilled")}          color="var(--accent)"   />
           <StatCard icon={Scissors} value={totalForgotten}   label={t("forgotten")}          color="var(--dim)"      />
           <StatCard icon={Activity} value={totalOps}         label={t("total_ops")}          color="var(--gold)"     />
