@@ -21,6 +21,7 @@ gets INJECTED, so the published recall benchmark is unaffected by design.
 """
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 from typing import Tuple
@@ -81,9 +82,25 @@ _GREETING = re.compile(r"(?i)^(hi|hello|hey|yo|oi|olá|ola|e?ai|eae|bom dia|boa 
 _SHELLISH = re.compile(r"^\s*(\$|sudo |cd |ls |git |npm |pip |node |python |make |docker |kubectl |"
                        r"rm |cp |mv |cat |echo |curl |wget )")
 _EMOJI_ONLY = re.compile(r"^\s*[\W☀-➿\U0001f000-\U0001faff]+\s*$")
-_FORCE = re.compile(r"(?i)\b(remember|recall|forget|my name|who am i|what did|last time|"
-                    r"yesterday|earlier|before|we discussed|you said|lembr|meu nome|quem sou|"
-                    r"ontem|antes|da última vez|conversamos|você disse|voce disse)\b")
+# Memory-referencing prompts force recall even when short. English is the
+# library's lingua franca; deployments in other languages extend the list via
+# LOGICA_MIND_FORCE_TERMS (a regex alternation, e.g. "lembr\\w*|sobre mim") so the
+# shipped library stays language-neutral instead of hardcoding any one locale.
+_FORCE_BASE = (r"remember|recall|forget|my name|who am i|what do you know|what did|last time|"
+               r"yesterday|earlier|before|we discussed|you said|memory|profile|summari[sz]e|"
+               r"about me|remind me")
+
+
+def _compile_force() -> "re.Pattern[str]":
+    extra = os.environ.get("LOGICA_MIND_FORCE_TERMS", "").strip()
+    src = _FORCE_BASE + (("|" + extra) if extra else "")
+    try:
+        return re.compile(rf"(?i)\b({src})\b")
+    except re.error:                       # a malformed override must never break the gate
+        return re.compile(rf"(?i)\b({_FORCE_BASE})\b")
+
+
+_FORCE = _compile_force()
 
 
 def should_retrieve(prompt: str, min_len: int = 12) -> Tuple[bool, bool]:

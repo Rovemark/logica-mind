@@ -3,6 +3,27 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.12] — 2026-06-16
+
+### Language-neutral retrieval gate
+- **No hardcoded locale in the shipped library**: the force-recall list is now
+  English only (the library's lingua franca) and reads extra terms from
+  `LOGICA_MIND_FORCE_TERMS` (a regex alternation, e.g. `lembr\w*|sobre mim`). The
+  previous gate baked Portuguese keywords into an i18n library; deployments now
+  extend it for their own language via env instead of forking. A malformed
+  override falls back to the base list rather than breaking the gate. The
+  language-agnostic default (recall on any non-trivial prompt) is unchanged, so
+  this only affects which *short* prompts force recall.
+
+## [0.4.11] — 2026-06-16
+
+### Recall fires when you ask about memory
+- **Stronger retrieval gate**: prompts like "what do you know about me", "summarize
+  me", "look at your memory", "remind me what we were doing" now reliably *force*
+  recall+injection. The gate also matches inflected forms (`lembra`/`lembrar`,
+  `resuma`/`resumir`) that the old word-boundary pattern missed. Memory-about-the-user
+  requests were the most likely to silently skip injection; now they don't.
+
 ## [0.4.10] — 2026-06-16
 
 ### Dashboard & server robustness

@@ -422,7 +422,27 @@ def test_context_is_injection_framed_and_sanitized():
     assert should_retrieve("hi")[0] is False
     assert should_retrieve("what's my name?")[0] is True
     assert should_retrieve("what did we decide about the database schema yesterday")[0] is True
+    # "summarize me / what do you know about me / remind me" must FORCE recall —
+    # exactly the prompts users expect to hit memory (English: the lib's lingua franca)
+    assert should_retrieve("what do you know about me?") == (True, True)
+    assert should_retrieve("summarize me in a poem") == (True, True)
+    assert should_retrieve("remind me what we were doing") == (True, True)
     assert frame("") == ""                                       # empty stays empty
+
+
+def test_force_terms_are_language_extensible(monkeypatch):
+    # the shipped library is English-only (no hardcoded non-English locale); other
+    # languages extend the force list via env, so a PT deployment forces "lembra"
+    from logica_mind import guard
+    base = guard._compile_force()
+    assert not base.search("lembra o que falamos")              # PT not baked in
+    monkeypatch.setenv("LOGICA_MIND_FORCE_TERMS", r"lembr\w*|sobre mim")
+    pt = guard._compile_force()
+    assert pt.search("lembra o que falamos") and pt.search("o que você sabe sobre mim")
+    assert pt.search("what do you know about me")               # English core still works
+    # a malformed override falls back to the base instead of crashing the gate
+    monkeypatch.setenv("LOGICA_MIND_FORCE_TERMS", "(unclosed")
+    assert guard._compile_force().search("recall this")
 
 
 def test_neighbor_evolution_inherits_dimension():
