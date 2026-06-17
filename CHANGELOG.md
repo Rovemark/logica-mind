@@ -3,6 +3,12 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.17] — 2026-06-17
+
+### Housekeeping
+- Use generic, neutral example names across the test suite and docs (no behavior
+  change).
+
 ## [0.4.16] — 2026-06-17
 
 ### Consolidation distills fresh content first
@@ -320,7 +326,7 @@ All notable changes to Logica Mind. Format loosely follows
 ### Graph-aware recall (retrieval 2.0)
 - **Recall now uses the knowledge graph**: when the query names a graph entity,
   memories about its **1-hop neighbours** rank up too (`graph_boost`, on by
-  default) — ask about *Voyspark* and the facts connected to it surface, not
+  default) — ask about a project and the facts connected to it surface, not
   just the strings that literally match.
 - **`context()` injects the graph's own knowledge**: a compact
   `## Knowledge graph` section with the query entities' strongest facts,
@@ -344,7 +350,7 @@ All notable changes to Logica Mind. Format loosely follows
 
 ### Entity resolution & editing
 - **Read-time entity resolution**: edge endpoints are canonicalized through the
-  alias map, so casing/spacing variants (`LogicaOS` / `Logica OS`) and explicit
+  alias map, so casing/spacing variants (`OpenAI` / `Open AI`) and explicit
   merges collapse onto ONE node everywhere (viz, dimensions, co-mentions,
   facets) without rewriting stored rows.
 - **Rename/merge in the dashboard**: every entity panel has a merge field, and

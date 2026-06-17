@@ -86,7 +86,7 @@ class TemporalGraph:
         # alias rows live in the GRAPH layer too — never expose them as edges
         out = [_memory_to_edge(m) for m in mems if "alias" not in (m.tags or [])]
         # ENTITY RESOLUTION at read time: canonicalize endpoints through the alias
-        # map, so casing/spacing variants ('LogicaOS'/'Logica OS') and explicit
+        # map, so casing/spacing variants ('OpenAI'/'Open AI') and explicit
         # add_alias() merges collapse onto ONE node everywhere downstream (viz,
         # dimensions, co-mentions, facets) — without rewriting stored rows.
         amap = self._alias_map()

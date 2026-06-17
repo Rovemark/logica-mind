@@ -36,7 +36,7 @@ def test_all_is_uncapped_enumeration():
 
 def test_tagged_whitelist_and_values():
     m = _mind()
-    m.log("deploy aprovado pelo Astro", metadata={"channel": "whatsapp"})
+    m.log("deploy aprovado pelo Maya", metadata={"channel": "whatsapp"})
     m.log("outra conversa", metadata={"channel": "telegram"})
     got = dict()
     for content, val in m.store.tagged("t", "channel"):
@@ -47,27 +47,27 @@ def test_tagged_whitelist_and_values():
 
 def test_entity_facets_vote_channel_onto_mentions():
     m = _mind()
-    _edge(m, "Astro", "leads", "LogicaOS", st="Person", ot="Product")
-    m.log("Astro confirmou o deploy do LogicaOS hoje", metadata={"channel": "whatsapp"})
-    m.log("Astro de novo no mesmo canal", metadata={"channel": "whatsapp"})
-    m.log("Astro apareceu uma vez aqui", metadata={"channel": "voice"})
-    facets = m._entity_facets(["t"], ["Astro", "LogicaOS"], "channel")
-    assert facets.get("Astro") == "whatsapp"        # 2 votos x 1
-    assert facets.get("LogicaOS") == "whatsapp"
+    _edge(m, "Maya", "leads", "AcmeCorp", st="Person", ot="Product")
+    m.log("Maya confirmou o deploy do AcmeCorp hoje", metadata={"channel": "whatsapp"})
+    m.log("Maya de novo no mesmo canal", metadata={"channel": "whatsapp"})
+    m.log("Maya apareceu uma vez aqui", metadata={"channel": "voice"})
+    facets = m._entity_facets(["t"], ["Maya", "AcmeCorp"], "channel")
+    assert facets.get("Maya") == "whatsapp"        # 2 votos x 1
+    assert facets.get("AcmeCorp") == "whatsapp"
 
 
 def test_graph_viz_nodes_carry_type_dimension_channel():
     m = _mind()
-    _edge(m, "Astro", "leads", "LogicaOS", st="Person", ot="Product")
-    m.log("Astro fechou contrato do LogicaOS", metadata={"channel": "telegram"})
-    m.remember("Astro is focused on the LogicaOS launch", extract=False,
+    _edge(m, "Maya", "leads", "AcmeCorp", st="Person", ot="Product")
+    m.log("Maya fechou contrato do AcmeCorp", metadata={"channel": "telegram"})
+    m.remember("Maya is focused on the AcmeCorp launch", extract=False,
                metadata={"dimension": "project_status"})
     viz = m.graph_viz(namespace="t")
     nodes = {n["id"]: n for n in viz["nodes"]}
-    assert nodes["Astro"]["type"] == "Person"
-    assert nodes["LogicaOS"]["type"] == "Product"
-    assert nodes["Astro"].get("channel") == "telegram"
-    assert nodes["Astro"].get("dimension") == "project_status"
+    assert nodes["Maya"]["type"] == "Person"
+    assert nodes["AcmeCorp"]["type"] == "Product"
+    assert nodes["Maya"].get("channel") == "telegram"
+    assert nodes["Maya"].get("dimension") == "project_status"
 
 
 def test_graph_viz_cache_hits_and_invalidates():
@@ -84,10 +84,10 @@ def test_graph_viz_cache_hits_and_invalidates():
 
 def test_graph_aware_recall_boosts_neighbour_memories():
     m = _mind()
-    _edge(m, "Voyspark", "focuses_on", "SEO")
+    _edge(m, "Northwind", "focuses_on", "SEO")
     m.remember("SEO strategy needs better backlinks", extract=False)
     m.remember("nota completamente alheia sobre macarrão", extract=False)
-    hits = m.recall("me fala do Voyspark", limit=5)
+    hits = m.recall("me fala do Northwind", limit=5)
     by = {h.memory.content: h for h in hits}
     seo = next(v for k, v in by.items() if "SEO" in k)
     # a memória do VIZINHO (SEO) recebe o graph_boost — recall é graph-aware
@@ -98,11 +98,11 @@ def test_graph_aware_recall_boosts_neighbour_memories():
 
 def test_context_includes_knowledge_graph_facts():
     m = _mind()
-    _edge(m, "Voyspark", "focuses_on", "SEO")
+    _edge(m, "Northwind", "focuses_on", "SEO")
     m.remember("SEO strategy doc", extract=False)
-    block = m.context("qual o status do Voyspark", token_budget=800)
+    block = m.context("qual o status do Northwind", token_budget=800)
     assert "## Knowledge graph" in block
-    assert "Voyspark focuses on SEO" in block
+    assert "Northwind focuses on SEO" in block
 
 
 def test_offline_heuristic_extractor_tags_dimensions():
@@ -120,15 +120,15 @@ def test_offline_heuristic_extractor_tags_dimensions():
 
 def test_alias_merges_existing_nodes_at_read_time():
     m = _mind()
-    _edge(m, "Logica OS", "uses", "SQLite")
-    _edge(m, "LogicaOS", "ships", "Dashboard")      # variação de grafia → MESMO nó
+    _edge(m, "Acme Corp", "uses", "SQLite")
+    _edge(m, "AcmeCorp", "ships", "Dashboard")      # variação de grafia → MESMO nó
     subs = {e.subject for e in m.graph.edges(include_history=True)}
-    logica = [s for s in subs if "logica" in s.lower().replace(" ", "")]
-    assert len(set(logica)) == 1, f"variações deviam colapsar num nó só: {logica}"
+    names = [s for s in subs if "acme" in s.lower().replace(" ", "")]
+    assert len(set(names)) == 1, f"variações deviam colapsar num nó só: {names}"
     # rename/merge explícito: tudo resolve pro novo nome canônico
-    m.graph.add_alias(logica[0], "Logica Mind OS")
+    m.graph.add_alias(names[0], "Acme Industries")
     subs2 = {e.subject for e in m.graph.edges(include_history=True)}
-    assert "Logica Mind OS" in subs2
+    assert "Acme Industries" in subs2
 
 
 def test_reembed_migrates_embedding_dimension():
@@ -152,11 +152,11 @@ def test_reembed_migrates_embedding_dimension():
 
 def test_mentions_is_superset_of_precise_match():
     m = _mind()
-    _edge(m, "Voyspark", "ships", "Artigos")
-    m.log("o Voyspark publicou dez artigos hoje")
+    _edge(m, "Northwind", "ships", "Artigos")
+    m.log("o Northwind publicou dez artigos hoje")
     m.log("conversa que não menciona nada disso")
-    cands = m.store.mentions("t", "Voyspark")
-    et = _tokset("Voyspark")
+    cands = m.store.mentions("t", "Northwind")
+    et = _tokset("Northwind")
     precise = [x for x in m.store.all("t", with_embeddings=False)
                if et and et <= _tokset(x.content)]
     cand_ids = {c.id for c in cands}

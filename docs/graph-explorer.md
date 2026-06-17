@@ -70,7 +70,7 @@ or over REST:
 
 ```bash
 curl -X POST http://127.0.0.1:8420/api/log \
-  -d '{"namespace":"astro","text":"…","channel":"telegram"}'
+  -d '{"namespace":"my-agent","text":"…","channel":"telegram"}'
 ```
 
 Each channel-tagged memory **votes its channel onto every graph entity it
