@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "central_entities": "中心的エンティティ",
   "relations_word": "リレーション",
   "shared_word": "共有",
-  "observations_foot": "時系列グラフから構造的に検出 — 接続性と共起から、メモリの成長に応じて再計算されます。"
+  "observations_foot": "時系列グラフから構造的に検出 — 接続性と共起から、メモリの成長に応じて再計算されます。",
+  "intg_pick_hint": "タップしてマインド全体に使用",
+  "intg_click_use": "このモデルをマインド全体に使う",
+  "intg_click_off": "オフにする（LLMなしで書き込み）",
+  "dream_cadence": "ドリームのスケジュール",
+  "dream_interval": "実行間隔（時間）",
+  "dream_batch": "サイクルごとの蒸留ターン数",
+  "dream_auto_on": "自動",
+  "dream_auto_off": "一時停止",
+  "dream_cadence_hint": "ドリームの実行頻度と、毎回いくつの生のターンを事実に蒸留するか。接続されたLLMが必要です（設定→連携）。",
+  "saved": "保存しました"
 };
 export default d;

@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "central_entities": "Entità centrali",
   "relations_word": "relazioni",
   "shared_word": "condivisi",
-  "observations_foot": "Rilevati strutturalmente dal grafo temporale — connettività e co-occorrenza, ricalcolati man mano che la memoria cresce."
+  "observations_foot": "Rilevati strutturalmente dal grafo temporale — connettività e co-occorrenza, ricalcolati man mano che la memoria cresce.",
+  "intg_pick_hint": "tocca per usarlo per tutta la mente",
+  "intg_click_use": "Usa questo modello per tutta la mente",
+  "intg_click_off": "Disattiva (scrittura senza LLM)",
+  "dream_cadence": "Pianificazione del sogno",
+  "dream_interval": "Esegui ogni (ore)",
+  "dream_batch": "Turni distillati per ciclo",
+  "dream_auto_on": "Automatico",
+  "dream_auto_off": "In pausa",
+  "dream_cadence_hint": "Con quale frequenza viene eseguito il sogno e quanti turni grezzi distilla in fatti ogni volta. Richiede un LLM connesso (Impostazioni → Integrazioni).",
+  "saved": "Salvato"
 };
 export default d;

@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "central_entities": "الكيانات المركزية",
   "relations_word": "علاقات",
   "shared_word": "مشترك",
-  "observations_foot": "مُكتشَفة بنيويًا من الرسم الزمني — الترابط والتزامن، يُعاد حسابها مع نمو الذاكرة."
+  "observations_foot": "مُكتشَفة بنيويًا من الرسم الزمني — الترابط والتزامن، يُعاد حسابها مع نمو الذاكرة.",
+  "intg_pick_hint": "انقر لاستخدامه للعقل كله",
+  "intg_click_use": "استخدم هذا النموذج للعقل كله",
+  "intg_click_off": "إيقاف (كتابة بدون LLM)",
+  "dream_cadence": "جدول الحلم",
+  "dream_interval": "التشغيل كل (ساعات)",
+  "dream_batch": "الأدوار المقطّرة لكل دورة",
+  "dream_auto_on": "تلقائي",
+  "dream_auto_off": "متوقّف مؤقتًا",
+  "dream_cadence_hint": "كم مرة يعمل الحلم وكم دورًا خامًا يقطّره إلى حقائق في كل مرة. يتطلب نموذج LLM متصلاً (الإعدادات ← التكاملات).",
+  "saved": "تم الحفظ"
 };
 export default d;

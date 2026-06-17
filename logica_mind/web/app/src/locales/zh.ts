@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "central_entities": "中心实体",
   "relations_word": "关系",
   "shared_word": "共享",
-  "observations_foot": "从时间图谱中按结构检测——连通性与共现，随记忆增长重新计算。"
+  "observations_foot": "从时间图谱中按结构检测——连通性与共现，随记忆增长重新计算。",
+  "intg_pick_hint": "点按以用于整个心智",
+  "intg_click_use": "用此模型服务整个心智",
+  "intg_click_off": "关闭（无 LLM 写入）",
+  "dream_cadence": "梦境计划",
+  "dream_interval": "运行间隔（小时）",
+  "dream_batch": "每个周期蒸馏的轮次",
+  "dream_auto_on": "自动",
+  "dream_auto_off": "已暂停",
+  "dream_cadence_hint": "梦境运行的频率，以及每次将多少原始轮次蒸馏成事实。需要连接 LLM（设置 → 集成）。",
+  "saved": "已保存"
 };
 export default d;

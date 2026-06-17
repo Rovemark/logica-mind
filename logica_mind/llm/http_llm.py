@@ -85,11 +85,13 @@ class AnthropicCompatLLM(LLM):
 
 
 # Common local OpenAI-compatible servers, probed in order when nothing is
-# configured explicitly. (host, default-model, env-for-model)
+# configured explicitly. (host, default-model). `mlx_lm.server` is OpenAI-
+# compatible, so MLX models served that way are picked up here too.
 LOCAL_OPENAI_ENDPOINTS = [
     ("http://127.0.0.1:11434/v1", "llama3.1"),    # Ollama
     ("http://127.0.0.1:1234/v1", "local-model"),  # LM Studio
-    ("http://127.0.0.1:8080/v1", "local-model"),  # llama.cpp / vLLM
+    ("http://127.0.0.1:8080/v1", "local-model"),  # llama.cpp / vLLM / MLX (30B slot)
+    ("http://127.0.0.1:8081/v1", "local-model"),  # MLX (4B slot)
     ("http://127.0.0.1:8000/v1", "local-model"),  # vLLM default
 ]
 

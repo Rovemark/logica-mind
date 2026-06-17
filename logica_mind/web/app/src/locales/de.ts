@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "central_entities": "Zentrale Entitäten",
   "relations_word": "Beziehungen",
   "shared_word": "geteilt",
-  "observations_foot": "Strukturell aus dem zeitlichen Graphen erkannt — Konnektivität und gemeinsames Auftreten, neu berechnet, während das Gedächtnis wächst."
+  "observations_foot": "Strukturell aus dem zeitlichen Graphen erkannt — Konnektivität und gemeinsames Auftreten, neu berechnet, während das Gedächtnis wächst.",
+  "intg_pick_hint": "tippen, um es für den ganzen Verstand zu nutzen",
+  "intg_click_use": "Dieses Modell für den ganzen Verstand nutzen",
+  "intg_click_off": "Ausschalten (Schreiben ohne LLM)",
+  "dream_cadence": "Traum-Zeitplan",
+  "dream_interval": "Ausführen alle (Stunden)",
+  "dream_batch": "Destillierte Runden pro Zyklus",
+  "dream_auto_on": "Automatisch",
+  "dream_auto_off": "Pausiert",
+  "dream_cadence_hint": "Wie oft der Traum läuft und wie viele rohe Runden er jedes Mal zu Fakten destilliert. Benötigt ein verbundenes LLM (Einstellungen → Integrationen).",
+  "saved": "Gespeichert"
 };
 export default d;

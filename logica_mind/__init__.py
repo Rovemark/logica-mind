@@ -11,6 +11,6 @@ Quickstart (no API keys needed):
 from .core import LogicaMind
 from .types import Memory, MemoryLayer, SearchResult
 
-__version__ = "0.4.13"
+__version__ = "0.4.14"
 
 __all__ = ["LogicaMind", "Memory", "MemoryLayer", "SearchResult", "__version__"]

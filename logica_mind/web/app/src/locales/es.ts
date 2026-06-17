@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "import_bundle": "Importar bundle",
   "importing_bundle": "Importando…",
   "import_success": "Importado",
-  "import_error": "Error en importación"
+  "import_error": "Error en importación",
+  "intg_pick_hint": "toca para usar en toda la mente",
+  "intg_click_use": "Usar este modelo en toda la mente",
+  "intg_click_off": "Desactivar (escritura sin LLM)",
+  "dream_cadence": "Programación del sueño",
+  "dream_interval": "Ejecutar cada (horas)",
+  "dream_batch": "Turnos destilados por ciclo",
+  "dream_auto_on": "Automático",
+  "dream_auto_off": "En pausa",
+  "dream_cadence_hint": "Con qué frecuencia se ejecuta el sueño y cuántos turnos crudos destila en hechos cada vez. Necesita un LLM conectado (Ajustes → Integraciones).",
+  "saved": "Guardado"
 };
 export default d;

@@ -3,6 +3,15 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.14] — 2026-06-17
+
+### Translations & local-model detection
+- **The LLM picker and Dream schedule UI are now translated** into all 14 dashboard
+  languages (was English-only via fallback).
+- **MLX detection**: the local-model probe now also covers the port MLX's
+  `mlx_lm.server` 4-bit slot uses, so an MLX model served OpenAI-style is picked up
+  alongside Ollama / LM Studio / llama.cpp / vLLM.
+
 ## [0.4.13] — 2026-06-16
 
 ### Pick the LLM that serves your memory — any model, no key required

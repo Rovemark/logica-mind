@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "central_entities": "Entitas sentral",
   "relations_word": "relasi",
   "shared_word": "bersama",
-  "observations_foot": "Terdeteksi secara struktural dari grafik temporal — konektivitas dan ko-okurensi, dihitung ulang seiring memori bertumbuh."
+  "observations_foot": "Terdeteksi secara struktural dari grafik temporal — konektivitas dan ko-okurensi, dihitung ulang seiring memori bertumbuh.",
+  "intg_pick_hint": "ketuk untuk dipakai seluruh mind",
+  "intg_click_use": "Gunakan model ini untuk seluruh mind",
+  "intg_click_off": "Matikan (tulis tanpa LLM)",
+  "dream_cadence": "Jadwal mimpi",
+  "dream_interval": "Jalankan setiap (jam)",
+  "dream_batch": "Giliran disuling per siklus",
+  "dream_auto_on": "Otomatis",
+  "dream_auto_off": "Dijeda",
+  "dream_cadence_hint": "Seberapa sering mimpi berjalan dan berapa banyak giliran mentah yang disuling menjadi fakta setiap kali. Perlu LLM terhubung (Pengaturan → Integrasi).",
+  "saved": "Tersimpan"
 };
 export default d;

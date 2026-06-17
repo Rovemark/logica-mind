@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "central_entities": "중심 엔터티",
   "relations_word": "관계",
   "shared_word": "공유됨",
-  "observations_foot": "시간적 그래프에서 구조적으로 감지됨 — 연결성과 동시 발생으로, 메모리가 늘어남에 따라 재계산됨."
+  "observations_foot": "시간적 그래프에서 구조적으로 감지됨 — 연결성과 동시 발생으로, 메모리가 늘어남에 따라 재계산됨.",
+  "intg_pick_hint": "탭하여 전체 마인드에 사용",
+  "intg_click_use": "이 모델을 전체 마인드에 사용",
+  "intg_click_off": "끄기 (LLM 없이 기록)",
+  "dream_cadence": "드림 일정",
+  "dream_interval": "실행 간격 (시간)",
+  "dream_batch": "주기당 증류 턴 수",
+  "dream_auto_on": "자동",
+  "dream_auto_off": "일시중지",
+  "dream_cadence_hint": "드림이 얼마나 자주 실행되고 매번 몇 개의 원시 턴을 사실로 증류하는지. 연결된 LLM이 필요합니다 (설정 → 통합).",
+  "saved": "저장됨"
 };
 export default d;

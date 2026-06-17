@@ -478,6 +478,16 @@ const d: Record<string, string> = {
   "central_entities": "Merkezi varlıklar",
   "relations_word": "ilişkiler",
   "shared_word": "paylaşılan",
-  "observations_foot": "Zamansal grafikten yapısal olarak algılandı — bağlantılılık ve birlikte oluşum, bellek büyüdükçe yeniden hesaplanır."
+  "observations_foot": "Zamansal grafikten yapısal olarak algılandı — bağlantılılık ve birlikte oluşum, bellek büyüdükçe yeniden hesaplanır.",
+  "intg_pick_hint": "tüm zihin için kullanmak üzere dokun",
+  "intg_click_use": "Bu modeli tüm zihin için kullan",
+  "intg_click_off": "Kapat (LLM'siz yazma)",
+  "dream_cadence": "Rüya programı",
+  "dream_interval": "Şu kadarda bir çalıştır (saat)",
+  "dream_batch": "Döngü başına damıtılan tur",
+  "dream_auto_on": "Otomatik",
+  "dream_auto_off": "Duraklatıldı",
+  "dream_cadence_hint": "Rüyanın ne sıklıkta çalıştığı ve her seferinde kaç ham turu gerçeklere damıttığı. Bağlı bir LLM gerekir (Ayarlar → Entegrasyonlar).",
+  "saved": "Kaydedildi"
 };
 export default d;
