@@ -551,10 +551,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       g.t.x = mx - (mx - g.t.x) * f; g.t.y = my - (my - g.t.y) * f; g.t.k *= f; };
     const onDown = (e: MouseEvent) => { g.initialSettle = false; const r = cv.getBoundingClientRect(), n = nodeAt(e.clientX - r.left, e.clientY - r.top);
       downPos = { x: e.clientX, y: e.clientY }; downNode = n;
-      if (n) { g.drag = n; n.fx = n.x; n.fy = n.y; mode = "node"; g.alpha = 1; } else { mode = "pan"; g.pan = true; } last = { x: e.clientX, y: e.clientY }; };
+      if (n) { g.drag = n; n.fx = n.x; n.fy = n.y; mode = "node"; g.alpha = 0.5; if (g.sim) { g._vd = g.sim.velocityDecay(); g.sim.velocityDecay(0.78); } } else { mode = "pan"; g.pan = true; } last = { x: e.clientX, y: e.clientY }; };
     const onMove = (e: MouseEvent) => { const r = cv.getBoundingClientRect();
       if (mode === "pan") { g.t.x += e.clientX - last.x; g.t.y += e.clientY - last.y; last = { x: e.clientX, y: e.clientY }; }
-      else if (mode === "node" && g.drag) { g.drag.fx = (e.clientX - r.left - g.t.x) / g.t.k; g.drag.fy = (e.clientY - r.top - g.t.y) / g.t.k; g.alpha = Math.max(g.alpha, 0.3); }
+      else if (mode === "node" && g.drag) { g.drag.fx = (e.clientX - r.left - g.t.x) / g.t.k; g.drag.fy = (e.clientY - r.top - g.t.y) / g.t.k; g.alpha = Math.max(g.alpha, 0.18); }
       else { const n = nodeAt(e.clientX - r.left, e.clientY - r.top); const id = n ? n.id : null;
         if (id !== g.hover) { g.hover = id; hoverCbRef.current?.(id, e.clientX - r.left, e.clientY - r.top); }
         cv.style.cursor = n || anchorAt(e.clientX - r.left, e.clientY - r.top) ? "pointer" : "grab"; } };
@@ -573,7 +573,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
           if (next !== g.groupSpot) { g.groupSpot = next; g.dirty = true; }
         }
       }
-      if (g.drag) { g.drag.fx = null; g.drag.fy = null; } mode = null; g.drag = null; downPos = null; downNode = null;
+      if (g.drag) { g.drag.fx = null; g.drag.fy = null; if (g.sim && g._vd != null) { g.sim.velocityDecay(g._vd); g._vd = null; } } mode = null; g.drag = null; downPos = null; downNode = null;
       g.pan = false; g.dirty = true;   // end pan/drag → one rich repaint
       // after a PAN only (not a node drag), the graph slid under a now-stale g.hover →
       // re-evaluate at the release point so the highlight matches the cursor.
@@ -593,16 +593,16 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       if (e.touches.length === 2) { mode = "pinch"; g.pan = true; pinch = pinchInfo(e, r); e.preventDefault(); return; }
       const t = e.touches[0], n = nodeAt(t.clientX - r.left, t.clientY - r.top);
       tStart = performance.now(); tNode = n; tMoved = false;
-      if (n) { g.drag = n; n.fx = n.x; n.fy = n.y; mode = "node"; g.alpha = 1; } else { mode = "pan"; g.pan = true; } last = { x: t.clientX, y: t.clientY }; e.preventDefault(); };
+      if (n) { g.drag = n; n.fx = n.x; n.fy = n.y; mode = "node"; g.alpha = 0.5; if (g.sim) { g._vd = g.sim.velocityDecay(); g.sim.velocityDecay(0.78); } } else { mode = "pan"; g.pan = true; } last = { x: t.clientX, y: t.clientY }; e.preventDefault(); };
     const onTMove = (e: TouchEvent) => { const r = cv.getBoundingClientRect(); tMoved = true;
       if (mode === "pinch" && e.touches.length === 2) { const pi = pinchInfo(e, r), f = pi.dist / (pinch.dist || pi.dist);
         g.t.x = pi.mx - (pi.mx - g.t.x) * f; g.t.y = pi.my - (pi.my - g.t.y) * f; g.t.k *= f; pinch = pi; }
-      else if (mode === "node" && g.drag && e.touches[0]) { const t = e.touches[0]; g.drag.fx = (t.clientX - r.left - g.t.x) / g.t.k; g.drag.fy = (t.clientY - r.top - g.t.y) / g.t.k; g.alpha = Math.max(g.alpha, 0.3); }
+      else if (mode === "node" && g.drag && e.touches[0]) { const t = e.touches[0]; g.drag.fx = (t.clientX - r.left - g.t.x) / g.t.k; g.drag.fy = (t.clientY - r.top - g.t.y) / g.t.k; g.alpha = Math.max(g.alpha, 0.18); }
       else if (mode === "pan" && e.touches[0]) { const t = e.touches[0]; g.t.x += t.clientX - last.x; g.t.y += t.clientY - last.y; last = { x: t.clientX, y: t.clientY }; }
       e.preventDefault(); };
     const onTEnd = (e: TouchEvent) => {
       if (tNode && !tMoved && performance.now() - tStart < 400) pickRef.current(tNode.id);  // tap → open detail
-      if (e.touches.length === 0) { if (g.drag) { g.drag.fx = null; g.drag.fy = null; } mode = null; g.drag = null; pinch = null; tNode = null; g.pan = false; g.dirty = true; }
+      if (e.touches.length === 0) { if (g.drag) { g.drag.fx = null; g.drag.fy = null; if (g.sim && g._vd != null) { g.sim.velocityDecay(g._vd); g._vd = null; } } mode = null; g.drag = null; pinch = null; tNode = null; g.pan = false; g.dirty = true; }
       else if (e.touches.length === 1) { mode = "pan"; g.pan = true; last = { x: e.touches[0].clientX, y: e.touches[0].clientY }; pinch = null; } };
     cv.addEventListener("touchstart", onTStart, { passive: false });
     cv.addEventListener("touchmove", onTMove, { passive: false });
