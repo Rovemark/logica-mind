@@ -861,6 +861,37 @@ def test_session_names_path_resolves_through_multistore(tmp_path):
     assert websrv._session_names_path(_Bare()) is None
 
 
+def test_set_llm_rewires_and_with_llm_is_isolated():
+    from logica_mind.llm.base import LLM
+
+    class _Fake(LLM):
+        name = "fake"
+        available = True
+        def complete(self, prompt, system=None): return "ok"
+
+    m = LogicaMind(namespace="t", store=InMemoryStore())
+    assert m.llm.available is False                       # keyless by default
+    assert m.set_llm(_Fake()) is True
+    assert m.llm.available and m.graph_extractor.available
+    sib = m.with_llm(None)                                # keyless sibling, same store
+    assert sib.store is m.store and sib.namespace == "t"
+    assert sib.llm.available is False and m.llm.available is True   # base unchanged
+
+
+def test_auto_llm_is_network_free_without_config(monkeypatch):
+    from logica_mind import providers
+    for k in ("LOGICA_MIND_LLM", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+              "LOGICA_MIND_LLM_BASE_URL", "OPENAI_BASE_URL", "ANTHROPIC_BASE_URL",
+              "LOGICA_MIND_AUTODETECT_LOCAL"):
+        monkeypatch.delenv(k, raising=False)
+    assert providers._auto_order() == ["anthropic", "openai"]      # no port/gateway probe
+    assert providers.auto_llm() is None
+    # a configured but unreachable gateway must resolve to None, never raise
+    monkeypatch.setenv("LOGICA_MIND_LLM", "anthropic-gateway")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:59321/v1/messages")
+    assert providers.build_llm_by_id("anthropic-gateway") is None
+
+
 def test_capture_failure_is_logged(monkeypatch, tmp_path):
     logf = tmp_path / "capture.log"
     monkeypatch.setattr(hooks, "_capture_log_path", lambda: str(logf))

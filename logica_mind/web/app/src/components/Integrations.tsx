@@ -17,10 +17,23 @@ export default function Integrations({ onBack, embedded }: { onBack?: () => void
   const { t } = useI18n();
   const [data, setData] = useState<IntegrationsData | null>(null);
   const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.integrations().then(setData).catch(() => setErr(true));
-  }, []);
+  const refresh = () => api.integrations().then(setData).catch(() => setErr(true));
+  useEffect(() => { refresh(); }, []);
+
+  // pick which LLM serves the whole mind. Clicking the active one turns it off
+  // (keyless). Applies live and persists across restart.
+  const pickLLM = async (id: string) => {
+    const activeId = data?.active.llm.available ? data.active.llm.id : null;
+    const target = id === activeId ? "none" : id;
+    setBusy(id);
+    try {
+      const r = await api.setLLM(target);
+      if (!r.ok && r.error) alert(r.error);
+    } catch { /* fail-soft */ }
+    finally { await refresh(); setBusy(null); }
+  };
 
   return (
     <div className="fadein">
@@ -55,7 +68,7 @@ export default function Integrations({ onBack, embedded }: { onBack?: () => void
               value={data.active.reranker || t("intg_none")} ok={!!data.active.reranker} />
           </div>
 
-          <Group title={t("intg_llms")} icon={Sparkles} options={data.available.llm} activeId={data.active.llm.available ? data.active.llm.id : null} t={t} />
+          <Group title={t("intg_llms")} icon={Sparkles} options={data.available.llm} activeId={data.active.llm.available ? data.active.llm.id : null} t={t} onPick={pickLLM} busy={busy} />
           <Group title={t("intg_embedders")} icon={Layers} options={data.available.embedders} activeId={data.active.embedder.id} t={t} />
           <Group title={t("intg_rerankers")} icon={ListOrdered} options={data.available.rerankers} activeId={data.active.reranker} t={t} />
           <Group title={t("intg_stores")} icon={Boxes} options={data.available.stores} activeId={data.active.store.id} activeBackends={data.active.store.backends} t={t} />
@@ -81,29 +94,41 @@ function ActiveCard({ icon: Icon, label, value, ok }: { icon: any; label: string
   );
 }
 
-function Group({ title, icon: Icon, options, activeId, activeBackends, t }: {
-  title: string; icon: any; options: IntegrationOption[]; activeId?: string | null; activeBackends?: string[]; t: (k: any, v?: any) => string;
+function Group({ title, icon: Icon, options, activeId, activeBackends, t, onPick, busy }: {
+  title: string; icon: any; options: IntegrationOption[]; activeId?: string | null; activeBackends?: string[];
+  t: (k: any, v?: any) => string; onPick?: (id: string) => void; busy?: string | null;
 }) {
   return (
     <div className="mb-4">
       <div className="flex items-center gap-1.5 text-[var(--dim2)] text-[11px] uppercase tracking-[.7px] mb-2">
         <Icon size={12} /> {title}
+        {onPick && <span className="ml-auto normal-case tracking-normal text-[10px] text-[var(--dim2)] font-normal">{t("intg_pick_hint")}</span>}
       </div>
       <div className="flex flex-col gap-1.5">
         {options.map((o) => {
           const isActive = (activeId && o.id === activeId) || (activeBackends && activeBackends.includes(o.id));
           const s: Status = isActive ? "active" : statusOf(o, null);
-          return (
-            <div key={o.id} className="card-surface px-3 py-2 flex items-center gap-2.5">
-              <div className="min-w-0 flex-1">
+          const loading = busy === o.id;
+          const inner = (
+            <>
+              <div className="min-w-0 flex-1 text-left">
                 <div className="flex items-center gap-2">
                   <span className="text-[12.5px] font-semibold truncate">{o.label}</span>
                   {o.model && <span className="text-[10.5px] text-[var(--dim2)] truncate">{o.model}</span>}
                 </div>
                 {o.blurb && <div className="text-[11px] text-[var(--dim2)] leading-snug mt-0.5">{o.blurb}</div>}
               </div>
-              <Badge s={s} env={o.env} t={t} />
-            </div>
+              {loading ? <span className="text-[10px] text-[var(--dim2)]">…</span> : <Badge s={s} env={o.env} t={t} />}
+            </>
+          );
+          return onPick ? (
+            <button key={o.id} onClick={() => !loading && onPick(o.id)} disabled={loading}
+              title={isActive ? t("intg_click_off") : t("intg_click_use")}
+              className={`card-surface px-3 py-2 flex items-center gap-2.5 w-full text-left transition-colors hover:border-[var(--accent)] ${isActive ? "border-[var(--good)]" : ""} ${loading ? "opacity-60" : "cursor-pointer"}`}>
+              {inner}
+            </button>
+          ) : (
+            <div key={o.id} className="card-surface px-3 py-2 flex items-center gap-2.5">{inner}</div>
           );
         })}
       </div>

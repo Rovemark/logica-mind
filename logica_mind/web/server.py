@@ -64,6 +64,40 @@ def _save_session_names(store, names: dict) -> None:
         pass
 
 
+# ---- persisted user settings (LLM choice + dream cadence) -------------------
+DREAM_DEFAULTS = {"interval_hours": 3.0, "batch": 40, "auto": True}
+
+
+def _settings_path(store) -> "str | None":
+    p = _session_names_path(store)        # reuse the MultiStore-aware path resolver
+    return p.replace("_session_names.json", "_settings.json") if p else None
+
+
+def _load_settings(store) -> dict:
+    path = _settings_path(store)
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_settings(store, data: dict) -> None:
+    path = _settings_path(store)
+    if not path:
+        return
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
 def _auto_name_session(mind, namespace: str, session_id: str) -> str:
     """Generate an auto-name from the session's first user message."""
     for m in sorted(mind.store.all(namespace, with_embeddings=False), key=lambda x: x.created_at or ""):
@@ -457,12 +491,56 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # graph inference + distillation). Returns the dream report. Meant to
                     # be called on a schedule (cron) against the live service.
                     try:
-                        rep = target.dream(**(body.get("opts") or {}))
+                        dmind = target
+                        # consolidation (the distill step) needs an LLM. If the serving
+                        # mind is keyless (fast writes), give the DREAM an auto-detected
+                        # LLM — a local model / gateway / CLI / hosted key — on the SAME
+                        # store, so facts get distilled without the LLM on the write path.
+                        if not getattr(target.llm, "available", False):
+                            try:
+                                from ..providers import auto_llm
+                                _dl = auto_llm()
+                                if _dl is not None and getattr(_dl, "available", False):
+                                    dmind = target.with_llm(_dl)
+                            except Exception:
+                                pass
+                        rep = dmind.dream(**(body.get("opts") or {}))
                         out = rep.asdict() if hasattr(rep, "asdict") else (
                             rep.__dict__ if hasattr(rep, "__dict__") else rep)
-                        self._json({"ok": True, "report": out})
+                        self._json({"ok": True, "report": out, "llm": getattr(dmind.llm, "name", "null")})
                     except Exception as e:
                         self._json({"ok": False, "error": str(e)}, 500)
+                elif path == "/api/integrations":
+                    # LLM picker: choose which model serves the whole mind. Applies
+                    # live (set_llm → extractor/graph/user) and persists across restart.
+                    from ..providers import build_llm_by_id
+                    pid = str(body.get("llm", "")).strip().lower()
+                    st = _load_settings(mind.store)
+                    if pid in ("", "none", "null", "keyless"):
+                        mind.set_llm(None); st["llm"] = ""; _save_settings(mind.store, st)
+                        return self._json({"ok": True, "llm": {"id": "null", "available": False}})
+                    chosen = build_llm_by_id(pid)
+                    if not chosen or not getattr(chosen, "available", False):
+                        return self._json({"ok": False, "error": f"'{pid}' is not available on this machine"}, 400)
+                    mind.set_llm(chosen); st["llm"] = pid; _save_settings(mind.store, st)
+                    self._json({"ok": True, "llm": {"id": getattr(chosen, "name", pid),
+                                                    "model": getattr(chosen, "model", None), "available": True}})
+                elif path == "/api/dream/config":
+                    # the Dreams page picks the cadence: how often it runs + how many
+                    # turns it distills per cycle (+ auto on/off). Persisted; the
+                    # scheduler reads this file.
+                    st = _load_settings(mind.store)
+                    d = dict(DREAM_DEFAULTS); d.update(st.get("dream") or {})
+                    if body.get("interval_hours") is not None:
+                        try: d["interval_hours"] = max(0.0, round(float(body["interval_hours"]), 3))
+                        except Exception: pass
+                    if body.get("batch") is not None:
+                        try: d["batch"] = max(1, min(2000, int(body["batch"])))
+                        except Exception: pass
+                    if body.get("auto") is not None:
+                        d["auto"] = bool(body["auto"])
+                    st["dream"] = d; _save_settings(mind.store, st)
+                    self._json({"ok": True, "dream": d})
                 elif path == "/api/record":
                     title = str(body.get("title", "")).strip()
                     if not title:
@@ -744,6 +822,11 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         "reranker": (getattr(mind.reranker, "name", None) if getattr(mind, "reranker", None) else None),
                     }
                     self._json({"active": active, "available": detect()})
+
+                elif path == "/api/dream/config":
+                    st = _load_settings(mind.store)
+                    d = dict(DREAM_DEFAULTS); d.update(st.get("dream") or {})
+                    self._json({"dream": d, "defaults": DREAM_DEFAULTS})
 
                 elif path == "/api/memories":
                     layers = layers_of(qs)

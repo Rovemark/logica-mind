@@ -3,6 +3,29 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.4.13] — 2026-06-16
+
+### Pick the LLM that serves your memory — any model, no key required
+- **Smart LLM auto-detection**: `auto_llm()` now finds a local open-source model
+  behind an OpenAI-compatible server (Ollama, LM Studio, llama.cpp, vLLM, MLX) or
+  a self-hosted Anthropic gateway, in addition to hosted keys and the Claude CLI.
+  Zero-dependency HTTP transports (`OpenAICompatLLM`, `AnthropicCompatLLM`). It
+  stays **network-free unless you configure an endpoint**, so `LogicaMind()`
+  construction remains deterministic and never probes ports on its own.
+- **Runtime LLM swap**: `mind.set_llm()` rewires the extractor, knowledge graph
+  and user model live; `mind.with_llm()` returns a sibling view backed by a
+  different LLM (so a keyless write path can still run an LLM-powered consolidation).
+- **Dashboard LLM picker**: Settings → Integrations is now a working picker —
+  tap a detected model to make it serve the whole mind (applied live via
+  `POST /api/integrations`, persisted across restart). Tap the active one to go
+  keyless.
+- **Dream schedule controls**: the Dreams page exposes the cadence — how often it
+  runs, how many turns it distills per cycle, and a pause toggle
+  (`GET`/`POST /api/dream/config`).
+- **Consolidation works without an LLM on the write path**: when the serving mind
+  is keyless, `/api/dream` runs the consolidation through an auto-detected LLM on
+  the same store — fast cheap writes, distilled facts at sleep-time.
+
 ## [0.4.12] — 2026-06-16
 
 ### Language-neutral retrieval gate

@@ -3,7 +3,7 @@ import {
   Moon, Layers, Zap, Scissors, GitMerge, Brain, Network,
   AlertTriangle, TrendingDown, ChevronDown, ChevronUp, Activity, Sparkles
 } from "lucide-react";
-import { api, tShort, type DreamReport, type ContestedPair, type ForgetCurveEntry, type SurpriseEvent } from "../api";
+import { api, tShort, type DreamReport, type ContestedPair, type ForgetCurveEntry, type SurpriseEvent, type DreamCadence } from "../api";
 import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
 
@@ -281,6 +281,47 @@ function DreamCard({ report }: { report: DreamReport }) {
   );
 }
 
+// ---- cadence settings (when + how much the dream runs) ----------------------
+function DreamSettings() {
+  const { t } = useI18n();
+  const [cfg, setCfg] = useState<DreamCadence | null>(null);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { api.dreamConfig().then(d => setCfg(d.dream)).catch(() => {}); }, []);
+  if (!cfg) return null;
+  const save = async (patch: Partial<DreamCadence>) => {
+    const next = { ...cfg, ...patch }; setCfg(next);
+    try { await api.setDreamConfig(patch); setSaved(true); setTimeout(() => setSaved(false), 1500); } catch { /* fail-soft */ }
+  };
+  return (
+    <div className="card-surface mb-3 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Moon size={14} className="text-[var(--accent2)] flex-none" />
+        <span className="text-[13.5px] font-semibold flex-1">{t("dream_cadence")}</span>
+        {saved && <span className="text-[11px] text-[var(--good)]">✓ {t("saved")}</span>}
+        <button onClick={() => save({ auto: !cfg.auto })}
+          className={`text-[11px] px-2.5 py-1 rounded-full font-semibold flex-none ${cfg.auto ? "text-[var(--good)] bg-[color-mix(in_srgb,var(--good)_15%,transparent)]" : "text-[var(--dim2)] border border-[var(--line)]"}`}>
+          {cfg.auto ? t("dream_auto_on") : t("dream_auto_off")}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-3 max-[420px]:grid-cols-1">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-[var(--dim2)] uppercase tracking-[.5px]">{t("dream_interval")}</span>
+          <input type="number" min={0.05} step={0.5} defaultValue={cfg.interval_hours}
+            onBlur={e => save({ interval_hours: parseFloat(e.target.value) || cfg.interval_hours })}
+            className="bg-[var(--panel2)] border border-[var(--line)] rounded-[8px] px-2.5 py-1.5 text-[13px] tabular-nums" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-[var(--dim2)] uppercase tracking-[.5px]">{t("dream_batch")}</span>
+          <input type="number" min={1} max={2000} step={10} defaultValue={cfg.batch}
+            onBlur={e => save({ batch: parseInt(e.target.value) || cfg.batch })}
+            className="bg-[var(--panel2)] border border-[var(--line)] rounded-[8px] px-2.5 py-1.5 text-[13px] tabular-nums" />
+        </label>
+      </div>
+      <div className="text-[11px] text-[var(--dim2)] mt-2 leading-snug">{t("dream_cadence_hint")}</div>
+    </div>
+  );
+}
+
 // ---- main view --------------------------------------------------------------
 export default function Dreams({ ns }: { ns: string }) {
   const { t } = useI18n();
@@ -316,6 +357,9 @@ export default function Dreams({ ns }: { ns: string }) {
           <StatCard icon={Activity} value={totalOps}         label={t("total_ops")}          color="var(--gold)"     />
         </div>
       )}
+
+      {/* cadence settings — when & how much the dream runs */}
+      <DreamSettings />
 
       {/* always-visible moat sections */}
       <ForgetCurveSection ns={ns} />

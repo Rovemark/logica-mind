@@ -178,6 +178,30 @@ class LogicaMind:
         self.graph_extractor = GraphExtractor(self.llm)
         self.user = DialecticUserModel(self.store, namespace, self.llm, self.embedder)
 
+    def set_llm(self, llm: Optional[LLM]) -> bool:
+        """Swap the LLM at runtime so one chosen model serves the WHOLE mind —
+        write-time extraction, the knowledge graph, the user model and sleep-time
+        consolidation. Powers the dashboard's LLM picker without a restart. Pass
+        None to go keyless (heuristic extractor). Returns True if an available LLM
+        is now active."""
+        self.llm = llm or NullLLM()
+        avail = bool(getattr(self.llm, "available", False))
+        if avail:
+            self.extractor = LLMExtractor(self.llm)
+        else:
+            from .extract.heuristic import HeuristicExtractor
+            self.extractor = HeuristicExtractor()
+        self.graph_extractor = GraphExtractor(self.llm)
+        self.user = DialecticUserModel(self.store, self.namespace, self.llm, self.embedder)
+        return avail
+
+    def with_llm(self, llm: Optional[LLM]) -> "LogicaMind":
+        """A view of this memory (same store, embedder and namespace) backed by a
+        different LLM. Lets one step run with an LLM (e.g. sleep-time consolidation)
+        without putting the LLM on the main mind's write path."""
+        return LogicaMind(namespace=self.namespace, store=self.store,
+                          embedder=self.embedder, llm=llm)
+
     # ---- internals ---------------------------------------------------------
     def _embed(self, text: str) -> Optional[List[float]]:
         try:

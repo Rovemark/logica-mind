@@ -54,6 +54,7 @@ export interface IntegrationsData {
   };
   available: { llm: IntegrationOption[]; embedders: IntegrationOption[]; rerankers: IntegrationOption[]; stores: IntegrationOption[] };
 }
+export interface DreamCadence { interval_hours: number; batch: number; auto: boolean; }
 export interface PathHop { subject: string; predicate: string; object: string; confidence: number; }
 export interface PathResult { from: string; to: string; found: boolean; path: string[]; hops: PathHop[]; }
 export interface ConnEntity { name: string; degree: number; type?: string; dimension?: string | null; }
@@ -81,6 +82,9 @@ export const api = {
   stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),
   analytics: (ns: string, range = 30): Promise<AnalyticsData> => j(`/api/analytics?${nsq(ns)}&range=${range}`),
   integrations: (): Promise<IntegrationsData> => j(`/api/integrations`),
+  setLLM: (id: string): Promise<{ ok: boolean; error?: string; llm?: any }> => post(`/api/integrations`, { llm: id }),
+  dreamConfig: (): Promise<{ dream: DreamCadence; defaults: DreamCadence }> => j(`/api/dream/config`),
+  setDreamConfig: (cfg: Partial<DreamCadence>): Promise<{ ok: boolean; dream: DreamCadence }> => post(`/api/dream/config`, cfg),
   dimensions: (ns: string): Promise<DimensionsData> => j(`/api/dimensions?${nsq(ns)}`),
   search: (q: string, limit = 6): Promise<SearchResults> => j(`/api/search?q=${encodeURIComponent(q)}&limit=${limit}`),
   context: (ns: string, q: string, budget = 1200): Promise<ContextResult> =>
