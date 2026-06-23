@@ -29,6 +29,15 @@ from ..stores.base import _tokset
 def _session_names_path(store) -> str | None:
     p = getattr(store, "path", None)
     if not p or p in (":memory:", ""):
+        # MultiStore (and other wrappers) have no .path of their own — fall back
+        # to the first child store that has one, so session names persist next to
+        # the db instead of silently no-op'ing (rename / Claude-import).
+        for child in getattr(store, "stores", None) or []:
+            cp = getattr(child, "path", None)
+            if cp and cp not in (":memory:", ""):
+                p = cp
+                break
+    if not p or p in (":memory:", ""):
         return None
     return os.path.splitext(p)[0] + "_session_names.json"
 
@@ -51,6 +60,40 @@ def _save_session_names(store, names: dict) -> None:
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(names, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+# ---- persisted user settings (LLM choice + dream cadence) -------------------
+DREAM_DEFAULTS = {"interval_hours": 3.0, "batch": 40, "auto": True}
+
+
+def _settings_path(store) -> "str | None":
+    p = _session_names_path(store)        # reuse the MultiStore-aware path resolver
+    return p.replace("_session_names.json", "_settings.json") if p else None
+
+
+def _load_settings(store) -> dict:
+    path = _settings_path(store)
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_settings(store, data: dict) -> None:
+    path = _settings_path(store)
+    if not path:
+        return
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
     except Exception:
         pass
 
@@ -236,6 +279,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
     # the SPA shell and static assets aren't under /api/ so they stay open too.
     _PUBLIC_GET = {"/api/namespaces", "/api/health"}
     _LOOPBACK = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+    # public READ-ONLY mode (LOGICA_MIND_PUBLIC=1): every GET /api is open so the
+    # dashboard works as a public live demo / read-only board, while writes stay
+    # gated exactly as before. Off by default — opt-in for a shareable deployment.
+    _PUBLIC_READ = os.environ.get("LOGICA_MIND_PUBLIC", "").lower() in ("1", "true", "yes")
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -259,18 +306,24 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
         def _send(self, code, body: bytes, ctype):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            # never let the browser serve a STALE /api response, nor a stale app
-            # shell (index.html) that would reference an old JS bundle — both must
-            # always be fresh. The hashed JS/CSS assets can cache forever (their
-            # name changes on rebuild), so only /api and HTML get no-store.
-            if self.path.startswith("/api/") or "text/html" in ctype:
-                self.send_header("Cache-Control", "no-store")
-            self._cors()
-            self.end_headers()
-            self.wfile.write(body)
+            # a client that hangs up mid-response (closed tab, timed-out caller)
+            # must not raise out of the handler — swallow the dropped-connection
+            # errors so one disconnect can never crash the worker.
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                # never let the browser serve a STALE /api response, nor a stale app
+                # shell (index.html) that would reference an old JS bundle — both must
+                # always be fresh. The hashed JS/CSS assets can cache forever (their
+                # name changes on rebuild), so only /api and HTML get no-store.
+                if self.path.startswith("/api/") or "text/html" in ctype:
+                    self.send_header("Cache-Control", "no-store")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass
 
         def do_OPTIONS(self):
             # CORS preflight — browsers send this before a cross-origin POST/custom
@@ -309,7 +362,16 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             path = parsed.path
             if not allow_writes:
                 return self._json({"error": "writes disabled"}, 403)
-            if not self._authed():  # loopback-trusted or constant-time bearer check
+            if _PUBLIC_READ:
+                # public demo: reads are open but writes must carry an explicit
+                # bearer token — loopback is NOT trusted here, because a reverse
+                # proxy (HF Spaces, nginx…) forwards traffic and can appear as a
+                # loopback/local peer. Without LOGICA_MIND_TOKEN set, no one writes.
+                auth = self.headers.get("Authorization", "")
+                if not (token and auth.startswith("Bearer ")
+                        and hmac.compare_digest(auth[7:], token)):
+                    return self._json({"error": "read-only public deployment"}, 403)
+            elif not self._authed():  # loopback-trusted or constant-time bearer check
                 return self._json({"error": "unauthorized"}, 401)
             body = self._body()
             ns = (body.get("namespace") or mind.namespace)
@@ -324,6 +386,51 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 if path == "/api/remember":
                     created = target.remember(str(body.get("text", "")), session=body.get("session"))
                     self._json({"stored": [c.content for c in created], "count": len(created)})
+                elif path == "/api/self-model":
+                    # continuity substrate: merge a patch into the agent's self-model
+                    from ..continuity import SelfModel
+                    saved = SelfModel(target.store, ns).save(body.get("patch") or {})
+                    self._json({"namespace": ns, "version": saved["version"], "self_model": saved})
+                elif path == "/api/debate":
+                    # continuity substrate: resolve a debate with epistemic consequence
+                    from ..continuity import Debate
+                    self._json(Debate(target.store).resolve(
+                        body.get("question", ""), body.get("positions") or [],
+                        winner=body.get("winner"), skeptic_passed=bool(body.get("skeptic_passed", True)),
+                        dept=body.get("dept")))
+                elif path == "/api/heartbeat/beat":
+                    # continuity substrate: run one cognitive beat for this agent
+                    from ..continuity import Heartbeat, zone_guard
+                    beat_mind = target  # `target` is a fresh for_namespace() view
+                    if not getattr(target.llm, "available", False):
+                        # give the beat an LLM (auto-detected from env) so it can
+                        # hypothesize — WITHOUT making the keyless serving mind pay an
+                        # LLM call on every write. Isolated to this per-namespace view.
+                        try:
+                            from ..providers import auto_llm
+                            _bllm = auto_llm()
+                            if _bllm and getattr(_bllm, "available", False):
+                                beat_mind = target.with_llm(_bllm)
+                        except Exception:
+                            pass
+                    # protect identity: block re-identification (red zone) for every
+                    # agent AND clone — a clone evolves beliefs/skills but stays its mentor.
+                    self._json(Heartbeat(beat_mind, guard=zone_guard(block_zones=("red",))).beat())
+                elif path == "/api/mcp/dispatch":
+                    # CLUSTER MODE: a remote `logica-mind mcp` (LOGICA_MIND_URL set)
+                    # forwards memory tools here — full 32-tool parity from one
+                    # endpoint, because it reuses the MCP server's own dispatch
+                    # against THIS process's mind (right store, right embedder).
+                    from ..mcp_server import LOCAL_TOOLS, MCPServer
+                    tool = str(body.get("name") or "")
+                    if not tool:
+                        return self._json({"error": "name required"}, 400)
+                    if tool in LOCAL_TOOLS:
+                        return self._json({"error": f"{tool} runs on the client machine, not the brain"}, 400)
+                    srv = MCPServer(target, remote_url="")   # never re-forward (no recursion)
+                    srv.source = str(body.get("source") or "remote-mcp")
+                    payload = srv._dispatch(tool, body.get("args") or {})
+                    self._json({"result": payload})
                 elif path == "/api/add":
                     # rich "learning" add — runs extraction + dedup + (with an LLM)
                     # graph linking, then returns exactly what the engine learned so
@@ -373,6 +480,18 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     self._json({"ok": bool(m), "id": m.id if m else None})
                 elif path == "/api/forget":
                     self._json({"deleted": target.forget(memory_id=body.get("id"), query=body.get("query"))})
+                elif path == "/api/entity/alias":
+                    # rename/merge an entity (non-destructive): variant resolves to
+                    # canonical from now on, and edges() canonicalizes at read time —
+                    # the graph collapses the nodes everywhere without rewriting rows.
+                    variant = str(body.get("variant", "")).strip()
+                    canonical = str(body.get("canonical", "")).strip()
+                    if not variant or not canonical:
+                        return self._json({"error": "variant and canonical required"}, 400)
+                    base_ns = ns if ns not in _ALL else mind.namespace
+                    mind.for_namespace(base_ns).graph.add_alias(variant, canonical)
+                    return self._json({"ok": True, "variant": variant, "canonical": canonical})
+
                 elif path == "/api/forget_about":
                     entity = str(body.get("entity", "")).strip()
                     if not entity:
@@ -402,12 +521,56 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # graph inference + distillation). Returns the dream report. Meant to
                     # be called on a schedule (cron) against the live service.
                     try:
-                        rep = target.dream(**(body.get("opts") or {}))
+                        dmind = target
+                        # consolidation (the distill step) needs an LLM. If the serving
+                        # mind is keyless (fast writes), give the DREAM an auto-detected
+                        # LLM — a local model / gateway / CLI / hosted key — on the SAME
+                        # store, so facts get distilled without the LLM on the write path.
+                        if not getattr(target.llm, "available", False):
+                            try:
+                                from ..providers import auto_llm
+                                _dl = auto_llm()
+                                if _dl is not None and getattr(_dl, "available", False):
+                                    dmind = target.with_llm(_dl)
+                            except Exception:
+                                pass
+                        rep = dmind.dream(**(body.get("opts") or {}))
                         out = rep.asdict() if hasattr(rep, "asdict") else (
                             rep.__dict__ if hasattr(rep, "__dict__") else rep)
-                        self._json({"ok": True, "report": out})
+                        self._json({"ok": True, "report": out, "llm": getattr(dmind.llm, "name", "null")})
                     except Exception as e:
                         self._json({"ok": False, "error": str(e)}, 500)
+                elif path == "/api/integrations":
+                    # LLM picker: choose which model serves the whole mind. Applies
+                    # live (set_llm → extractor/graph/user) and persists across restart.
+                    from ..providers import build_llm_by_id
+                    pid = str(body.get("llm", "")).strip().lower()
+                    st = _load_settings(mind.store)
+                    if pid in ("", "none", "null", "keyless"):
+                        mind.set_llm(None); st["llm"] = ""; _save_settings(mind.store, st)
+                        return self._json({"ok": True, "llm": {"id": "null", "available": False}})
+                    chosen = build_llm_by_id(pid)
+                    if not chosen or not getattr(chosen, "available", False):
+                        return self._json({"ok": False, "error": f"'{pid}' is not available on this machine"}, 400)
+                    mind.set_llm(chosen); st["llm"] = pid; _save_settings(mind.store, st)
+                    self._json({"ok": True, "llm": {"id": getattr(chosen, "name", pid),
+                                                    "model": getattr(chosen, "model", None), "available": True}})
+                elif path == "/api/dream/config":
+                    # the Dreams page picks the cadence: how often it runs + how many
+                    # turns it distills per cycle (+ auto on/off). Persisted; the
+                    # scheduler reads this file.
+                    st = _load_settings(mind.store)
+                    d = dict(DREAM_DEFAULTS); d.update(st.get("dream") or {})
+                    if body.get("interval_hours") is not None:
+                        try: d["interval_hours"] = max(0.0, round(float(body["interval_hours"]), 3))
+                        except Exception: pass
+                    if body.get("batch") is not None:
+                        try: d["batch"] = max(1, min(2000, int(body["batch"])))
+                        except Exception: pass
+                    if body.get("auto") is not None:
+                        d["auto"] = bool(body["auto"])
+                    st["dream"] = d; _save_settings(mind.store, st)
+                    self._json({"ok": True, "dream": d})
                 elif path == "/api/record":
                     title = str(body.get("title", "")).strip()
                     if not title:
@@ -494,7 +657,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             # any /api read that can return memory content requires auth on a
             # non-loopback caller (loopback trusted); namespace list is the only
             # anonymous /api endpoint
-            if path.startswith("/api/") and path not in _PUBLIC_GET and not self._authed():
+            if (path.startswith("/api/") and path not in _PUBLIC_GET
+                    and not _PUBLIC_READ and not self._authed()):
                 return self._json({"error": "unauthorized"}, 401)
             try:
                 if path in ("/", "/index.html"):
@@ -527,6 +691,37 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         self._json({"namespace": "__all__", "stats": agg})
                     else:
                         self._json({"namespace": ns, "stats": mind.for_namespace(ns).stats()})
+
+                elif path == "/api/self-model":
+                    # continuity substrate: the agent's evolving, versioned identity
+                    from ..continuity import SelfModel
+                    sm = SelfModel(mind.for_namespace(ns).store, ns)
+                    if first(qs, "history"):
+                        self._json({"namespace": ns, "versions": sm.versions()})
+                    elif first(qs, "verify"):
+                        ok, n, why = sm.verify_chain()
+                        self._json({"namespace": ns, "ok": ok, "versions": n, "reason": why})
+                    else:
+                        self._json(sm.load())
+
+                elif path == "/api/world-insights":
+                    # continuity substrate: the shared cortex — what OTHER agents learned
+                    from ..continuity import WorldInsights
+                    w = WorldInsights(mind.store)
+                    dept = first(qs, "dept") or None
+                    limit = _int(qs, "limit", 5)
+                    if first(qs, "format"):
+                        self._json({"namespace": ns, "block": w.format_for_prompt(ns, dept, limit)})
+                    else:
+                        items = w.top_for(ns, dept, limit=limit)
+                        self._json({"namespace": ns, "insights": [
+                            {"agent": (m.metadata or {}).get("agent"), "text": m.content,
+                             "confidence": (m.metadata or {}).get("confidence")} for m in items]})
+
+                elif path == "/api/metacog":
+                    # continuity substrate: does this agent know the domain? who does?
+                    from ..continuity import Metacog
+                    self._json(Metacog(mind.store).route(ns, first(qs, "domain") or ""))
 
                 elif path == "/api/recall":
                     q = first(qs, "q")
@@ -589,6 +784,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # pool (with which ones made the cut) and the assembled block.
                     q = first(qs, "q") or ""
                     budget = _int(qs, "budget", 1200)
+                    profile = first(qs, "profile") or "balanced"
                     if is_all:
                         # context() is per-namespace; show the busiest one so the
                         # block is populated, and let the UI switch namespaces.
@@ -597,8 +793,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     else:
                         tgt = ns
                     sub = mind.for_namespace(tgt)
-                    cands = sub.recall(q, limit=20) if q.strip() else []
-                    block = sub.context(q, token_budget=budget) if q.strip() else ""
+                    block = sub.context(q, token_budget=budget, profile=profile) if q.strip() else ""
+                    # the candidate pool is only for the dashboard's ranked-list UI;
+                    # skip that second recall on the speed path (hook injection)
+                    cands = sub.recall(q, limit=20) if (q.strip() and profile != "speed") else []
                     tokens = mind._approx_tokens(block) if block else 0
                     items = []
                     for r in cands:
@@ -685,6 +883,11 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         "reranker": (getattr(mind.reranker, "name", None) if getattr(mind, "reranker", None) else None),
                     }
                     self._json({"active": active, "available": detect()})
+
+                elif path == "/api/dream/config":
+                    st = _load_settings(mind.store)
+                    d = dict(DREAM_DEFAULTS); d.update(st.get("dream") or {})
+                    self._json({"dream": d, "defaults": DREAM_DEFAULTS})
 
                 elif path == "/api/memories":
                     layers = layers_of(qs)
@@ -928,34 +1131,51 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     etoks = _tokset(name or "")
                     nlow = (name or "").lower()
                     scan = mind.store.namespaces() if is_all else [ns]
-                    mems, connected = [], {}
-                    for nm in scan:
-                        for m in mind.store.all(nm, with_embeddings=False):
-                            if _is_internal(m):
-                                continue
-                            md = m.metadata or {}
-                            mentions = ((etoks and etoks <= _tokset(m.content))
-                                        or str(md.get("subject", "")).lower() == nlow
-                                        or str(md.get("object", "")).lower() == nlow
-                                        or str(md.get("observed", "")).lower() == nlow)
-                            if not mentions:
-                                continue
-                            mems.append(m)   # everything mentioning it — graph edges + notes, all openable
-                            if m.layer == MemoryLayer.GRAPH and md.get("subject"):
-                                s, o = str(md.get("subject")), str(md.get("object"))
-                                other = o if s.lower() == nlow else s
-                                if other and other.lower() != nlow:
-                                    connected.setdefault(other.lower(), other)
-                    mems.sort(key=lambda m: m.created_at or "", reverse=True)
-                    # first-class entity info (type + aliases) from the resolving ns
-                    ent = mind.for_namespace(ns if not is_all else mind.namespace).entity(name)
-                    base = ns if not is_all else mind.namespace
-                    unlinked = mind.for_namespace(base).entity_unlinked(name, namespaces=scan)
-                    self._json({"name": ent.get("name") or name, "type": ent.get("type", ""),
-                                "aliases": ent.get("aliases", []),
-                                "connected": list(connected.values()),
-                                "unlinked": unlinked,
-                                "memories": [_strip(m.to_dict()) for m in mems[:60]]})
+                    # &unlinked=1: the dashboard fetches the EXPENSIVE unlinked-mentions
+                    # section LAZILY, after the detail panel already opened — so a click is
+                    # instant and this multi-second graph scan never blocks it.
+                    if first(qs, "unlinked"):
+                        base = ns if not is_all else mind.namespace
+                        self._json({"unlinked": mind.for_namespace(base).entity_unlinked(name, namespaces=scan)})
+                    else:
+                        # preview=1 (hover): just the entity's most-recent mentioning memories.
+                        preview = bool(first(qs, "preview"))
+                        cand_cap = 120 if preview else 400      # bound deserialization for busy entities
+                        mems, connected, etype = [], {}, ""
+                        for nm in scan:
+                            # fast SQL LIKE pre-filter (candidates), not a whole-namespace scan
+                            for m in mind.store.mentions(nm, name, limit=cand_cap, with_embeddings=False):
+                                if _is_internal(m):
+                                    continue
+                                md = m.metadata or {}
+                                mentions = ((etoks and etoks <= _tokset(m.content))
+                                            or str(md.get("subject", "")).lower() == nlow
+                                            or str(md.get("object", "")).lower() == nlow
+                                            or str(md.get("observed", "")).lower() == nlow)
+                                if not mentions:
+                                    continue
+                                mems.append(m)   # graph edges + notes, all openable
+                                if not preview and m.layer == MemoryLayer.GRAPH and md.get("subject"):
+                                    s, o = str(md.get("subject")), str(md.get("object"))
+                                    other = o if s.lower() == nlow else s
+                                    if other and other.lower() != nlow:
+                                        connected.setdefault(other.lower(), other)
+                                    # the entity's own type, straight off the edge — avoids the
+                                    # multi-second entity() graph build just to label one node
+                                    if not etype:
+                                        if s.lower() == nlow and md.get("subject_type"): etype = md.get("subject_type")
+                                        elif o.lower() == nlow and md.get("object_type"): etype = md.get("object_type")
+                        mems.sort(key=lambda m: m.created_at or "", reverse=True)
+                        if preview:
+                            self._json({"name": name, "type": "", "aliases": [], "connected": [],
+                                        "unlinked": [], "memories": [_strip(m.to_dict()) for m in mems[:6]]})
+                        else:
+                            # unlinked is fetched lazily via &unlinked=1; aliases dropped from the
+                            # hot path (entity() was a multi-second graph build for one label)
+                            self._json({"name": name, "type": etype, "aliases": [],
+                                        "connected": list(connected.values()),
+                                        "unlinked": [],
+                                        "memories": [_strip(m.to_dict()) for m in mems[:60]]})
 
                 elif path == "/api/contradictions":
                     # aggregate across namespaces in __all__ mode (parity with
@@ -1052,10 +1272,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
 
                 # ---- new moats ----
                 elif path == "/api/dreams":
-                    from ..dreaming import load_dreams
+                    from ..dreaming import load_dreams, dream_summary
                     tgt_ns = ns if not is_all else None
-                    self._json({"dreams": load_dreams(mind.store, tgt_ns,
-                                                      limit=_int(qs, "limit", 50))})
+                    self._json({"dreams": load_dreams(mind.store, tgt_ns, limit=_int(qs, "limit", 50)),
+                                "summary": dream_summary(mind.store, tgt_ns)})
 
                 elif path == "/api/contested":
                     thresh = _float(qs, "threshold", 0.65)
@@ -1231,17 +1451,18 @@ def serve(mind, host: str = "127.0.0.1", port: int = 8420, open_browser: bool = 
     is_local = host in ("127.0.0.1", "::1", "localhost")
     token = os.environ.get("LOGICA_MIND_TOKEN")
     if allow_writes is None:
-        allow_writes = is_local                # writes on by default only on loopback
-    if allow_writes and not is_local and not token:
-        raise SystemExit("logica-mind: refusing to enable write endpoints on a non-loopback "
-                         "host without LOGICA_MIND_TOKEN set.")
-    if allow_writes and not is_local:
-        print("⚠️  write endpoints exposed on a non-loopback host — bearer token required.")
+        # per-request auth is what actually restricts writers: loopback callers are
+        # trusted, anyone else needs the bearer token (_authed). So write endpoints
+        # stay on by default — a 0.0.0.0 bind without a token still only accepts
+        # writes from the machine itself (remote callers get 401), instead of the
+        # old bind-level gate 403ing the local memory pipeline too.
+        allow_writes = True
     if not is_local and not token:
-        # reads are now auth-gated too, so a tokenless non-loopback bind 401s every
-        # API call — warn the operator instead of silently shipping a broken board
-        print("⚠️  non-loopback host without LOGICA_MIND_TOKEN — all /api reads will "
-              "return 401. Set LOGICA_MIND_TOKEN to use the dashboard remotely.")
+        # remote calls (reads and writes) are auth-gated per request; loopback
+        # callers keep working either way
+        print("⚠️  non-loopback host without LOGICA_MIND_TOKEN — remote /api calls "
+              "will return 401 (loopback callers keep working). Set LOGICA_MIND_TOKEN "
+              "to use the dashboard remotely.")
     httpd = ThreadingHTTPServer((host, port), make_handler(mind, allow_writes=allow_writes, token=token))
     url = f"http://{host}:{port}"
     n = len(mind.store.namespaces())
