@@ -2,15 +2,18 @@
 
 # 🧠 Logica Mind
 
-### Memory that thinks like a brain, not a database.
+### The continuity substrate for AI agents — memory that becomes a mind.
 
-**Long-term memory for AI agents — episodic, semantic, a temporal knowledge graph & a dialectic user model in one library.**
+**Not just long-term memory. A living substrate of continuity: episodic / semantic memory + a temporal knowledge graph + a dialectic user model — now with a `continuity` layer that gives an agent a *self* that persists, evolves, and knows what it doesn't know (a versioned self-model, a cognitive heartbeat, a self-rewrite guard, a shared cortex, metacognition & debate).**
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Live demo on HF Spaces](https://img.shields.io/badge/🤗%20Live%20Demo-try%20it%20now-ffce1c.svg)](https://huggingface.co/spaces/rovemark/logica-mind-demo)
+[![PyPI](https://img.shields.io/pypi/v/logica-mind.svg?color=3775A9&label=pip%20install%20logica-mind)](https://pypi.org/project/logica-mind/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/Rovemark/logica-mind/blob/main/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-189%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
+[![Tests](https://img.shields.io/badge/tests-203%20passing-brightgreen.svg)](#%EF%B8%8F-building-from-source)
 [![MCP](https://img.shields.io/badge/MCP-32%20tools-8A2BE2.svg)](#-model-context-protocol-mcp)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-orange.svg)](CONTRIBUTING.md)
+
+**▶ [Try the live demo](https://huggingface.co/spaces/rovemark/logica-mind-demo) — explore the temporal graph in your browser, nothing to install.**
 
 </div>
 
@@ -34,14 +37,14 @@ mind.contradictions()            # every belief that changed value — and exact
 ```
 
 It runs fully offline on the standard library — **zero dependencies, no API key
-to start** — and is covered by **189 tests**, so you can verify every claim on
+to start** — and is covered by **202 tests**, so you can verify every claim on
 this page in five minutes. It then lights up Voyage, OpenAI, Supabase, Postgres
 or Redis whenever you want them.
 
 <div align="center">
-  <img src="docs/img/dashboard-graph.png" alt="Logica Mind dashboard — the intelligent temporal knowledge graph" width="100%">
+  <img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/demo.gif" alt="Logica Mind dashboard — live tour: faceted filter sidebar, orbit and ring layouts, hover previews" width="100%">
   <br>
-  <em>The built-in dashboard: edges hued by relation type, nodes sized by centrality, emergent co-mentions, a full filter bar, point-in-time replay — and intelligence (path-finding, bridges, suggested links) a hand-linked note graph can't have.</em>
+  <em>The built-in dashboard: edges hued by relation type, nodes sized by centrality, emergent co-mentions, a full filter bar, point-in-time replay — and intelligence (path-finding, bridges, suggested links) a hand-linked note graph can't have. Organize it as an organic <b>web</b>, as <b>facet orbits</b> (hubs with their members around them — by channel, agent, life-area or entity type) or as concentric <b>importance rings</b>; click a hub and only its participants stay lit.</em>
 </div>
 
 ---
@@ -50,7 +53,9 @@ or Redis whenever you want them.
 
 ```bash
 pip install logica-mind                 # core: zero dependencies, fully offline
+pip install "logica-mind[onnx]"         # + TRUE semantic recall without torch (~50MB; +22% recall@5 — see bench/)
 pip install "logica-mind[voyage]"       # + Voyage embeddings & reranker
+pip install "logica-mind[sqlcipher]"    # + at-rest encryption for the SQLite store
 pip install "logica-mind[all]"          # + Voyage, OpenAI, Supabase, Postgres, Redis, local
 ```
 
@@ -75,6 +80,32 @@ mind.serve()                                    # -> http://127.0.0.1:8420
 
 > Prefer the terminal? `logica-mind demo` loads a fictional dataset so you can
 > explore every feature instantly, and `logica-mind demo --clear` removes it.
+
+---
+
+## 🫀 The continuity substrate — memory that becomes a mind
+
+Memory tells you what an agent *knows*. The **`continuity` layer** makes it *someone*: a self that persists between sessions, evolves from experience, and stays governed and auditable. Six organs, all dependency-injected on top of the store — no keys, no lock-in:
+
+| Organ | What it gives an agent |
+|---|---|
+| **`SelfModel`** | a structured, **versioned** identity (skills · drives · beliefs) — hash-chained & tamper-evident, atomic writes, restorable, and portable across machines (it lives in the store, not a file) |
+| **`Heartbeat`** | a background cognitive cycle: perceive → consolidate → connect → **hypothesize** (falsifiable, with a check time) → **self-correct** → rewrite the self → emerge |
+| **`SelfRewriteGuard`** | a constitutional brake — classifies every self-edit *green / yellow / red*, an injectable policy can veto re-identification, and `detect_drift()` flags slow erosion of load-bearing drives |
+| **`WorldInsights`** | a shared cortex — when one agent learns, the others wake up knowing (visibility-scoped, deduped, sanitized against prompt injection) |
+| **`Metacog`** | knowing what it *doesn't* know — and routing to the agent that does |
+| **`Debate`** | disagreement with consequence — the winner reinforces its stance and takes risk (it's promoted fleet-wide); the losers update |
+
+```python
+from logica_mind import LogicaMind
+from logica_mind.continuity import SelfModel, Heartbeat
+
+mind = LogicaMind(namespace="astro", llm=my_llm)
+Heartbeat(mind).beat()                       # one beat: reflect, hypothesize, self-correct, become
+print(SelfModel(mind.store, "astro").load()["direction"])   # who the agent is now
+```
+
+You're not adding features to a memory library — you're plugging your agents into a **substrate of continuity**, and they gain a life.
 
 ---
 
@@ -127,14 +158,20 @@ mind.dimensions()   # the whole profile, grouped by dimension + Maslow tier
 ```
 
 <div align="center">
-  <img src="docs/img/dashboard-profile.png" alt="Profile — every fact categorized by life & work dimension, mapped to Maslow" width="100%">
+  <img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/demo-learn.gif" alt="Adding a memory live — extracted, checked against memory, stored and indexed" width="100%">
+  <br>
+  <em>Live: hand it a messy sentence and watch it extract the fact, check it against what it already believes, and index it — no save button for each fact, no schema.</em>
+</div>
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-profile.png" alt="Profile — every fact categorized by life & work dimension, mapped to Maslow" width="100%">
   <br>
   <em>The Profile view: a person <b>and</b> their work, organized — personal facts up Maslow's pyramid, plus Projects, Organization, and Business & Finance. The same animation shows it learning each categorized fact live.</em>
 </div>
 
 - **Person *and* work** — the taxonomy models a human (identity, health, spirituality, ambitions) and the work (project blockers, OKRs, MRR, runway) in one place.
-- **Everywhere** — category + dimension ride on every memory: the Profile view (cards **and** a clickable knowledge-map), the colour-by-area knowledge graph, the `lm_dimensions` MCP tool, `recall`/`remember`, `/api/memories?dimension=`, and the ⌘K search. Full guide: **[Fact categorization](docs/categorization.md)**.
-- **Zero-key option** — categorization needs an LLM; it auto-detects an `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or uses your **local Claude CLI** with no API key at all (`LOGICA_MIND_LLM=claude-cli`). See **[LLM providers & auto-detection](docs/providers.md)**.
+- **Everywhere** — category + dimension ride on every memory: the Profile view (cards **and** a clickable knowledge-map), the colour-by-area knowledge graph, the `lm_dimensions` MCP tool, `recall`/`remember`, `/api/memories?dimension=`, and the ⌘K search. Full guide: **[Fact categorization](https://github.com/Rovemark/logica-mind/blob/main/docs/categorization.md)**.
+- **Zero-key option** — categorization needs an LLM; it auto-detects an `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or uses your **local Claude CLI** with no API key at all (`LOGICA_MIND_LLM=claude-cli`). See **[LLM providers & auto-detection](https://github.com/Rovemark/logica-mind/blob/main/docs/providers.md)**.
 
 ### 🕸️ A graph that reasons about itself
 
@@ -151,10 +188,10 @@ mind.suggested_links()    # predict the missing edge: pairs with a strong shared
 - **Bridges** — articulation points; the brokers between clusters, often low-degree nodes pure centrality misses.
 - **Suggested links** — Adamic-Adar link prediction proposes the edges you're *missing*. Note tools make you author every link; here the graph proposes them.
 - **Emergent + semantic layers** — beyond explicit edges: **co-mentions** (entities named together) and opt-in **semantic affinity** (similar memory-neighbourhoods), each a toggle.
-- **A professional canvas** — edges hued by relation type with arrows + confidence-weighted width, nodes sized by **PageRank centrality**, a local/ego graph with a depth slider, hover previews, and a top filter bar (colour-by, layers, search-focus, min-confidence, per-relation-type). Full guide: **[Graph intelligence](docs/graph-intelligence.md)**.
+- **A professional canvas** — edges hued by relation type with arrows + confidence-weighted width, nodes sized by **PageRank centrality**, a local/ego graph with a depth slider, hover previews, and a top filter bar (colour-by, layers, search-focus, min-confidence, per-relation-type). Full guide: **[Graph intelligence](https://github.com/Rovemark/logica-mind/blob/main/docs/graph-intelligence.md)**.
 
 <div align="center">
-  <img src="docs/img/dashboard-graph-path.png" alt="Path mode — how is A related to B?, traced and spotlighted on the graph" width="100%">
+  <img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/demo-path.gif" alt="Path mode live — how is A related to B?, traced and spotlighted on the graph" width="100%">
   <br>
   <em>Path mode answers "how is A related to B?" — a typed, narrated chain, spotlighted on the canvas while the rest dims.</em>
 </div>
@@ -196,7 +233,7 @@ bundle = mind.export_bundle(secret=k)  # HMAC-signed, portable memory you can mo
 - **A demo you control** — ship empty, load a rich fictional dataset to explore, then clear it with one click (it only removes the demo, never your data).
 
 <div align="center">
-  <img src="docs/img/dashboard-connected.png" alt="The Connected panel — auto-derived backlinks for a memory: mentions, typed relations, and other notes that link here" width="100%">
+  <img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-connected.png" alt="The Connected panel — auto-derived backlinks for a memory: mentions, typed relations, and other notes that link here" width="100%">
   <br>
   <em>Open any memory and the <b>Connected</b> panel derives its neighborhood — the entities it mentions, the typed relations among them, and the other notes that link here — with no hand-typed links. Click any of them to walk note-to-note.</em>
 </div>
@@ -211,6 +248,72 @@ assistant's context layer.
 
 ---
 
+## 📊 Benchmarks
+
+Measured on **LoCoMo** (1,540 scored questions) under the *same published
+protocol as the [Mem0 paper](https://arxiv.org/abs/2504.19413)* — gpt-4o-mini
+answerer **and** judge, adversarial category excluded. Full methodology, every
+competitor number with its primary source, and one-command reproduction:
+**[BENCHMARKS.md](https://github.com/Rovemark/logica-mind/blob/main/BENCHMARKS.md)**.
+
+| Mode | **accuracy (J)** | **retrieval latency** | **median context** |
+|---|---|---|---|
+| **full pipeline** (1 LLM call per *session* at write) | **72.5%** | 1.6 / 2.9 s p50/p95 (network ×2) | 3,525 tokens |
+| zero-LLM writes, `openai` embedder | **67.3%** | 584 / 1,452 ms p50/p95 (network) | 2,648 tokens |
+| zero-LLM writes, `onnx` embedder — **no API keys at all** | **60.9%** | 87 / 338 ms p50/p95 (local) | 2,738 tokens |
+
+How that places against the market, in the published protocol (every number
+sourced in [BENCHMARKS.md](https://github.com/Rovemark/logica-mind/blob/main/BENCHMARKS.md)):
+
+| System | LoCoMo J | LLM at write time? |
+|---|---|---|
+| Letta (filesystem agent) | 74.0% | agent-managed |
+| Full-context baseline (no memory system) | 72.9% | — |
+| **Logica Mind — full pipeline** | **72.5%** | **1 call per session (~35× fewer)** |
+| Mem0ᵍ (graph variant) | 68.4% | every write |
+| **Logica Mind — zero-LLM writes** | **67.3%** | **none** |
+| Mem0 | 66.9% | every write |
+| Zep | 66.0% | every write |
+| Best RAG baseline | 61.0% | none |
+| **Logica Mind — fully keyless (onnx)** | **60.9%** | **none** |
+| LangMem | 58.1% | every write |
+| OpenAI Memory | 52.9% | every write |
+
+**The full pipeline beats every memory system in the published protocol** —
+4.1pts above Mem0ᵍ, within 0.4pt of reading the entire conversation into
+context — at one LLM call per *session* instead of per memory written, and
+~39% less answer context than Zep reports. Even storing raw turns with **zero
+write-time LLM**, Logica Mind lands above Mem0 and Zep, pipelines that pay an
+LLM on every memory written (~26,000 calls to ingest this benchmark; we pay
+zero). Why it wins:
+
+- **Distillation loses detail; raw turns keep it.** Extraction pipelines store
+  an LLM's summary of each message; when the answer sits verbatim in one turn,
+  the summary has often thrown it away. *Retrieve precise, read wide*: each
+  turn is its own memory, and the answer context expands every hit with its
+  neighbouring turns. Single-hop: **82.9% vs Mem0's 67.1%**.
+- **Time is a first-class column.** Every memory carries its session date and
+  relative expressions get resolved against it. Temporal: **60.4% vs 55.5%** —
+  temporal memory is literally the product Zep sells.
+- **The economics.** $0 and 0ms of LLM at write time, in-process retrieval,
+  no per-call billing — the cost curve per-write pipelines don't put on their
+  landing page.
+
+```text
+full pipeline · accuracy by category
+single-hop    █████████████████░░░  83.5%   ← Mem0 published: 67.1%
+temporal      ██████████████░░░░░░  70.7%   ← Mem0 published: 55.5%
+multi-hop     ███████████░░░░░░░░░  53.2%   ← Mem0 published: 51.2%
+open-domain   ███████░░░░░░░░░░░░░  37.0%   ← Mem0's stronghold (72.9%) — see BENCHMARKS.md
+```
+
+Vendor sites advertise much bigger LoCoMo numbers (Zep 94.7%, Mem0 91.6%) —
+those are **self-reported under each vendor's own methodology** and not
+comparable to the published protocol above; [BENCHMARKS.md](https://github.com/Rovemark/logica-mind/blob/main/BENCHMARKS.md)
+unpacks that, with sources, including the public Mem0×Zep dispute.
+
+---
+
 ## 🧱 Core, done right
 
 | | |
@@ -222,7 +325,7 @@ assistant's context layer.
 | **5 rerankers** | MMR (diversity) · Voyage cross-encoder · RRF · node-distance · episode-mention |
 | **Extraction** | Automatic ADD / UPDATE / DELETE / NOOP with dedup and conflict resolution |
 | **Auto-capture hooks** | `SessionStart` / `UserPromptSubmit` / `Stop` / `PreCompact` — memory that survives context compaction |
-| **Adapters & SDKs** | LangChain · LlamaIndex · a [provider adapter](examples/provider_adapter.py) for any host · a [TypeScript SDK](sdk-ts/) |
+| **Adapters & SDKs** | LangChain · LlamaIndex · a [provider adapter](https://github.com/Rovemark/logica-mind/blob/main/examples/provider_adapter.py) for any host · a [TypeScript SDK](sdk-ts/) |
 
 ---
 
@@ -263,28 +366,53 @@ Bahasa Indonesia, Русский, 한국어, 中文, 日本語, हिन्द�
 each **lazy-loaded** so the bundle stays lean — even the graph's relationship
 labels localize, and a first visit auto-matches the browser language.
 
+The **graph explorer** is a full instrument: three **organisation modes** —
+organic **Web** (force), **Orbits** (facet hubs on a circle with their members
+around them, the org-map look) and **Rings** (concentric tiers by PageRank
+importance) — and nine **colour facets**: agent/namespace, community, life-area
+(every one of the 34 dimensions gets its own stable colour), entity type,
+**channel**, **source**, **project**, **squad** and centrality. The metadata
+facets are generic: any memory your app tags with `metadata.channel` (whatsapp,
+telegram, voice, sessions, slack — your call), `metadata.project` or
+`metadata.squad` votes that value onto the entities it mentions, so the graph
+organizes itself around *where and in what context things were talked about*.
+Every facet also gets **filter chips** (multi-select; shift+click keeps only
+one value) so "show me just the telegram universe" is a single click. Hubs are
+**clickable**: click a channel/agent hub and everything else goes translucent —
+only that hub's participants stay lit (shift+click a hub filters down to it);
+click a node for the same spotlight on its direct neighbourhood, hover for an
+instant preview of its memories. Full guide:
+**[Graph explorer](https://github.com/Rovemark/logica-mind/blob/main/docs/graph-explorer.md)**.
+
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-orbit.png" alt="Orbits — facet hubs (channels) with their participants around them"><br><sub><b>Orbits</b> — one hub per channel/agent/facet value with its participants around it; the facet-less periphery is one chip away from hidden.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-rings.png" alt="Rings — concentric importance tiers, sectored by entity type"><br><sub><b>Rings</b> — hubs in the middle, periphery outside, one angular sector per facet value (here: entity types).</sub></td>
+  </tr>
+</table>
+
 <div align="center">
-  <img src="docs/img/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
+  <img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-context.png" alt="Logica Mind dashboard — smart context assembly" width="100%">
   <br>
   <em>The Context block: smart assembly. Candidates are ranked, then the most relevant are fitted to a token budget — and you see exactly which made the cut, the per-section token cost, and the prompt-ready block to inject.</em>
 </div>
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/img/dashboard-observations.png" alt="Observations — recurring patterns across memory"><br><sub><b>Observations</b> — structural patterns no single fact holds: entities that recur together and the hubs everything hangs off of.</sub></td>
-    <td width="50%"><img src="docs/img/dashboard-changes.png" alt="Changes — fact invalidation and a memory changelog"><br><sub><b>Changes</b> — when a fact's value changes, the old one is invalidated (not deleted): the current belief stands out, superseded ones stay queryable with their validity window.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-observations.png" alt="Observations — recurring patterns across memory"><br><sub><b>Observations</b> — structural patterns no single fact holds: entities that recur together and the hubs everything hangs off of.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-changes.png" alt="Changes — fact invalidation and a memory changelog"><br><sub><b>Changes</b> — when a fact's value changes, the old one is invalidated (not deleted): the current belief stands out, superseded ones stay queryable with their validity window.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/img/dashboard-lake.png" alt="Memory lake — a typed, governed catalog of namespaces"><br><sub><b>Memory lake</b> — a typed catalog of every namespace (user / org / agent), each row provenance-tracked, source-attributed, versioned and erasable on request.</sub></td>
-    <td width="50%"><img src="docs/img/dashboard-analytics.png" alt="Analytics — usage, activity and reliability"><br><sub><b>Analytics</b> — usage, activity and reliability: added-over-time, distribution by layer / source / agent, real request latency and error rate.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-lake.png" alt="Memory lake — a typed, governed catalog of namespaces"><br><sub><b>Memory lake</b> — a typed catalog of every namespace (user / org / agent), each row provenance-tracked, source-attributed, versioned and erasable on request.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-analytics.png" alt="Analytics — usage, activity and reliability"><br><sub><b>Analytics</b> — usage, activity and reliability: added-over-time, distribution by layer / source / agent, real request latency and error rate.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/img/dashboard-spotlight.png" alt="Spotlight — global ⌘K search"><br><sub><b>⌘K Spotlight</b> — one box over everything: jump to any view, agent, memory or graph entity, keyboard-first.</sub></td>
-    <td width="50%"><img src="docs/img/dashboard-integrations.png" alt="Integrations — the live stack with provider auto-detection"><br><sub><b>Integrations</b> — the live stack (store + redundancy, embedder, LLM, reranker) and every backend you can plug in, auto-detected from your environment.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/demo-spotlight.gif" alt="Spotlight — global ⌘K search, live"><br><sub><b>⌘K Spotlight</b> — one box over everything: jump to any view, agent, memory or graph entity, keyboard-first.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-integrations.png" alt="Integrations — the live stack with provider auto-detection"><br><sub><b>Integrations</b> — the live stack (store + redundancy, embedder, LLM, reranker) and every backend you can plug in, auto-detected from your environment.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/img/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
-    <td width="50%"><img src="docs/img/overview-home.png" alt="Overview — layer counts and insights"><br><sub><b>Overview</b> — per-layer counts, recent activity and synthesized insights.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/dashboard-dreams.png" alt="Dreams — the forgetting curve and dream journal"><br><sub><b>Dreams</b> — the Ebbinghaus forgetting curve, contested beliefs and a journal of every consolidation cycle.</sub></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Rovemark/logica-mind/main/docs/img/overview-home.png" alt="Overview — layer counts and insights"><br><sub><b>Overview</b> — per-layer counts, recent activity and synthesized insights.</sub></td>
   </tr>
 </table>
 
@@ -292,19 +420,19 @@ labels localize, and a first visit auto-matches the browser language.
 
 ## 📚 Documentation
 
-Full guides live in [`docs/`](docs/):
+Full guides live in [`docs/`](https://github.com/Rovemark/logica-mind/tree/main/docs):
 
 | | | |
 |---|---|---|
-| [Installation](docs/installation.md) | [Quickstart](docs/quickstart.md) | [Core concepts](docs/concepts.md) |
-| [Fact categorization](docs/categorization.md) | [Connections (derived backlinks)](docs/connections.md) | [LLM providers & auto-detection](docs/providers.md) |
-| [How memory is learned](docs/memory-extraction.md) | [Stores](docs/stores.md) | [Embeddings & reranking](docs/embeddings-and-reranking.md) |
-| [Knowledge graph](docs/knowledge-graph.md) | [Graph intelligence](docs/graph-intelligence.md) | |
-| [Dreaming & lifecycle](docs/dreaming.md) | [User model & peers](docs/user-model-and-peers.md) | [Sessions & run records](docs/sessions-and-records.md) |
-| [MCP server](docs/mcp.md) | [Auto-capture hooks](docs/hooks.md) | [Integrations & SDKs](docs/integrations.md) |
-| [Dashboard](docs/dashboard.md) | [Internationalization](docs/internationalization.md) | [Portability & privacy](docs/portability-and-privacy.md) |
-| [CLI](docs/cli.md) | [Graph intelligence](docs/graph-intelligence.md) | [Connections](docs/connections.md) |
-| [API reference](docs/api-reference.md) | | |
+| [Installation](https://github.com/Rovemark/logica-mind/blob/main/docs/installation.md) | [Quickstart](https://github.com/Rovemark/logica-mind/blob/main/docs/quickstart.md) | [Core concepts](https://github.com/Rovemark/logica-mind/blob/main/docs/concepts.md) |
+| [Fact categorization](https://github.com/Rovemark/logica-mind/blob/main/docs/categorization.md) | [Connections (derived backlinks)](https://github.com/Rovemark/logica-mind/blob/main/docs/connections.md) | [LLM providers & auto-detection](https://github.com/Rovemark/logica-mind/blob/main/docs/providers.md) |
+| [How memory is learned](https://github.com/Rovemark/logica-mind/blob/main/docs/memory-extraction.md) | [Stores](https://github.com/Rovemark/logica-mind/blob/main/docs/stores.md) | [Embeddings & reranking](https://github.com/Rovemark/logica-mind/blob/main/docs/embeddings-and-reranking.md) |
+| [Knowledge graph](https://github.com/Rovemark/logica-mind/blob/main/docs/knowledge-graph.md) | [Graph intelligence](https://github.com/Rovemark/logica-mind/blob/main/docs/graph-intelligence.md) | [Graph explorer (layouts & facets)](https://github.com/Rovemark/logica-mind/blob/main/docs/graph-explorer.md) |
+| [Dreaming & lifecycle](https://github.com/Rovemark/logica-mind/blob/main/docs/dreaming.md) | [User model & peers](https://github.com/Rovemark/logica-mind/blob/main/docs/user-model-and-peers.md) | [Sessions & run records](https://github.com/Rovemark/logica-mind/blob/main/docs/sessions-and-records.md) |
+| [MCP server](https://github.com/Rovemark/logica-mind/blob/main/docs/mcp.md) | [Auto-capture hooks](https://github.com/Rovemark/logica-mind/blob/main/docs/hooks.md) | [Integrations & SDKs](https://github.com/Rovemark/logica-mind/blob/main/docs/integrations.md) |
+| [Dashboard](https://github.com/Rovemark/logica-mind/blob/main/docs/dashboard.md) | [Internationalization](https://github.com/Rovemark/logica-mind/blob/main/docs/internationalization.md) | [Portability & privacy](https://github.com/Rovemark/logica-mind/blob/main/docs/portability-and-privacy.md) |
+| [CLI](https://github.com/Rovemark/logica-mind/blob/main/docs/cli.md) | [Graph intelligence](https://github.com/Rovemark/logica-mind/blob/main/docs/graph-intelligence.md) | [Connections](https://github.com/Rovemark/logica-mind/blob/main/docs/connections.md) |
+| [API reference](https://github.com/Rovemark/logica-mind/blob/main/docs/api-reference.md) | [Benchmarks for agent memory](https://github.com/Rovemark/logica-mind/blob/main/BENCHMARKS.md) | [TypeScript client](https://github.com/Rovemark/logica-mind/blob/main/clients/typescript/src/index.ts) |
 
 ---
 
@@ -313,19 +441,19 @@ Full guides live in [`docs/`](docs/):
 ```bash
 git clone https://github.com/Rovemark/logica-mind.git
 cd logica-mind
-pip install -e ".[dev]" && pytest -q          # 189 tests, fully offline
+pip install -e ".[dev]" && pytest -q          # 202 tests, fully offline
 
 # rebuild the dashboard (only if you change the UI)
 cd logica_mind/web/app && npm ci && npm run build
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
+See [CONTRIBUTING.md](https://github.com/Rovemark/logica-mind/blob/main/CONTRIBUTING.md) for the full guide.
 
 ---
 
 ## 📦 Status
 
-**v0.2.0 — Beta.** The full feature set above is shipped and covered by 189 tests.
+**v0.3.0 — Beta.** The full feature set above is shipped and covered by 202 tests.
 Episodic, semantic, temporal-graph and dialectic user memory; automatic
 extraction; embeddings + reranking; a temporal knowledge graph; sleep-time
 consolidation; an MCP server and a self-hosted dashboard — one cohesive library,
@@ -333,4 +461,4 @@ offline by default.
 
 ## 📄 License
 
-[Apache License 2.0](LICENSE) © Rovemark.
+[Apache License 2.0](https://github.com/Rovemark/logica-mind/blob/main/LICENSE) © Rovemark.
