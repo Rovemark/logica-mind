@@ -34,6 +34,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..types import Memory, MemoryLayer, now_iso
+from .guard import SelfRewriteBlocked
 from .self_model import SelfModel
 
 _HYP_SYSTEM = "Você raciocina de forma cética e concreta. Nada de vaguidão."
@@ -52,6 +53,7 @@ class Heartbeat:
         check_after_seconds: int = 6 * 3600,
         max_hypotheses: int = 3,
         max_corrections: int = 5,
+        guard: Optional[Callable[..., bool]] = None,
     ) -> None:
         self.mind = mind
         self.ns = mind.namespace
@@ -64,7 +66,7 @@ class Heartbeat:
         self.max_corrections = max_corrections
         self.self_model = SelfModel(
             mind.store, mind.namespace,
-            llm=self.llm, embedder=getattr(mind, "embedder", None), clock=clock,
+            llm=self.llm, embedder=getattr(mind, "embedder", None), clock=clock, guard=guard,
         )
 
     # ── helpers ───────────────────────────────────────────────────────────────
@@ -148,7 +150,10 @@ class Heartbeat:
         if report["corrected"]:
             patch["recent"] = {"wins": [f"auto-corrigiu {report['corrected']} hipótese(s)"]}
         if patch:
-            self.self_model.save(patch)
+            try:
+                self.self_model.save(patch)
+            except SelfRewriteBlocked as blocked:
+                report["blocked"] = blocked.decision.get("zone")  # gate vetoed the rewrite
 
         # 7. EMERGE (proactive surface)
         report["surfaced"] = len(surfaced)

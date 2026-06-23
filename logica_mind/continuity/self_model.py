@@ -40,6 +40,7 @@ import json
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..types import Memory, MemoryLayer, now_iso
+from .guard import classify_self_change, SelfRewriteBlocked
 
 # Tunables — kept module-level so they are easy to audit and override in tests.
 ALPHA = 0.3          # weight of new experience in the moving average (evolve, don't jump)
@@ -74,6 +75,7 @@ class SelfModel:
         llm: Optional[object] = None,
         embedder: Optional[object] = None,
         clock: Optional[Callable[[], str]] = None,
+        guard: Optional[Callable[..., bool]] = None,
     ) -> None:
         self.store = store
         self.namespace = namespace          # the agent this self belongs to
@@ -81,6 +83,9 @@ class SelfModel:
         self.embedder = embedder            # reserved (future: embed beliefs)
         self._now = clock or now_iso
         self._current_id = f"self-model::{namespace}::current"
+        # optional constitutional brake: guard(prev, proposed, decision) -> bool
+        # (True = allow). None = kernel default (permissive, only classifies).
+        self.guard = guard
 
     # ── skeleton & merge ──────────────────────────────────────────────────────
     def _skeleton(self) -> Dict[str, Any]:
@@ -158,13 +163,14 @@ class SelfModel:
                 pass  # corrupted current → fall through to skeleton (history still intact)
         return self._skeleton()
 
-    def _commit(self, state: Dict[str, Any], prev_hash: str) -> Dict[str, Any]:
+    def _commit(self, state: Dict[str, Any], prev_hash: str, zone: str = "green") -> Dict[str, Any]:
         """Write an immutable version + upsert the current pointer, atomically."""
         state["prev_hash"] = prev_hash
         state.pop("hash", None)
         state["hash"] = self._hash(state)
         body = json.dumps(state, ensure_ascii=False)
-        meta_common = {"continuity": "self-model", "version": state["version"], "hash": state["hash"]}
+        meta_common = {"continuity": "self-model", "version": state["version"],
+                       "hash": state["hash"], "zone": zone}
         version = Memory(
             content=body, namespace=self.namespace, layer=MemoryLayer.USER,
             id=f"self-model::{self.namespace}::v{state['version']}",
@@ -188,6 +194,10 @@ class SelfModel:
             prev = self.load()
             prev_hash = prev.get("hash", "")
             nxt = self._merge_reweight(prev, patch or {})
+            # constitutional brake: classify the change; an injected guard may veto
+            decision = classify_self_change(prev, nxt)
+            if self.guard is not None and not self.guard(prev, nxt, decision):
+                raise SelfRewriteBlocked(decision)
             # CAS: has `current` moved since we read it?
             check = self.store.get(self.namespace, self._current_id)
             check_hash = ""
@@ -197,7 +207,7 @@ class SelfModel:
                 except (ValueError, TypeError):
                     check_hash = ""
             if check_hash == prev_hash:
-                return self._commit(nxt, prev_hash)
+                return self._commit(nxt, prev_hash, zone=decision["zone"])
         raise RuntimeError(f"self-model[{self.namespace}]: CAS conflict — concurrent writers, retries exhausted")
 
     # ── history / integrity / restore ─────────────────────────────────────────
@@ -225,6 +235,21 @@ class SelfModel:
                 return (False, v.get("version", -1), "broken link (missing/forked version)")
             prev_hash = v["hash"]
         return (True, len(versions), "ok")
+
+    def detect_drift(self, window: int = 6, threshold: float = 0.15) -> Dict[str, Any]:
+        """Flag slow self-corruption: load-bearing drives eroding across versions.
+
+        Looks at the last ``window`` versions and reports any of coherence/legacy
+        that fell by ``threshold`` or more from the window's start to its end.
+        """
+        versions = self.versions()[-window:]
+        eroded: Dict[str, Any] = {}
+        for d in ("coherence", "legacy"):
+            seq = [(v.get("drives") or {}).get(d) for v in versions]
+            seq = [x for x in seq if isinstance(x, (int, float))]
+            if len(seq) >= 3 and (seq[0] - seq[-1]) >= threshold:
+                eroded[d] = {"from": seq[0], "to": seq[-1], "delta": round(seq[0] - seq[-1], 3)}
+        return {"drifting": bool(eroded), "eroded": eroded, "window": len(versions)}
 
     def restore(self, version: int) -> Dict[str, Any]:
         """Restore an earlier version as the new *current* — recorded as a fresh
