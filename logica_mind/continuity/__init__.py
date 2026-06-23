@@ -8,6 +8,7 @@ imports nothing outside ``logica_mind`` — so it stays a clean, embeddable kern
 Phase -1 ships :class:`SelfModel` (versioned, hash-chained, atomic, restorable).
 :class:`Heartbeat` adds the cognitive cycle on top. The rest lands in later phases.
 """
+from .causal_model import CausalModel
 from .debate import Debate
 from .guard import SelfRewriteBlocked, classify_self_change, zone_guard
 from .heartbeat import Heartbeat, beat_all
@@ -18,5 +19,5 @@ from .world_insights import WorldInsights
 __all__ = [
     "SelfModel", "Heartbeat", "beat_all",
     "classify_self_change", "zone_guard", "SelfRewriteBlocked",
-    "WorldInsights", "Metacog", "Debate",
+    "WorldInsights", "Metacog", "Debate", "CausalModel",
 ]
