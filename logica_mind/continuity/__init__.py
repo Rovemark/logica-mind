@@ -11,8 +11,10 @@ Phase -1 ships :class:`SelfModel` (versioned, hash-chained, atomic, restorable).
 from .guard import SelfRewriteBlocked, classify_self_change, zone_guard
 from .heartbeat import Heartbeat, beat_all
 from .self_model import SelfModel
+from .world_insights import WorldInsights
 
 __all__ = [
     "SelfModel", "Heartbeat", "beat_all",
     "classify_self_change", "zone_guard", "SelfRewriteBlocked",
+    "WorldInsights",
 ]

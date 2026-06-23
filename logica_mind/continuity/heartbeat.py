@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from ..types import Memory, MemoryLayer, now_iso
 from .guard import SelfRewriteBlocked
 from .self_model import SelfModel
+from .world_insights import WorldInsights
 
 _HYP_SYSTEM = "Você raciocina de forma cética e concreta. Nada de vaguidão."
 _JUDGE_SYSTEM = "Você é um juiz cético. Sem evidência clara, o veredito é 'open'."
@@ -68,6 +69,8 @@ class Heartbeat:
             mind.store, mind.namespace,
             llm=self.llm, embedder=getattr(mind, "embedder", None), clock=clock, guard=guard,
         )
+        # shared cortex: this agent both reads what the fleet learned and contributes
+        self.world = WorldInsights(mind.store, embedder=getattr(mind, "embedder", None), clock=clock)
 
     # ── helpers ───────────────────────────────────────────────────────────────
     def _llm_ok(self) -> bool:
@@ -172,6 +175,7 @@ class Heartbeat:
             f"Você é o ciclo cognitivo do agente \"{self.ns}\".\n\n"
             f"QUEM ELE É HOJE:\n{self.self_model.format_for_prompt(model) or '(self-model vazio)'}\n\n"
             f"CONTEXTO (memória de longo prazo):\n{(context or '(vazio)')[:1200]}\n\n"
+            f"{self.world.format_for_prompt(self.ns) or '(empresa sem insights ainda)'}\n\n"
             f"NOVIDADES DESDE A ÚLTIMA BATIDA:\n{perceived_txt}\n\n"
             "Gere 1 a 3 HIPÓTESES FALSIFICÁVEIS sobre o mundo/usuário/trabalho — coisas que dá "
             "pra confirmar ou refutar depois. Cada uma com confiança 0..1. "
@@ -241,6 +245,13 @@ class Heartbeat:
                     "text": m.content[:200],
                     "confidence": 0.7 if verdict == "confirmed" else 0.2,
                 })
+                # share with the fleet: confirmed → company insight; refuted → retract
+                try:
+                    self.world.publish(self.ns, m.content[:200],
+                                       confidence=0.7 if verdict == "confirmed" else 0.2,
+                                       refuted=(verdict == "refuted"))
+                except Exception:
+                    pass
                 if verdict == "refuted":
                     surfaced.append(f"crença refutada: {m.content[:80]}")
         return corrected, beliefs_patch, surfaced

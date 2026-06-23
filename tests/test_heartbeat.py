@@ -101,3 +101,12 @@ def test_fail_soft_on_llm_error():
     rep = Heartbeat(mind).beat()                                    # must not raise
     assert rep["llm"] is True and rep["hypotheses"] == 0            # degraded, but pulsed
     assert rep["steps"]["consolidate"] == "ok"
+
+
+def test_beat_publishes_confirmed_to_shared_cortex():
+    from logica_mind.continuity import WorldInsights
+    store = InMemoryStore()
+    mind = FakeMind(store, "dev", FakeLLM(verdict="confirmed"))
+    Heartbeat(mind, check_after_seconds=0).beat()                   # dev confirms its hypotheses
+    top = WorldInsights(store).top_for("luna")                      # luna wakes up knowing
+    assert len(top) >= 1 and all(m.metadata["agent"] == "dev" for m in top)
