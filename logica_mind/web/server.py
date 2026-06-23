@@ -387,10 +387,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     created = target.remember(str(body.get("text", "")), session=body.get("session"))
                     self._json({"stored": [c.content for c in created], "count": len(created)})
                 elif path == "/api/self-model":
-                    # continuity substrate: merge a patch into the agent's self-model
-                    from ..continuity import SelfModel
-                    saved = SelfModel(target.store, ns).save(body.get("patch") or {})
-                    self._json({"namespace": ns, "version": saved["version"], "self_model": saved})
+                    # continuity substrate: merge a patch into the agent's self-model.
+                    # IDENTITY GUARD on the data plane: an identity drift (filled -> different)
+                    # is the red zone and is BLOCKED here too, not only on the heartbeat path.
+                    # The initial seed (empty -> filled) is yellow and passes. `seed: true` is the
+                    # admin override (identity correction), used only by the seed-identity tool.
+                    from ..continuity import SelfModel, zone_guard
+                    from ..continuity.guard import SelfRewriteBlocked
+                    _guard = None if body.get("seed") else zone_guard(block_zones=("red",))
+                    try:
+                        saved = SelfModel(target.store, ns, guard=_guard).save(body.get("patch") or {})
+                        self._json({"namespace": ns, "version": saved["version"], "self_model": saved})
+                    except SelfRewriteBlocked as exc:
+                        self._json({"namespace": ns, "blocked": True, "zone": "red", "reason": str(exc)}, code=403)
                 elif path == "/api/debate":
                     # continuity substrate: resolve a debate with epistemic consequence
                     from ..continuity import Debate
