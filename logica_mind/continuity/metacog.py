@@ -87,6 +87,25 @@ class Metacog:
         return round(best, 3)
 
     @staticmethod
+    def _match_count(model: Dict[str, Any], domain: str) -> int:
+        """How many distinct (non-sentinel) skills match the domain — depth of expertise.
+
+        Used only as a small near-tie breaker in :meth:`who_knows` (a head with 4 legal
+        skills beats one with a single lgpd skill); never changes the public competence.
+        """
+        domain_l = (domain or "").lower().strip()
+        if not domain_l:
+            return 0
+        n = 0
+        for k in (model.get("skills") or {}):
+            kl = str(k).lower()
+            if kl.startswith("__"):
+                continue
+            if kl == domain_l or kl in domain_l or domain_l in kl:
+                n += 1
+        return n
+
+    @staticmethod
     def _marker(c: float) -> str:
         return "alta" if c >= 0.7 else "média" if c >= 0.4 else "baixa"
 
@@ -111,9 +130,11 @@ class Metacog:
             if c >= self.min_competence:
                 etype = self._entity_type(model)
                 # public `competence` stays the TRUE score (contract unchanged); the
-                # private `_rank` carries the type-aware tiebreak used only to sort.
+                # private `_rank` carries the type-aware tiebreak + a tiny depth bonus
+                # (more matching skills wins a near-tie) used only to sort.
+                depth = min(0.08, 0.02 * max(0, self._match_count(model, domain) - 1))
                 out.append({"agent": ns, "competence": c,
-                            "_rank": self._rank_competence(c, etype)})
+                            "_rank": round(self._rank_competence(c, etype) + depth, 3)})
         # sort by the type-aware rank, then by true competence, then name (stable).
         out.sort(key=lambda x: (x["_rank"], x["competence"], x["agent"]), reverse=True)
         for r in out:
