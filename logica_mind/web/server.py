@@ -288,14 +288,32 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
         def log_message(self, *args):
             pass
 
-        def _authed(self) -> bool:
-            # loopback callers are trusted; otherwise a valid bearer token is required
-            if self.client_address and self.client_address[0] in _LOOPBACK:
-                return True
+        def _bearer_ok(self) -> bool:
+            # constant-time check of a valid `Authorization: Bearer <token>` header.
+            # Only meaningful when a token is configured.
             if not token:
                 return False
             auth = self.headers.get("Authorization", "")
             return auth.startswith("Bearer ") and hmac.compare_digest(auth[7:], token)
+
+        def _authed(self) -> bool:
+            # READ auth: loopback callers are trusted; otherwise a valid bearer token.
+            # This keeps the local dashboard and the loopback memory pipeline working
+            # with zero config (reads expose content but never mutate state).
+            if self.client_address and self.client_address[0] in _LOOPBACK:
+                return True
+            return self._bearer_ok()
+
+        def _can_write(self) -> bool:
+            # WRITE auth (defense-in-depth): when a token IS configured, EVERY writer
+            # must present it — INCLUDING loopback. That stops a local process that
+            # doesn't hold the token (a compromised same-host service) from mutating
+            # memory just by virtue of running on the box. When NO token is configured
+            # we fall back to the read rule (loopback trusted) so a token-less
+            # deployment behaves exactly as before — zero regression, fail-soft.
+            if token:
+                return self._bearer_ok()
+            return self._authed()
 
         def _cors(self):
             # the server binds loopback only, so a permissive ACAO is safe and lets
@@ -371,7 +389,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 if not (token and auth.startswith("Bearer ")
                         and hmac.compare_digest(auth[7:], token)):
                     return self._json({"error": "read-only public deployment"}, 403)
-            elif not self._authed():  # loopback-trusted or constant-time bearer check
+            elif not self._can_write():
+                # WRITE gate: when LOGICA_MIND_TOKEN is set, a valid bearer token is
+                # required even from loopback (a same-host process without the token
+                # can't mutate memory). Token-less deployments keep loopback trust.
                 return self._json({"error": "unauthorized"}, 401)
             body = self._body()
             ns = (body.get("namespace") or mind.namespace)
