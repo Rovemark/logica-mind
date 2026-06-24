@@ -202,6 +202,11 @@ class Heartbeat:
             "sou uma ia", "sou um modelo", "sou um assistente", "sou o claude", "sou a claude",
             "como uma ia", "como um modelo de linguagem", "enquanto ia", "não sou capaz de",
             "não posso ter", "nao posso ter",
+            # o modelo "quebrando personagem" — negando ser o agente / se dizendo Claude/IA:
+            "sou claude", "anthropic", "modelo de linguagem", "language model",
+            "não um agente", "nao um agente", "não sou um agente", "nao sou um agente",
+            "agente persistente", "persistent agent", "agente chamado", "agent named",
+            "inteligência artificial", "inteligência artificial",
         )
         return any(m in t for m in markers)
 
