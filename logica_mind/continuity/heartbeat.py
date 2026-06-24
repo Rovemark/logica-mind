@@ -182,6 +182,29 @@ class Heartbeat:
         report["ms"] = int((time.monotonic() - t0) * 1000)
         return report
 
+    # A shared insight must be a claim about the WORLD / USER / WORK — not the model
+    # talking about ITSELF. The cortex is fed back into the next beat's prompt, so a
+    # defensive/meta/self-referential "belief" (the LLM doubting its memory, flagging the
+    # prompt as a jailbreak, narrating the JSON format, "sou uma IA…") would loop and
+    # AMPLIFY across the fleet. Drop those before they reach the shared cortex.
+    @staticmethod
+    def _is_low_quality(text: str) -> bool:
+        t = (text or "").strip().lower()
+        if len(t) < 12:   # too short to be a real, falsifiable insight
+            return True
+        markers = (
+            "jailbreak", "prompt injection", "este prompt", "esse prompt",
+            "ignorar instruç", "ignorar as instru", "ignore previous", "ignore as instru",
+            "não tenho memória", "nao tenho memoria", "não tenho acesso", "nao tenho acesso",
+            "sem memória persistente", "sem memoria persistente", "memória persistente entre",
+            "no persistent memory", "don't have memory", "dont have memory", "don't have access",
+            "memória estruturada", "memoria estruturada", "insights de agentes anteriores",
+            "sou uma ia", "sou um modelo", "sou um assistente", "sou o claude", "sou a claude",
+            "como uma ia", "como um modelo de linguagem", "enquanto ia", "não sou capaz de",
+            "não posso ter", "nao posso ter",
+        )
+        return any(m in t for m in markers)
+
     # ── step 7 (cortex) ─────────────────────────────────────────────────────────
     def _publish_to_cortex(self, beliefs_patch: List[Dict[str, Any]]) -> int:
         """Publish the beat's high-confidence beliefs to the shared WorldInsights.
@@ -209,6 +232,8 @@ class Heartbeat:
             except (TypeError, ValueError):
                 conf = 0.0
             if not text or conf < self.publish_min_confidence:
+                continue
+            if self._is_low_quality(text):   # não polui o cortex com meta/defensivo (evita o loop)
                 continue
             key = text[:200]
             if key in seen:
