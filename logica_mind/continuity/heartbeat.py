@@ -55,6 +55,8 @@ class Heartbeat:
         max_hypotheses: int = 3,
         max_corrections: int = 5,
         guard: Optional[Callable[..., bool]] = None,
+        publish_min_confidence: float = 0.8,
+        max_published: int = 3,
     ) -> None:
         self.mind = mind
         self.ns = mind.namespace
@@ -65,6 +67,8 @@ class Heartbeat:
         self.check_after_seconds = check_after_seconds
         self.max_hypotheses = max_hypotheses
         self.max_corrections = max_corrections
+        self.publish_min_confidence = publish_min_confidence
+        self.max_published = max_published
         self.self_model = SelfModel(
             mind.store, mind.namespace,
             llm=self.llm, embedder=getattr(mind, "embedder", None), clock=clock, guard=guard,
@@ -158,7 +162,16 @@ class Heartbeat:
             except SelfRewriteBlocked as blocked:
                 report["blocked"] = blocked.decision.get("zone")  # gate vetoed the rewrite
 
-        # 7. EMERGE (proactive surface)
+        # 7. EMERGE (proactive surface + feed the shared cortex)
+        # Share the high-confidence beliefs this beat just formed with the fleet,
+        # so learning emerges immediately — not only 6h later when a hypothesis
+        # happens to resolve. publish() already sanitizes-on-read and dedupes by
+        # content-hash id, so re-publishing the same belief is idempotent.
+        try:
+            report["published"] = self._publish_to_cortex(beliefs_patch)
+        except Exception:
+            report["published"] = 0  # fail-soft: publicar no cortex NUNCA quebra a batida
+
         report["surfaced"] = len(surfaced)
         if surfaced and self.notifier:
             try:
@@ -168,6 +181,45 @@ class Heartbeat:
 
         report["ms"] = int((time.monotonic() - t0) * 1000)
         return report
+
+    # ── step 7 (cortex) ─────────────────────────────────────────────────────────
+    def _publish_to_cortex(self, beliefs_patch: List[Dict[str, Any]]) -> int:
+        """Publish the beat's high-confidence beliefs to the shared WorldInsights.
+
+        Quality gate (no flooding): only beliefs at/above ``publish_min_confidence``,
+        deduped by text within this beat, capped at ``max_published``, strongest
+        first. Fail-soft: a publish error never breaks the beat. Refuted beliefs
+        (confidence pushed down by self-correction) are skipped here — those are
+        already retracted via ``mark_refuted`` in :meth:`_self_correct`.
+        """
+        published = 0
+        seen: set[str] = set()
+        def _safe_conf(b):
+            try:
+                return float(b.get("confidence", 0))
+            except (TypeError, ValueError):
+                return 0.0
+        candidates = sorted(beliefs_patch, key=_safe_conf, reverse=True)
+        for b in candidates:
+            if published >= self.max_published:
+                break
+            text = (b.get("text") or "").strip()
+            try:
+                conf = float(b.get("confidence", 0))
+            except (TypeError, ValueError):
+                conf = 0.0
+            if not text or conf < self.publish_min_confidence:
+                continue
+            key = text[:200]
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if self.world.publish(self.ns, key, confidence=conf):
+                    published += 1
+            except Exception:
+                pass  # fail-soft: cortex hiccup never breaks the beat
+        return published
 
     # ── step 4 ────────────────────────────────────────────────────────────────
     def _hypothesize(self, model: Dict[str, Any], context: str, perceived_txt: str) -> List[Dict[str, Any]]:
