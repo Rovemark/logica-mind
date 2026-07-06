@@ -19,6 +19,8 @@ import hmac
 import json
 import os
 import re
+import threading
+import time as _time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -57,11 +59,22 @@ def _save_session_names(store, names: dict) -> None:
     path = _session_names_path(store)
     if not path:
         return
+    # ATOMIC write (tmp + os.replace), like _save_settings: /api/sessions now writes
+    # this file from the hot, concurrently-served list handler under ThreadingHTTPServer.
+    # A plain open('w')+json.dump could interleave with a concurrent writer and leave a
+    # torn file → _load_session_names swallows the JSONDecodeError, returns {}, and every
+    # manual rename is silently lost. os.replace is atomic, so readers never see a partial.
     try:
-        with open(path, "w", encoding="utf-8") as f:
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(names, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
     except Exception:
-        pass
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
 
 
 # ---- persisted user settings (LLM choice + dream cadence) -------------------
@@ -113,61 +126,111 @@ def _auto_name_session(mind, namespace: str, session_id: str) -> str:
     return session_id[:16]
 
 
-def _try_import_claude_sessions(session_names: dict) -> int:
-    """Scan ~/.claude/projects/ for session .jsonl files and auto-name matching sessions."""
-    claude_dir = os.path.expanduser("~/.claude/projects")
-    if not os.path.isdir(claude_dir):
-        return 0
-    added = 0
-    try:
-        for proj_hash in os.listdir(claude_dir):
-            proj_path = os.path.join(claude_dir, proj_hash)
-            if not os.path.isdir(proj_path):
-                continue
-            for fname in os.listdir(proj_path):
-                if not fname.endswith(".jsonl"):
+# Incremental cache for the Claude Code title scan. Titles are broadcast events keyed
+# by sessionId, scattered across transcripts; scanning every file on each /api/sessions
+# call would be wasteful. We remember each file's (mtime, size) and only re-parse the
+# ones that changed, and memoize the built index behind a short TTL — so a hot, polled
+# /api/sessions doesn't re-stat the whole ~/.claude/projects tree every request.
+# All access is under _CLAUDE_TITLE_LOCK: the server is ThreadingHTTPServer, and the
+# cache dicts are module-global mutable state (naked iteration would risk
+# "dictionary changed size during iteration"). _SNAMES_LOCK serializes the
+# load→modify→save of session_names.json so a rename can't be lost to a racing writer.
+_CLAUDE_TITLE_CACHE: dict = {"file_sigs": {}, "custom": {}, "ai": {}, "titles": None, "scanned_at": -1e9}
+_CLAUDE_TITLE_LOCK = threading.Lock()
+_SNAMES_LOCK = threading.Lock()
+_CLAUDE_TITLE_TTL = 15.0   # seconds; a fresh scan at most this often on the polled path
+
+
+def _index_claude_titles(ttl: float = _CLAUDE_TITLE_TTL) -> dict:
+    """Map Claude Code session_id → {'name', 'kind'} using the session's REAL title.
+    Claude Code records titles as broadcast events (keyed by sessionId, not necessarily
+    in that session's own transcript file):
+        {"type":"custom-title","customTitle":..,"sessionId":..}  — user-set (wins)
+        {"type":"ai-title","aiTitle":..,"sessionId":..}          — AI-generated
+    Returns {} when ~/.claude/projects is absent (non-Claude-Code hosts). Memoized for
+    `ttl` seconds; within a scan, only files whose (mtime, size) changed are re-parsed.
+    Pass ttl=0 to force a fresh scan (explicit /api/sessions/claude-import)."""
+    base = os.path.expanduser("~/.claude/projects")
+    if not os.path.isdir(base):
+        return {}
+    with _CLAUDE_TITLE_LOCK:
+        cache = _CLAUDE_TITLE_CACHE
+        now = _time.monotonic()
+        if cache["titles"] is not None and (now - cache["scanned_at"]) < ttl:
+            return cache["titles"]              # inside the TTL window → skip the walk
+        try:
+            walker = os.walk(base)
+        except OSError:
+            return cache["titles"] or {}
+        for root, _dirs, fnames in walker:
+            for fn in fnames:
+                if not fn.endswith(".jsonl"):
                     continue
-                session_id = fname[:-6]  # strip .jsonl
-                if session_id in session_names:
-                    continue
-                fpath = os.path.join(proj_path, fname)
+                p = os.path.join(root, fn)
                 try:
-                    title = _extract_claude_session_title(fpath)
-                    if title:
-                        session_names[session_id] = {"name": title, "source": "claude-code", "auto": True}
-                        added += 1
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return added
+                    st = os.stat(p)
+                except OSError:
+                    continue
+                sig = (st.st_mtime_ns, st.st_size)
+                if cache["file_sigs"].get(p) == sig:
+                    continue                    # unchanged → keep cached contributions
+                try:
+                    # errors="replace": a stray invalid UTF-8 byte would otherwise raise
+                    # UnicodeDecodeError (a ValueError, NOT caught by `except OSError`)
+                    # mid-iteration and abort the whole scan.
+                    with open(p, "r", encoding="utf-8", errors="replace") as f:
+                        for line in f:
+                            # cheap prefilter: skip the (many, huge) non-title lines
+                            # before paying for a JSON parse
+                            if '"custom-title"' not in line and '"ai-title"' not in line:
+                                continue
+                            try:
+                                o = json.loads(line)
+                            except Exception:
+                                continue
+                            sid = o.get("sessionId")
+                            if not sid:
+                                continue
+                            if o.get("type") == "custom-title" and o.get("customTitle"):
+                                cache["custom"][sid] = str(o["customTitle"]).strip()
+                            elif o.get("type") == "ai-title" and o.get("aiTitle"):
+                                cache["ai"][sid] = str(o["aiTitle"]).strip()
+                except OSError:
+                    continue
+                # stamp the signature only AFTER a fully successful read, so a mid-file
+                # failure doesn't mark the file "done" and drop the title events past it.
+                cache["file_sigs"][p] = sig
+        titles: dict = {}
+        for sid, name in cache["ai"].items():
+            if name:
+                titles[sid] = {"name": name[:80], "kind": "ai"}
+        for sid, name in cache["custom"].items():   # user-set title overrides the AI one
+            if name:
+                titles[sid] = {"name": name[:80], "kind": "custom"}
+        cache["titles"] = titles
+        cache["scanned_at"] = now
+        return titles
 
 
-def _extract_claude_session_title(jsonl_path: str) -> str | None:
-    """Extract the first human message from a Claude Code .jsonl session file."""
-    try:
-        with open(jsonl_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                obj = json.loads(line)
-                # Claude Code format: {type: "user", message: {role:"user", content:[...]}}
-                msg = obj.get("message") or obj
-                role = msg.get("role", "")
-                if role != "user":
-                    continue
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    # content blocks: [{type:"text", text:"..."}]
-                    parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
-                    content = " ".join(p for p in parts if p)
-                if isinstance(content, str) and content.strip():
-                    txt = content.strip()[:80]
-                    return txt + ("…" if len(content.strip()) > 80 else "")
-    except Exception:
-        pass
-    return None
+def _try_import_claude_sessions(session_names: dict, known_sids=None, ttl: float = _CLAUDE_TITLE_TTL) -> int:
+    """Capture each Claude Code session's REAL title (custom > ai) into session_names,
+    for every session that HAS one. `known_sids` (when given) scopes the capture to the
+    sessions that actually exist in this store — otherwise we'd persist a name for every
+    Claude session on the machine, bloating the file. Never clobbers a manual rename
+    (auto=False); refreshes auto entries and upgrades ai→custom. Returns how many changed."""
+    changed = 0
+    for sid, info in _index_claude_titles(ttl=ttl).items():
+        if known_sids is not None and sid not in known_sids:
+            continue                            # not a session in this store — skip
+        cur = session_names.get(sid)
+        if cur and cur.get("auto") is False:
+            continue                            # a human named it — leave it
+        if cur and cur.get("name") == info["name"] and cur.get("kind") == info["kind"]:
+            continue                            # already captured, unchanged
+        session_names[sid] = {"name": info["name"], "source": "claude-code",
+                              "auto": True, "kind": info["kind"]}
+        changed += 1
+    return changed
 
 _HERE = os.path.dirname(__file__)
 _DIST = os.path.join(_HERE, "dist")          # built React/Vite app (preferred)
@@ -627,9 +690,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     new_name = str(body.get("name", "")).strip()
                     if not sid or not new_name:
                         return self._json({"error": "session_id and name required"}, 400)
-                    snames = _load_session_names(mind.store)
-                    snames[sid] = {"name": new_name[:80], "source": "manual", "auto": False}
-                    _save_session_names(mind.store, snames)
+                    # locked load→modify→save so a concurrent /api/sessions auto-capture
+                    # can't overwrite this manual rename with a stale snapshot
+                    with _SNAMES_LOCK:
+                        snames = _load_session_names(mind.store)
+                        snames[sid] = {"name": new_name[:80], "source": "manual", "auto": False}
+                        _save_session_names(mind.store, snames)
                     self._json({"ok": True, "session_id": sid, "name": new_name[:80]})
                 elif path == "/api/clear":
                     # danger-zone: clear memories by layer / age / full namespace reset
@@ -963,7 +1029,6 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
 
                 elif path == "/api/sessions":
                     # distinct sessions with counts + time span + names
-                    session_names = _load_session_names(mind.store)
                     names_list = mind.store.namespaces() if is_all else [ns]
                     sess = {}
                     for name in names_list:
@@ -997,6 +1062,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                     e["_first_content"] = m.content.strip()[:60]
                             if c and (e["last"] is None or c > e["last"]):
                                 e["last"] = c
+                    # capture each session's REAL Claude Code title (custom > ai) for the
+                    # sessions we actually have — TTL-memoized scan, persisted so the name
+                    # survives instead of being re-derived. Locked load→import→atomic-save
+                    # so a concurrent rename is never lost; scoped to known sids to avoid
+                    # bloating the file with every Claude session on the machine.
+                    known_sids = {sid for (_n, sid) in sess.keys()}
+                    with _SNAMES_LOCK:
+                        session_names = _load_session_names(mind.store)
+                        try:
+                            if _try_import_claude_sessions(session_names, known_sids):
+                                _save_session_names(mind.store, session_names)
+                        except Exception:
+                            pass
                     for e in sess.values():
                         e["source"] = max(e["_src"], key=e["_src"].get) if e["_src"] else None
                         e.pop("_src", None)
@@ -1338,10 +1416,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     self._json({"namespace": "__all__" if is_all else ns, "curve": items})
 
                 elif path == "/api/sessions/claude-import":
-                    session_names = _load_session_names(mind.store)
-                    added = _try_import_claude_sessions(session_names)
-                    if added:
-                        _save_session_names(mind.store, session_names)
+                    # explicit refresh: force a fresh scan (ttl=0), scoped to the sessions
+                    # that actually exist in this store (naming invisible sessions is bloat)
+                    known = set()
+                    for nm in (mind.store.namespaces() if is_all else [ns]):
+                        for m in mind.store.all(nm, with_embeddings=False):
+                            s = (m.metadata or {}).get("session")
+                            if s:
+                                known.add(s)
+                    with _SNAMES_LOCK:
+                        session_names = _load_session_names(mind.store)
+                        added = _try_import_claude_sessions(session_names, known, ttl=0)
+                        if added:
+                            _save_session_names(mind.store, session_names)
                     self._json({"imported": added})
 
                 # ---- workspace / Project DNA (codebase understanding) ----
