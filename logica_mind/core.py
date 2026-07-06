@@ -204,10 +204,26 @@ class LogicaMind:
 
     def _find_duplicate(self, content: str, embedding, layer: MemoryLayer,
                         scope_filter: Optional[Dict[str, Any]] = None) -> Optional[Memory]:
-        hits = self.store.search(self.namespace, embedding, content, [layer], 1, scope_filter or None)
-        if hits and hits[0].score >= self.dedup_threshold:
-            return hits[0].memory
-        return None
+        # Dedup must mean TRUE semantic identity (cosine ≥ threshold), verified against
+        # the candidate's OWN vector — never a raw store-reported score. When the recall
+        # pool includes a LEXICAL backend (Obsidian BM25), its scores are normalized so
+        # the best candidate is always ~1.0; MultiStore merges by max score, so that 1.0
+        # would mark EVERY new write as a duplicate and silently drop it (the "mind stops
+        # capturing" bug). Re-score the pool with the real embeddings and ignore
+        # lexical-only hits; without a usable vector on either side we do NOT dedup —
+        # never lose a write on lexical overlap alone.
+        if not embedding:
+            return None
+        from ._vector import cosine
+        hits = self.store.search(self.namespace, embedding, content, [layer], 10, scope_filter or None)
+        best_mem, best_sim = None, 0.0
+        for h in hits:
+            emb = getattr(h.memory, "embedding", None)
+            if emb and len(emb) == len(embedding):
+                sim = cosine(embedding, emb)
+                if sim > best_sim:
+                    best_sim, best_mem = sim, h.memory
+        return best_mem if best_sim >= self.dedup_threshold else None
 
     # ---- write -------------------------------------------------------------
     def remember(
