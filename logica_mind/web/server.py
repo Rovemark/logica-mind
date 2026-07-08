@@ -897,13 +897,23 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                 continue
                         ents.sort(key=lambda e: -e["degree"])
                         nss = [n for n in mind.store.namespaces() if ql in n.lower()]
-                        # categories: distinct fact categories matching the query
+                        # categories: distinct fact categories matching the query —
+                        # aggregate in SQL (dimension_counts) instead of loading every
+                        # memory in every namespace, so the ⌘K palette stays snappy.
                         catc = {}
-                        for nm in mind.store.namespaces():
-                            for m in mind.store.all(nm, with_embeddings=False):
-                                c = (m.metadata or {}).get("category")
-                                if c and ql in c.lower():
-                                    catc[c] = catc.get(c, 0) + 1
+                        dcf = getattr(mind.store, "dimension_counts", None)
+                        if callable(dcf):
+                            agg, _unc = dcf(None if is_all else ns)
+                            for _dim, info in (agg or {}).items():
+                                for c, n in (info.get("cats") or {}).items():
+                                    if c and ql in c.lower():
+                                        catc[c] = catc.get(c, 0) + n
+                        else:
+                            for nm in mind.store.namespaces():
+                                for m in mind.store.all(nm, with_embeddings=False):
+                                    c = (m.metadata or {}).get("category")
+                                    if c and ql in c.lower():
+                                        catc[c] = catc.get(c, 0) + 1
                         cats = sorted(catc.items(), key=lambda x: -x[1])[:limit]
                         self._json({
                             "memories": [{"score": round(r.score, 3), "memory": _strip(r.memory.to_dict())} for r in mems],
