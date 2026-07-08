@@ -204,6 +204,54 @@ class Store(ABC):
     def count(self, namespace: str, layers: Optional[List[MemoryLayer]] = None) -> int:
         return len(self.all(namespace, layers))
 
+    def session_stats(self, namespace: Optional[str] = None,
+                      limit: Optional[int] = None, offset: int = 0) -> List[dict]:
+        """Per-session rollup for the sessions list: one dict per distinct
+        metadata.session — {id, namespace, count, first, last, source, first_content,
+        record}, newest-active first. `namespace=None` spans all namespaces.
+
+        Default implementation materializes all() (fine for small/in-process stores);
+        SQL-backed stores OVERRIDE this with an indexed GROUP BY so the sessions
+        endpoint never has to load the whole store into Python just to group it."""
+        namespaces = [namespace] if namespace is not None else self.namespaces()
+        sess: dict = {}
+        for ns in namespaces:
+            for m in self.all(ns, with_embeddings=False):
+                md = m.metadata or {}
+                sid = md.get("session")
+                if not sid:
+                    continue
+                e = sess.setdefault((ns, sid), {"id": sid, "namespace": ns, "count": 0,
+                                                "first": None, "last": None, "source": None,
+                                                "first_content": None, "record": None,
+                                                "_src": {}, "_rec_at": None})
+                e["count"] += 1
+                src = md.get("source")
+                if src:
+                    e["_src"][src] = e["_src"].get(src, 0) + 1
+                if md.get("record") and (e["_rec_at"] is None or (m.created_at or "") >= e["_rec_at"]):
+                    e["_rec_at"] = m.created_at or ""
+                    e["record"] = {"title": md.get("title"), "status": md.get("status"),
+                                   "participants": md.get("participants") or [],
+                                   "metrics": md.get("metrics") or {}, "links": md.get("links") or {}}
+                c = m.created_at or ""
+                if c and (e["first"] is None or c < e["first"]):
+                    e["first"] = c
+                    if not e["first_content"] and m.content:
+                        e["first_content"] = m.content.strip()[:60]
+                if c and (e["last"] is None or c > e["last"]):
+                    e["last"] = c
+        out = []
+        for e in sess.values():
+            e["source"] = max(e["_src"], key=e["_src"].get) if e["_src"] else None
+            e.pop("_src", None)
+            e.pop("_rec_at", None)
+            out.append(e)
+        out.sort(key=lambda x: x["last"] or "", reverse=True)
+        if limit is not None:
+            out = out[int(offset):int(offset) + int(limit)]
+        return out
+
     def timerange(self, namespace: str, layers: Optional[List[MemoryLayer]] = None):
         """(min_created_at, max_created_at) for a namespace, or (None, None) if
         empty. Default scans all() — fine for in-process stores; backends with a

@@ -102,6 +102,18 @@ class MultiStore(Store):
                 pass
         return sorted(out)
 
+    def session_stats(self, namespace=None, limit=None, offset=0):
+        # Delegate to the first backend that computes this IN the store (SQLite's
+        # indexed GROUP BY) rather than merging every backend's full row set in Python.
+        for s in self.stores:
+            if type(s).session_stats is not Store.session_stats:
+                try:
+                    return s.session_stats(namespace, limit, offset)
+                except Exception as e:
+                    print(f"[logica-mind] MultiStore.session_stats: {s.name} failed: {e}", file=sys.stderr)
+        # no SQL-capable backend → the primary store's base rollup (single store, no merge)
+        return self.stores[0].session_stats(namespace, limit, offset)
+
     def timerange(self, namespace, layers=None):
         # fold each child's cheap MIN/MAX instead of materializing rows via all()
         lo = hi = None

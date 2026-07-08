@@ -232,6 +232,44 @@ def _try_import_claude_sessions(session_names: dict, known_sids=None, ttl: float
         changed += 1
     return changed
 
+
+_CAPTURE_STATE = {"running": False, "at": -1e9}
+
+
+def _kick_claude_capture(store, known_sids) -> None:
+    """Fire the Claude-title capture in the BACKGROUND so the sessions list never waits
+    on it. The first cold scan reads every transcript (seconds on a big ~/.claude history);
+    blocking the request on it is exactly what made /sessions "hang then die". Names are
+    already persisted in _session_names.json, so the request renders instantly from disk;
+    this refresh (throttled, single-flight) just picks up new/changed titles for next time."""
+    now = _time.monotonic()
+    with _SNAMES_LOCK:
+        if _CAPTURE_STATE["running"] or (now - _CAPTURE_STATE["at"]) < _CLAUDE_TITLE_TTL:
+            return
+        _CAPTURE_STATE["running"] = True
+        _CAPTURE_STATE["at"] = now
+    sids = set(known_sids or ())
+
+    def _work():
+        try:
+            _index_claude_titles(ttl=0)          # the heavy scan — NO file lock held here
+            with _SNAMES_LOCK:
+                names = _load_session_names(store)
+                if _try_import_claude_sessions(names, sids or None):   # cached now → fast
+                    _save_session_names(store, names)
+        except Exception:
+            pass
+        finally:
+            with _SNAMES_LOCK:
+                _CAPTURE_STATE["running"] = False
+
+    try:
+        threading.Thread(target=_work, name="claude-title-capture", daemon=True).start()
+    except Exception:
+        with _SNAMES_LOCK:
+            _CAPTURE_STATE["running"] = False
+
+
 _HERE = os.path.dirname(__file__)
 _DIST = os.path.join(_HERE, "dist")          # built React/Vite app (preferred)
 _ALL = ("", "__all__", "*", "all")
@@ -1028,68 +1066,37 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         self._json({"memories": [_strip(m.to_dict()) for m in mems]})
 
                 elif path == "/api/sessions":
-                    # distinct sessions with counts + time span + names
-                    names_list = mind.store.namespaces() if is_all else [ns]
-                    sess = {}
-                    for name in names_list:
-                        for m in mind.store.all(name, with_embeddings=False):
-                            md = m.metadata or {}
-                            sid = md.get("session")
-                            if not sid:
-                                continue
-                            e = sess.setdefault((name, sid), {"id": sid, "namespace": name,
-                                                              "count": 0, "first": None, "last": None,
-                                                              "_src": {}, "_first_content": None,
-                                                              "record": None, "_record_at": None})
-                            e["count"] += 1
-                            src = md.get("source")
-                            if src:
-                                e["_src"][src] = e["_src"].get(src, 0) + 1
-                            # a structured session record surfaces its title/status/
-                            # participants/metrics to the list (generic, framework-free).
-                            # If an id was re-used for two records, the NEWEST wins
-                            # (deterministic, matching session_record()).
-                            if md.get("record") and (e["_record_at"] is None or (m.created_at or "") >= e["_record_at"]):
-                                e["_record_at"] = m.created_at or ""
-                                e["record"] = {"title": md.get("title"), "status": md.get("status"),
-                                               "participants": md.get("participants") or [],
-                                               "metrics": md.get("metrics") or {},
-                                               "links": md.get("links") or {}}
-                            c = m.created_at or ""
-                            if c and (e["first"] is None or c < e["first"]):
-                                e["first"] = c
-                                if not e["_first_content"] and m.content:
-                                    e["_first_content"] = m.content.strip()[:60]
-                            if c and (e["last"] is None or c > e["last"]):
-                                e["last"] = c
-                    # capture each session's REAL Claude Code title (custom > ai) for the
-                    # sessions we actually have — TTL-memoized scan, persisted so the name
-                    # survives instead of being re-derived. Locked load→import→atomic-save
-                    # so a concurrent rename is never lost; scoped to known sids to avoid
-                    # bloating the file with every Claude session on the machine.
-                    known_sids = {sid for (_n, sid) in sess.keys()}
-                    with _SNAMES_LOCK:
-                        session_names = _load_session_names(mind.store)
-                        try:
-                            if _try_import_claude_sessions(session_names, known_sids):
-                                _save_session_names(mind.store, session_names)
-                        except Exception:
-                            pass
-                    for e in sess.values():
-                        e["source"] = max(e["_src"], key=e["_src"].get) if e["_src"] else None
-                        e.pop("_src", None)
-                        e.pop("_record_at", None)
+                    # distinct sessions with counts + time span + names, aggregated IN SQL
+                    # (indexed GROUP BY) — NEVER materialize the whole store in Python, which
+                    # is what stalled the process and tripped the health-probe restart loop.
+                    # Optional ?limit=&offset= paginate; default (no limit) returns all.
+                    try:
+                        _lim = int(first(qs, "limit")) if first(qs, "limit") else None
+                    except (TypeError, ValueError):
+                        _lim = None
+                    try:
+                        _off = int(first(qs, "offset") or 0)
+                    except (TypeError, ValueError):
+                        _off = 0
+                    stats = mind.store.session_stats(None if is_all else ns, _lim, _off)
+                    # names come straight from the persisted file (instant); the Claude-title
+                    # refresh runs in the BACKGROUND so the list never blocks on a cold scan.
+                    session_names = _load_session_names(mind.store)
+                    _kick_claude_capture(mind.store, {e["id"] for e in stats})
+                    out = []
+                    for e in stats:
                         sid = e["id"]
+                        rec = e.get("record")
                         stored = session_names.get(sid, {})
                         if stored.get("name"):
-                            e["name"] = stored["name"]
-                        elif e.get("record") and e["record"].get("title"):
-                            e["name"] = e["record"]["title"]      # record title wins as the name
+                            name = stored["name"]
+                        elif rec and rec.get("title"):
+                            name = rec["title"]              # record title wins as the name
                         else:
-                            fc = e.pop("_first_content", None) or sid[:16]
-                            e["name"] = fc
-                        e.pop("_first_content", None)
-                    out = sorted(sess.values(), key=lambda s: s["last"] or "", reverse=True)
+                            name = e.get("first_content") or sid[:16]
+                        out.append({"id": sid, "namespace": e["namespace"], "count": e["count"],
+                                    "first": e["first"], "last": e["last"], "source": e.get("source"),
+                                    "record": rec, "name": name})
                     self._json({"sessions": out})
 
                 elif path == "/api/session":

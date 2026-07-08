@@ -230,6 +230,69 @@ class SQLiteStore(Store):
         return [r["namespace"] for r in cur.fetchall()]
 
     @_locked
+    def session_stats(self, namespace: Optional[str] = None,
+                      limit: Optional[int] = None, offset: int = 0) -> List[dict]:
+        """Per-session rollup computed IN SQL — the sessions endpoint must never load
+        the whole store into Python just to GROUP BY session (tens of thousands of
+        rows × every namespace stalled the process and tripped the health-probe restart
+        loop). Uses the (namespace, $.session) index. Same shape as the base fallback."""
+        # window functions need SQLite ≥ 3.25; older engines take the portable path
+        try:
+            if tuple(int(x) for x in sqlite3.sqlite_version.split(".")[:2]) < (3, 25):
+                return Store.session_stats(self, namespace, limit, offset)
+        except Exception:
+            return Store.session_stats(self, namespace, limit, offset)
+        nsclause = "AND namespace = ?" if namespace is not None else ""
+        ns_params: list = [namespace] if namespace is not None else []
+        # one pass: COUNT/first/last per session + the EARLIEST row's content & source
+        sql = (
+            "SELECT namespace, sid, cnt, first_at, last_at, first_content, first_source FROM ("
+            "  SELECT namespace,"
+            "         json_extract(metadata,'$.session') AS sid,"
+            "         content AS first_content,"
+            "         json_extract(metadata,'$.source') AS first_source,"
+            "         COUNT(*)        OVER w AS cnt,"
+            "         MIN(created_at) OVER w AS first_at,"
+            "         MAX(created_at) OVER w AS last_at,"
+            "         ROW_NUMBER()    OVER (PARTITION BY namespace, json_extract(metadata,'$.session')"
+            "                               ORDER BY created_at ASC, seq ASC, rowid ASC) AS rn"
+            "  FROM memories"
+            f"  WHERE json_extract(metadata,'$.session') IS NOT NULL {nsclause}"
+            "  WINDOW w AS (PARTITION BY namespace, json_extract(metadata,'$.session'))"
+            ") WHERE rn = 1 ORDER BY last_at DESC"
+        )
+        params = list(ns_params)
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params += [int(limit), int(offset)]
+        out: List[dict] = []
+        index: dict = {}
+        for r in self._conn.execute(sql, params).fetchall():
+            e = {"id": r["sid"], "namespace": r["namespace"], "count": r["cnt"],
+                 "first": r["first_at"], "last": r["last_at"],
+                 "first_content": ((r["first_content"] or "").strip()[:60]) or None,
+                 "source": r["first_source"], "record": None}
+            out.append(e)
+            index[(r["namespace"], r["sid"])] = e
+        # attach the most-recent structured session record (rare rows) to the page
+        if out:
+            rec_sql = ("SELECT namespace, json_extract(metadata,'$.session') sid, metadata "
+                       "FROM memories WHERE json_extract(metadata,'$.record') IS NOT NULL "
+                       f"{nsclause} ORDER BY created_at ASC")
+            for rr in self._conn.execute(rec_sql, ns_params).fetchall():
+                e = index.get((rr["namespace"], rr["sid"]))
+                if not e:
+                    continue
+                try:
+                    md = json.loads(rr["metadata"] or "{}")
+                except Exception:
+                    md = {}
+                e["record"] = {"title": md.get("title"), "status": md.get("status"),
+                               "participants": md.get("participants") or [],
+                               "metrics": md.get("metrics") or {}, "links": md.get("links") or {}}
+        return out
+
+    @_locked
     def touch(self, namespace: str, ids: List[str]) -> None:
         if not ids:
             return
