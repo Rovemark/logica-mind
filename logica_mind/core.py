@@ -521,11 +521,14 @@ class LogicaMind:
         metadata_filter: Optional[Dict[str, Any]] = None,
         min_importance: float = 0.0,
         category: Optional[str] = None,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[SearchResult]:
         """Retrieve the most relevant memories. Pipeline: embed query → hybrid
         store search (optionally metadata/session/category-filtered) → blend
         similarity · importance · recency → dedup → optional reranker.
-        `min_importance` is a fact-rating threshold (drop low-rated)."""
+        `min_importance` is a fact-rating threshold (drop low-rated).
+        `query_embedding` reuses a precomputed vector (same embedder) — recall_across
+        embeds ONCE and hands it to every namespace instead of re-embedding N times."""
         query = (query or "").strip()
         if not query:
             return []
@@ -546,7 +549,7 @@ class LogicaMind:
                                  f"metadata_filter['category']={flt['category']!r}")
             flt["category"] = category
 
-        q_emb = self._embed_query(query)
+        q_emb = query_embedding if query_embedding is not None else self._embed_query(query)
         # overfetch enough to feed both dedup and the reranker pool
         pool_size = max(limit * 4, self.rerank_pool if self.reranker else 0)
         raw = self.store.search(self.namespace, q_emb, query, layers, pool_size, flt or None)
@@ -703,9 +706,15 @@ class LogicaMind:
         """Recall across many namespaces (or all) and merge the rankings."""
         limit = max(1, limit)   # guard: a negative limit would slice from the end
         namespaces = namespaces or self.store.namespaces()
+        # embed the query ONCE and reuse it across every namespace — re-embedding per
+        # namespace (the local sentence-transformer is ~80ms) made recall across 254
+        # namespaces take ~20s. All namespace views share this mind's embedder, so the
+        # vector is identical everywhere.
+        q_emb = self._embed_query(query.strip()) if query and query.strip() else None
         merged: List[SearchResult] = []
         for ns in namespaces:
-            merged.extend(self.for_namespace(ns).recall(query, layers=layers, limit=limit))
+            merged.extend(self.for_namespace(ns).recall(
+                query, layers=layers, limit=limit, query_embedding=q_emb))
         merged.sort(key=lambda r: r.score, reverse=True)
         return merged[:limit]
 
