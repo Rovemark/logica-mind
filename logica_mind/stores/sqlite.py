@@ -22,7 +22,7 @@ import threading
 from typing import List, Optional
 
 from ..types import Memory, MemoryLayer, SearchResult
-from .base import Store, rank, apply_filter
+from .base import Store, rank, apply_filter, _tokset
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -44,6 +44,13 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_mem_ns_layer ON memories (namespace, layer);
 CREATE INDEX IF NOT EXISTS idx_mem_created  ON memories (namespace, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_mem_session  ON memories (namespace, json_extract(metadata, '$.session'));
+-- partial expression indexes: dimensioned()/tagged() filter on these JSON keys with
+-- IS NOT NULL — without them every facet vote was a full namespace scan.
+CREATE INDEX IF NOT EXISTS idx_mem_dim     ON memories (namespace, json_extract(metadata, '$.dimension')) WHERE json_extract(metadata, '$.dimension') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mem_channel ON memories (namespace, json_extract(metadata, '$.channel'))   WHERE json_extract(metadata, '$.channel') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mem_project ON memories (namespace, json_extract(metadata, '$.project'))   WHERE json_extract(metadata, '$.project') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mem_squad   ON memories (namespace, json_extract(metadata, '$.squad'))     WHERE json_extract(metadata, '$.squad') IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mem_source  ON memories (namespace, json_extract(metadata, '$.source'))    WHERE json_extract(metadata, '$.source') IS NOT NULL;
 """
 
 
@@ -60,7 +67,8 @@ def _locked(fn):
 class SQLiteStore(Store):
     name = "sqlite"
 
-    def __init__(self, path: str = "logica_mind.db", max_candidates: int = 5000):
+    def __init__(self, path: str = "logica_mind.db", max_candidates: int = 5000,
+                 encryption_key: Optional[str] = None):
         self.path = path
         self.max_candidates = max_candidates
         # reentrant so a locked public method can call another helper that locks
@@ -71,12 +79,29 @@ class SQLiteStore(Store):
         # opening the same shared db; WAL lets readers run during a writer and
         # busy_timeout makes concurrent writers wait-and-retry instead of dropping
         # the captured turn with 'database is locked'.
-        self._conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
-        self._conn.row_factory = sqlite3.Row
+        if encryption_key:
+            # at-rest encryption via SQLCipher (optional: pip install logica-mind[sqlcipher]).
+            # Same dbapi as sqlite3; PRAGMA key must run before any other statement.
+            try:
+                import sqlcipher3 as _drv                      # type: ignore
+            except ImportError as e:  # pragma: no cover
+                raise RuntimeError(
+                    "encryption_key set but sqlcipher3 is not installed. "
+                    "Run: pip install logica-mind[sqlcipher]") from e
+            self._conn = _drv.connect(path, check_same_thread=False, timeout=30)
+            self._conn.row_factory = _drv.Row
+            self._conn.execute("PRAGMA key = '%s'" % encryption_key.replace("'", "''"))
+        else:
+            self._conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
+            self._conn.row_factory = sqlite3.Row
         if path not in (":memory:", ""):
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=30000")
-            self._conn.execute("PRAGMA synchronous=NORMAL")
+            # Durabilidade real contra queda de energia: FULL faz fsync do WAL a cada commit
+            # (NORMAL só no checkpoint → corrompeu no apagão de 19/06). fullfsync=ON força o
+            # F_FULLFSYNC do macOS (APFS/HFS mentem no fsync() comum, não vão ao disco físico).
+            self._conn.execute("PRAGMA fullfsync=ON")
+            self._conn.execute("PRAGMA synchronous=FULL")
         self._conn.executescript(_SCHEMA)
         # migrate pre-seq databases (CREATE TABLE IF NOT EXISTS won't add columns)
         for col, defn in [
@@ -89,6 +114,21 @@ class SQLiteStore(Store):
             except sqlite3.OperationalError:
                 pass  # column already present
         self._conn.commit()
+
+        # Conexão de LEITURA dedicada: reads (recall/search) NÃO podem esperar o lock de ESCRITA — o
+        # dream cycle / captura escrevem em lotes longos segurando o RLock e o recall travava dezenas
+        # de segundos. WAL já permite ler durante escrita no nível SQLite; aqui damos aos reads uma
+        # conexão própria + lock próprio (uma conexão sqlite3 não é usável por 2 threads ao mesmo
+        # tempo). Só no caso arquivo+sem-cripto; :memory: (db por-conexão) e SQLCipher reusam a principal.
+        if path not in (":memory:", "") and not encryption_key:
+            self._rlock = threading.Lock()
+            self._rconn = sqlite3.connect(path, check_same_thread=False, timeout=30)
+            self._rconn.row_factory = sqlite3.Row
+            self._rconn.execute("PRAGMA busy_timeout=30000")
+            self._rconn.execute("PRAGMA query_only=ON")   # read-only defensivo
+        else:
+            self._rlock = self._lock
+            self._rconn = self._conn
 
     # ---- (de)serialization -------------------------------------------------
     @staticmethod
@@ -169,13 +209,15 @@ class SQLiteStore(Store):
         # prompt and its answer can share it
         sql += " ORDER BY created_at DESC, seq DESC, rowid DESC LIMIT ?"
         params.append(self.max_candidates)
-        cur = self._conn.execute(sql, params)
+        cur = self._rconn.execute(sql, params)   # conexão de LEITURA (chamado só pelo search, sob _rlock)
         return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
 
-    @_locked
     def search(self, namespace, query_embedding, query_text, layers=None, limit=20, metadata_filter=None) -> List[SearchResult]:
-        # SQL already scoped by metadata_filter; apply_filter is a cheap safety net
-        cands = apply_filter(self._candidates(namespace, layers, metadata_filter), metadata_filter)
+        # SEM @_locked de propósito: a LEITURA roda na conexão dedicada (_rconn/_rlock), não no lock de
+        # ESCRITA — assim o recall NÃO trava atrás do dream cycle/captura (que seguram o RLock de escrita).
+        # SQL already scoped by metadata_filter; apply_filter is a cheap safety net.
+        with self._rlock:
+            cands = apply_filter(self._candidates(namespace, layers, metadata_filter), metadata_filter)
         return rank(cands, query_embedding, query_text, limit)
 
     @_locked
@@ -222,7 +264,21 @@ class SQLiteStore(Store):
         # with_embeddings=False skips parsing the 384-float vector per row — a big
         # win for enumeration/aggregation endpoints (sessions, dimensions, analytics)
         # that only read content/metadata, never similarity.
-        return self._candidates(namespace, layers, with_embeddings=with_embeddings)
+        #
+        # ENUMERATION IS UNCAPPED on purpose: all() feeds the graph (edges), the
+        # exporter and aggregations — the max_candidates window belongs to SEARCH
+        # ranking only. With the cap, a namespace holding more graph rows than the
+        # window silently DROPPED its oldest edges from the graph/dimensions/
+        # co-mentions (seen live: 7,471 edges, 2,471 invisible).
+        sql = "SELECT * FROM memories WHERE namespace = ?"
+        params: list = [namespace]
+        if layers:
+            placeholders = ",".join("?" for _ in layers)
+            sql += f" AND layer IN ({placeholders})"
+            params += [l.value for l in layers]
+        sql += " ORDER BY created_at DESC, seq DESC, rowid DESC"
+        cur = self._conn.execute(sql, params)
+        return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
 
     @_locked
     def namespaces(self) -> List[str]:
@@ -291,6 +347,30 @@ class SQLiteStore(Store):
                                "participants": md.get("participants") or [],
                                "metrics": md.get("metrics") or {}, "links": md.get("links") or {}}
         return out
+
+    @_locked
+    def set_embeddings(self, namespace: str, pairs) -> int:
+        """Bulk-replace embeddings: pairs = [(memory_id, embedding), …]. Fuel for
+        reembed() — the dimension migration when the embedder changes."""
+        rows = [(json.dumps(v) if v is not None else None, namespace, mid) for mid, v in pairs]
+        self._conn.executemany(
+            "UPDATE memories SET embedding = ? WHERE namespace = ? AND id = ?", rows)
+        self._conn.commit()
+        return len(rows)
+
+    @_locked
+    def change_token(self, namespace=None) -> str:
+        """Cheap token that changes whenever the (namespace's) data changes — fuels
+        read-side caches (graph_viz). COUNT catches deletes, MAX(rowid) catches
+        inserts; in-place UPDATEs of old rows are rare enough that the dream cycle's
+        rewrite pattern (insert+invalidate) still flips the token."""
+        if namespace:
+            r = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(MAX(rowid),0) AS m FROM memories WHERE namespace = ?",
+                (namespace,)).fetchone()
+        else:
+            r = self._conn.execute("SELECT COUNT(*) AS n, COALESCE(MAX(rowid),0) AS m FROM memories").fetchone()
+        return f"{r['n']}:{r['m']}"
 
     @_locked
     def touch(self, namespace: str, ids: List[str]) -> None:
@@ -432,6 +512,49 @@ class SQLiteStore(Store):
         params += [limit, offset]
         cur = self._conn.execute(sql, params)
         return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
+
+    @_locked
+    def mentions(self, namespace, name, limit=0, with_embeddings=False):
+        """Candidate memories that may mention `name` — a fast SQL LIKE pre-filter so
+        the entity-detail/hover path (/api/node) doesn't load+tokenise the WHOLE
+        namespace (O(N) per hover). Returns a SUPERSET: every token of the name appears
+        as a substring in content, OR the raw name appears in the metadata JSON (graph
+        subject/object). The caller still runs the precise token match on this small
+        set, so correctness is unchanged. namespace=None searches GLOBALLY (__all__)."""
+        if not name or not name.strip():
+            return []
+        toks = list(_tokset(name)) or [name.strip().lower()]
+        sql = "SELECT * FROM memories WHERE 1=1"
+        params: list = []
+        if namespace:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        token_clause = " AND ".join("content LIKE ?" for _ in toks)
+        sql += f" AND (({token_clause}) OR metadata LIKE ?)"
+        params += [f"%{t}%" for t in toks]
+        params.append(f"%{name}%")
+        sql += " ORDER BY created_at DESC, seq DESC, rowid DESC"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        cur = self._conn.execute(sql, params)
+        return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
+
+    @_locked
+    def tagged(self, namespace=None, key="channel"):
+        """(content, value) pairs for memories carrying metadata[key] — fuel for the
+        per-entity facet voting (channel / project / squad / …): whatever tag the host
+        application writes on its memories can colour & organize the graph. Whitelisted
+        keys only (the key is interpolated into the json_extract path)."""
+        if key not in ("channel", "project", "squad", "skill", "source"):
+            return []
+        sql = (f"SELECT content, json_extract(metadata,'$.{key}') v FROM memories "
+               f"WHERE json_extract(metadata,'$.{key}') IS NOT NULL AND content IS NOT NULL")
+        params: list = []
+        if namespace:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        return [(c, v) for c, v in self._conn.execute(sql, params).fetchall() if c and v]
 
     def page(self, namespace=None, layers=None, limit=100, offset=0):
         """A bounded page of memories (newest first) — LIMIT/OFFSET in SQL so a list
