@@ -149,10 +149,15 @@ def rank(
         for m in mems
     ]
     lex = bm25_scores(query_text, [m.content for m in mems]) if not all(use_vec) else None
+    # PERF: cosseno de TODOS os candidatos vetoriais numa única operação BLAS (numpy) em vez de um
+    # loop Python O(N×D) chamando cosine() por memória. Com max_candidates=5000 × 384d o loop puro
+    # pendurava o recall em dezenas de segundos (o /api/recall travava >45s → cegava o resto). numpy
+    # já vem via sentence-transformers; sem ele, cai no caminho antigo (paridade). Semântica idêntica.
+    vec = _batch_cosine(query_embedding, mems, use_vec)
     scored = []
     for i, m in enumerate(mems):
         if use_vec[i]:
-            s = max(0.0, cosine(query_embedding, m.embedding))
+            s = vec[i]
         else:
             s = lex[i] if lex is not None else 0.0
         if s <= 0.0:
@@ -160,6 +165,26 @@ def rank(
         scored.append(SearchResult(memory=m, score=s, components={"similarity": round(s, 4)}))
     scored.sort(key=lambda r: r.score, reverse=True)
     return scored[:limit]
+
+
+def _batch_cosine(query_embedding, mems, use_vec):
+    """Cosseno de todos os candidatos com use_vec de uma vez (numpy) → {i: score em [0,1]}.
+    Fallback puro-Python (idêntico ao loop antigo) se numpy não estiver disponível."""
+    idxs = [i for i in range(len(mems)) if use_vec[i]]
+    if not idxs:
+        return {}
+    try:
+        import numpy as np
+    except Exception:
+        return {i: max(0.0, cosine(query_embedding, mems[i].embedding)) for i in idxs}
+    M = np.asarray([mems[i].embedding for i in idxs], dtype=np.float32)   # (K, D)
+    q = np.asarray(query_embedding, dtype=np.float32)                     # (D,)
+    dots = M @ q
+    denom = np.linalg.norm(M, axis=1) * np.linalg.norm(q)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cos = np.where(denom > 0.0, dots / denom, 0.0)
+    cos = np.clip(cos, 0.0, None)   # espelha o max(0.0, ...) do cosine() original
+    return {idxs[k]: float(cos[k]) for k in range(len(idxs))}
 
 
 class Store(ABC):
