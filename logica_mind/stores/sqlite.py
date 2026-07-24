@@ -154,14 +154,22 @@ class SQLiteStore(Store):
         self._fts = False
         self._fts_limit = 3000
         try:
+            # DROP+CREATE os triggers (não IF NOT EXISTS): o au tem que ser `AFTER UPDATE OF content` —
+            # senão touch()/bump_importance/set_embeddings (UPDATE de access_count/importance/embedding,
+            # que NÃO mudam content) re-indexavam o content no FTS a cada recall/reforço = CPU à toa.
+            # A tabela memories_fts é preservada (só recria triggers). O INSERT OR REPLACE do add() é
+            # DELETE+INSERT → coberto por ai/ad; o au só pega UPDATE direto de content (raro).
             self._conn.executescript(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts "
                 "USING fts5(content, content='memories', content_rowid='rowid');\n"
-                "CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN\n"
+                "DROP TRIGGER IF EXISTS memories_ai;\n"
+                "DROP TRIGGER IF EXISTS memories_ad;\n"
+                "DROP TRIGGER IF EXISTS memories_au;\n"
+                "CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN\n"
                 "  INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);\nEND;\n"
-                "CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN\n"
+                "CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN\n"
                 "  INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);\nEND;\n"
-                "CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN\n"
+                "CREATE TRIGGER memories_au AFTER UPDATE OF content ON memories BEGIN\n"
                 "  INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);\n"
                 "  INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);\nEND;")
             # backfill 1× (marcado): rows anteriores à FTS não estão indexadas; os triggers cuidam do resto.
