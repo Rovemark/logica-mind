@@ -671,6 +671,17 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         self._json({"ok": True, "report": out, "llm": getattr(dmind.llm, "name", "null")})
                     except Exception as e:
                         self._json({"ok": False, "error": str(e)}, 500)
+                elif path == "/api/reinforce":
+                    # CAUSAL: calibra a confiança de uma aresta causal com a REALIDADE — o efeito
+                    # previsto aconteceu (correct=true) → sobe; não aconteceu → desce. Auto-correção.
+                    from ..causal import CausalModel
+                    _cause = str(body.get("cause", "")).strip()
+                    _effect = str(body.get("effect", "")).strip()
+                    if not _cause or not _effect:
+                        return self._json({"error": "cause e effect são obrigatórios"}, 400)
+                    _correct = bool(body.get("correct", True))
+                    updated = CausalModel(target.graph).reinforce(_cause, _effect, correct=_correct)
+                    self._json({"ok": True, "updated": updated})
                 elif path == "/api/integrations":
                     # LLM picker: choose which model serves the whole mind. Applies
                     # live (set_llm → extractor/graph/user) and persists across restart.

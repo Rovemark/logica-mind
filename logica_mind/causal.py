@@ -146,6 +146,35 @@ class CausalModel:
             "second_order": [l for l in links if l["order"] >= 2],
         }
 
+    def reinforce(self, cause: str, effect: str, correct: bool = True, lr: float = 0.2) -> List[Dict]:
+        """Calibra a confiança da aresta causal `cause`→`effect` com a REALIDADE (auto-correção
+        sem humano): o efeito ACONTECEU (correct=True) → confiança sobe rumo a 0.99; NÃO aconteceu
+        → desce rumo a 0.05. EMA bounded (lr). Persiste no store SEM tocar o embedding da aresta
+        (store.get traz a linha completa → store.add re-salva). Retorna as arestas ajustadas."""
+        c = self.g.resolve(cause).lower()
+        eff = self.g.resolve(effect).lower()
+        target = 0.99 if correct else 0.05
+        lr = max(0.01, min(0.9, float(lr)))
+        updated: List[Dict] = []
+        for edge in self._causal_edges():
+            if edge.subject.lower() == c and edge.object.lower() == eff:
+                old = self._conf(edge)
+                new = round(max(0.05, min(0.99, old + lr * (target - old))), 4)
+                if not edge.id:
+                    continue
+                mem = self.g.store.get(self.g.namespace, edge.id)
+                if mem is None:
+                    continue
+                md = dict(mem.metadata or {})
+                md["confidence"] = new
+                mem.metadata = md
+                self.g.store.add([mem])   # re-salva a linha completa (embedding preservado)
+                updated.append({
+                    "cause": edge.subject, "effect": edge.object, "predicate": edge.predicate,
+                    "old": round(old, 3), "new": new, "direction": "up" if correct else "down",
+                })
+        return updated
+
     def summary(self, at: Optional[str] = None) -> Dict:
         ce = self._causal_edges(at)
         promotes = sum(1 for e in ce if _polarity(e.predicate) == "promotes")
