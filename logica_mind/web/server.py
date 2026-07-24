@@ -682,6 +682,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     _correct = bool(body.get("correct", True))
                     updated = CausalModel(target.graph).reinforce(_cause, _effect, correct=_correct)
                     self._json({"ok": True, "updated": updated})
+                elif path == "/api/calibrate":
+                    # CAUSAL: calibração AUTOMÁTICA — pra cada aresta causal, se causa+efeito co-ocorrem
+                    # na memória recente (confirmação da realidade), reforça leve. Sem humano no loop.
+                    from ..causal import CausalModel
+                    calibrated = CausalModel(target.graph).calibrate_from_memory()
+                    self._json({"ok": True, "calibrated": len(calibrated), "edges": calibrated[:20]})
                 elif path == "/api/integrations":
                     # LLM picker: choose which model serves the whole mind. Applies
                     # live (set_llm → extractor/graph/user) and persists across restart.

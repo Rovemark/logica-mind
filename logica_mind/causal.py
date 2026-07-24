@@ -186,9 +186,17 @@ class CausalModel:
     def risks(self, min_conf: float = 0.55, at: Optional[str] = None) -> List[Dict]:
         """Riscos previstos: arestas causais de ALTA confiança que PROMOVEM um efeito NEGATIVO
         (churn, perda, falha, atraso…). É o 'prevê E age' — o organismo antevê o que pode dar
-        errado, pra alertar/agir antes. Ranqueado por confiança; severidade alta ≥0.75."""
+        errado E sugere a CONTRAMEDIDA (o que, no grafo, PREVINE aquele mal). Ranqueado por
+        confiança; severidade alta ≥0.75."""
+        edges = self._causal_edges(at)
+        # inibidores por efeito: o que PREVINE cada mal (arestas de polaridade 'inhibits' → esse efeito)
+        inhibitors: Dict[str, List[Dict]] = {}
+        for e in edges:
+            if _polarity(e.predicate) == "inhibits":
+                inhibitors.setdefault(e.object.lower(), []).append(
+                    {"acao": e.subject, "via": e.predicate, "confianca": round(self._conf(e), 3)})
         out: List[Dict] = []
-        for e in self._causal_edges(at):
+        for e in edges:
             eff = e.object.lower()
             if not any(r in eff for r in _NEGATIVE):
                 continue
@@ -197,12 +205,45 @@ class CausalModel:
             conf = self._conf(e)
             if conf < min_conf:
                 continue
+            mit = sorted(inhibitors.get(eff, []), key=lambda x: -x["confianca"])[:3]
             out.append({
                 "cause": e.subject, "effect": e.object, "predicate": e.predicate,
                 "confidence": round(conf, 3), "since": e.valid_from,
                 "severity": "alta" if conf >= 0.75 else "media",
+                "mitigations": mit,   # o que o organismo sabe que PREVINE esse efeito ruim
             })
         out.sort(key=lambda x: x["confidence"], reverse=True)
+        return out
+
+    def calibrate_from_memory(self, recent: int = 300, lr: float = 0.05, ceiling: float = 0.85,
+                              max_edges: int = 40, at: Optional[str] = None) -> List[Dict]:
+        """Calibração AUTOMÁTICA (sem humano no loop): pra cada aresta causal C→E, se C e E CO-OCORREM
+        na memória RECENTE (episodic+semantic), a relação foi 'confirmada' pela realidade → reforça
+        LEVE (lr baixo — evidência fraca, incremental). Bounded: só arestas abaixo do teto (não empurra
+        tudo pra 0.99) e no máx `max_edges` por rodada. Roda no cron/sono. Retorna as arestas calibradas."""
+        try:
+            from .types import MemoryLayer
+            mems = self.g.store.all(self.g.namespace,
+                                    layers=[MemoryLayer.EPISODIC, MemoryLayer.SEMANTIC],
+                                    with_embeddings=False)
+        except Exception:
+            return []
+        if len(mems) > recent:
+            mems = mems[-recent:]
+        blob = " ".join((m.content or "").lower() for m in mems)
+        if not blob:
+            return []
+        out: List[Dict] = []
+        for e in self._causal_edges(at):
+            if len(out) >= max_edges:
+                break
+            if self._conf(e) >= ceiling:
+                continue   # já forte → não super-reforça
+            c, o = e.subject.lower(), e.object.lower()
+            if len(c) < 3 or len(o) < 3:
+                continue
+            if c in blob and o in blob:   # co-ocorrência recente = confirmação fraca
+                out.extend(self.reinforce(e.subject, e.object, correct=True, lr=lr))
         return out
 
     def summary(self, at: Optional[str] = None) -> Dict:
