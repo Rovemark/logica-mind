@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from typing import List, Optional
 
 from ..types import Memory, MemoryLayer, SearchResult, now_iso
@@ -69,6 +70,13 @@ class ObsidianStore(Store):
     def __init__(self, vault: str = "~/logica-mind-vault"):
         self.vault = _expand(vault)
         os.makedirs(self.vault, exist_ok=True)
+        # Cache dos candidatos parseados por (namespace, layers): _candidates() lia+parseava TODOS os
+        # .md do namespace a CADA busca (~1.4s no caminho quente do recall). O cache é invalidado por
+        # uma assinatura barata (nome+mtime via os.scandir, SEM ler os arquivos) → relê só quando algo
+        # muda. Cap simples pra não crescer sem limite com muitos namespaces.
+        self._cc_lock = threading.Lock()
+        self._cc: dict = {}
+        self._cc_cap = 16
 
     def _path(self, m: Memory) -> str:
         d = os.path.join(self.vault, m.namespace, m.layer.value)
@@ -146,19 +154,50 @@ class ObsidianStore(Store):
         base = os.path.join(self.vault, namespace)
         if not os.path.isdir(base):
             return []
-        wanted = {l.value for l in layers} if layers else None
+        wanted = frozenset(l.value for l in layers) if layers else None
+
+        # Assinatura BARATA (não lê arquivos): (arquivo, mtime_ns) de cada .md via os.scandir. Muda em
+        # add/delete/edit → invalida o cache com precisão. Muito mais barato que ler+parsear tudo.
+        sig_parts: List[tuple] = []
+        dirs: List[str] = []
+        try:
+            for layer_dir in sorted(os.listdir(base)):
+                if wanted and layer_dir not in wanted:
+                    continue
+                d = os.path.join(base, layer_dir)
+                if not os.path.isdir(d):
+                    continue
+                dirs.append(d)
+                with os.scandir(d) as it:
+                    for e in it:
+                        if e.name.endswith(".md"):
+                            try:
+                                sig_parts.append((d, e.name, e.stat().st_mtime_ns))
+                            except OSError:
+                                sig_parts.append((d, e.name, 0))
+        except OSError:
+            return []
+        sig = tuple(sorted(sig_parts))
+        ck = (namespace, wanted)
+
+        with self._cc_lock:
+            hit = self._cc.get(ck)
+            if hit is not None and hit[0] == sig:
+                return hit[1]
+
+        # miss → parseia de verdade (custo real, mas só quando os arquivos mudaram)
         out: List[Memory] = []
-        for layer_dir in os.listdir(base):
-            if wanted and layer_dir not in wanted:
-                continue
-            d = os.path.join(base, layer_dir)
-            if not os.path.isdir(d):
-                continue
+        for d in dirs:
             for fn in os.listdir(d):
                 if fn.endswith(".md"):
                     m = self._load(os.path.join(d, fn))
                     if m:
                         out.append(m)
+
+        with self._cc_lock:
+            if ck not in self._cc and len(self._cc) >= self._cc_cap:
+                self._cc.pop(next(iter(self._cc)), None)   # evita crescer sem limite
+            self._cc[ck] = (sig, out)
         return out
 
     def search(self, namespace, query_embedding, query_text, layers=None, limit=20, metadata_filter=None) -> List[SearchResult]:
@@ -183,7 +222,7 @@ class ObsidianStore(Store):
                 return True
         return False
 
-    def all(self, namespace, layers=None) -> List[Memory]:
+    def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         return self._candidates(namespace, layers)
 
     def touch(self, namespace: str, ids: List[str]) -> None:
