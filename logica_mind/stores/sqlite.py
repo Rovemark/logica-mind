@@ -14,15 +14,45 @@ safely.
 """
 from __future__ import annotations
 
+import array as _array
 import functools
 import json
 import os
 import sqlite3
+import sys as _sys
 import threading
 from typing import List, Optional
 
 from ..types import Memory, MemoryLayer, SearchResult
 from .base import Store, rank, apply_filter, _tokset
+
+
+# ── Embedding storage: BLOB float32 (stdlib array.array) ──────────────────────
+# Antes: TEXT/JSON → json.loads de 5000 embeddings/recall custava ~0.85s. Agora BLOB float32:
+# desempacota com array.array (10-20× mais rápido, ~5× menor no disco). LEITURA DUAL — rows antigas
+# em JSON continuam lidas sem migração. Little-endian canônico (byteswap em big-endian) = portável.
+def _pack_embedding(v):
+    if v is None:
+        return None
+    a = _array.array('f', v)
+    if _sys.byteorder != 'little':
+        a.byteswap()
+    return a.tobytes()
+
+
+def _unpack_embedding(val):
+    if not val:
+        return None
+    if isinstance(val, (bytes, bytearray)):
+        a = _array.array('f')
+        a.frombytes(bytes(val))
+        if _sys.byteorder != 'little':
+            a.byteswap()
+        return a.tolist()   # List[float] — mantém o contrato (supabase/postgres json.dumps não quebra)
+    try:
+        return json.loads(val)   # legado: TEXT JSON
+    except Exception:
+        return None
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -139,7 +169,7 @@ class SQLiteStore(Store):
             namespace=row["namespace"],
             content=row["content"],
             layer=MemoryLayer(row["layer"]),
-            embedding=(json.loads(row["embedding"]) if with_embeddings and "embedding" in keys and row["embedding"] else None),
+            embedding=(_unpack_embedding(row["embedding"]) if with_embeddings and "embedding" in keys and row["embedding"] else None),
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             importance=row["importance"] if row["importance"] is not None else 0.5,
             tags=json.loads(row["tags"]) if row["tags"] else [],
@@ -160,7 +190,7 @@ class SQLiteStore(Store):
         rows = [
             (
                 m.id, m.namespace, m.content, m.layer.value,
-                json.dumps(m.embedding) if m.embedding is not None else None,
+                _pack_embedding(m.embedding),
                 json.dumps(m.metadata), m.importance,
                 json.dumps(m.tags), json.dumps(m.source_ids),
                 m.created_at, getattr(m, "seq", None), m.access_count,
@@ -354,7 +384,7 @@ class SQLiteStore(Store):
     def set_embeddings(self, namespace: str, pairs) -> int:
         """Bulk-replace embeddings: pairs = [(memory_id, embedding), …]. Fuel for
         reembed() — the dimension migration when the embedder changes."""
-        rows = [(json.dumps(v) if v is not None else None, namespace, mid) for mid, v in pairs]
+        rows = [(_pack_embedding(v), namespace, mid) for mid, v in pairs]
         self._conn.executemany(
             "UPDATE memories SET embedding = ? WHERE namespace = ? AND id = ?", rows)
         self._conn.commit()
