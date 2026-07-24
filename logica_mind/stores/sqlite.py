@@ -390,6 +390,39 @@ class SQLiteStore(Store):
         self._conn.commit()
         return len(rows)
 
+    def migrate_embeddings_to_blob(self, batch: int = 2000) -> int:
+        """Migra embeddings TEXT/JSON legados → BLOB float32 (o formato atual). Resumível (cursor por
+        rowid, pula corrompido), com lock POR LOTE (não bloqueia captura/dream pela migração inteira).
+        A leitura dual já faz o sistema rodar sem isto — é ganho de disco (~5×) + parse (~8×) pras rows
+        históricas. Rode via CLI numa janela quieta, com backup antes. Retorna o nº de rows migradas."""
+        import json as _json
+        import time as _time
+        migrated = 0
+        last = 0
+        while True:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT rowid, embedding FROM memories WHERE rowid > ? "
+                    "AND embedding LIKE '[%' ORDER BY rowid LIMIT ?",
+                    (last, batch)).fetchall()
+                if not rows:
+                    return migrated
+                ups = []
+                for rowid, txt in rows:
+                    last = rowid
+                    try:
+                        v = _json.loads(txt)
+                        if isinstance(v, list) and v:
+                            ups.append((_pack_embedding(v), rowid))
+                    except Exception:
+                        pass   # corrompido → deixa como está; o cursor avança (sem loop)
+                if ups:
+                    self._conn.executemany(
+                        "UPDATE memories SET embedding = ? WHERE rowid = ?", ups)
+                    self._conn.commit()
+                    migrated += len(ups)
+            _time.sleep(0.01)   # cede o lock entre lotes pra captura/dream
+
     @_locked
     def change_token(self, namespace=None) -> str:
         """Cheap token that changes whenever the (namespace's) data changes — fuels
