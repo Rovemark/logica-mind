@@ -145,6 +145,37 @@ class SQLiteStore(Store):
                 pass  # column already present
         self._conn.commit()
 
+        # ── FTS5: pré-filtro LEXICAL sobre o corpus INTEIRO ──────────────────────────────────────
+        # O _candidates só pega os max_candidates MAIS RECENTES (ORDER BY created_at DESC LIMIT). Num
+        # store grande (astro=45k) isso deixa a memória ANTIGA invisível ao rank semântico. A FTS5
+        # (external-content, mantida por triggers) devolve candidatos por keyword de TODO o histórico.
+        # Capability-detected: sqlite sem FTS5 → self._fts=False → degrada pro comportamento de janela.
+        # Triggers cobrem o INSERT OR REPLACE da captura (DELETE+INSERT) — testado: captura não quebra.
+        self._fts = False
+        self._fts_limit = 3000
+        try:
+            self._conn.executescript(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts "
+                "USING fts5(content, content='memories', content_rowid='rowid');\n"
+                "CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN\n"
+                "  INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);\nEND;\n"
+                "CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN\n"
+                "  INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);\nEND;\n"
+                "CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN\n"
+                "  INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', old.rowid, old.content);\n"
+                "  INSERT INTO memories_fts(rowid, content) VALUES (new.rowid, new.content);\nEND;")
+            # backfill 1× (marcado): rows anteriores à FTS não estão indexadas; os triggers cuidam do resto.
+            # NÃO usar count(*) FROM memories_fts como guarda — em external-content isso conta a tabela
+            # EXTERNA (memories), NUNCA o índice → o rebuild nunca dispararia (índice ficaria vazio). Marca própria.
+            self._conn.execute("CREATE TABLE IF NOT EXISTS _lm_fts_built (v INTEGER)")
+            if not self._conn.execute("SELECT count(*) FROM _lm_fts_built").fetchone()[0]:
+                self._conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+                self._conn.execute("INSERT INTO _lm_fts_built VALUES (1)")
+            self._conn.commit()
+            self._fts = True
+        except sqlite3.OperationalError:
+            self._fts = False   # FTS5 não compilado nesta build do sqlite → janela-only (degrada gracioso)
+
         # Conexão de LEITURA dedicada: reads (recall/search) NÃO podem esperar o lock de ESCRITA — o
         # dream cycle / captura escrevem em lotes longos segurando o RLock e o recall travava dezenas
         # de segundos. WAL já permite ler durante escrita no nível SQLite; aqui damos aos reads uma
@@ -211,34 +242,43 @@ class SQLiteStore(Store):
 
     def _candidates(self, namespace: str, layers: Optional[List[MemoryLayer]],
                     metadata_filter: Optional[dict] = None,
-                    with_embeddings: bool = True) -> List[Memory]:
-        sql = "SELECT * FROM memories WHERE namespace = ?"
-        params: list = [namespace]
+                    with_embeddings: bool = True, query_text: str = None) -> List[Memory]:
+        where = "namespace = ?"
+        wparams: list = [namespace]
         if layers:
             placeholders = ",".join("?" for _ in layers)
-            sql += f" AND layer IN ({placeholders})"
-            params += [l.value for l in layers]
+            where += f" AND layer IN ({placeholders})"
+            wparams += [l.value for l in layers]
         # push metadata filter into SQL so it applies BEFORE the LIMIT window —
         # otherwise an older session's rows could fall outside the newest N
         if metadata_filter:
             for k, v in metadata_filter.items():
                 if isinstance(v, (list, tuple, set)):
                     if not v:
-                        sql += " AND 0"
+                        where += " AND 0"
                         continue
                     ph = ",".join("?" for _ in v)
-                    sql += f" AND json_extract(metadata, '$.' || ?) IN ({ph})"
-                    params.append(k)
-                    params.extend(list(v))
+                    where += f" AND json_extract(metadata, '$.' || ?) IN ({ph})"
+                    wparams.append(k)
+                    wparams.extend(list(v))
                 else:
-                    sql += " AND json_extract(metadata, '$.' || ?) = ?"
-                    params.append(k)
-                    params.append(v)
-        # seq (persisted, process-monotonic) then rowid break created_at ties by
-        # true insertion order — created_at has only whole-second granularity, so a
-        # prompt and its answer can share it
-        sql += " ORDER BY created_at DESC, seq DESC, rowid DESC LIMIT ?"
-        params.append(self.max_candidates)
+                    where += " AND json_extract(metadata, '$.' || ?) = ?"
+                    wparams.append(k)
+                    wparams.append(v)
+        # seq (persisted, process-monotonic) then rowid break created_at ties by true insertion order.
+        recency = (f"SELECT rowid FROM memories WHERE {where} "
+                   "ORDER BY created_at DESC, seq DESC, rowid DESC LIMIT ?")
+        # FTS: além da janela de recência, inclui os matches LEXICAIS do corpus INTEIRO (memória antiga
+        # com keyword casada). O rank() semântico decide por cima; a FTS só BROADENS o pool de candidatos.
+        toks = list(_tokset(query_text))[:12] if query_text else []
+        if self._fts and toks:
+            match = " OR ".join('"' + t + '"' for t in toks)   # OR de tokens quotados (FTS5 seguro)
+            sql = (f"SELECT * FROM memories WHERE {where} AND (rowid IN ({recency}) "
+                   "OR rowid IN (SELECT rowid FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?))")
+            params = wparams + wparams + [self.max_candidates, match, self._fts_limit]
+        else:
+            sql = f"SELECT * FROM memories WHERE {where} ORDER BY created_at DESC, seq DESC, rowid DESC LIMIT ?"
+            params = wparams + [self.max_candidates]
         cur = self._rconn.execute(sql, params)   # conexão de LEITURA (chamado só pelo search, sob _rlock)
         return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
 
@@ -249,7 +289,7 @@ class SQLiteStore(Store):
         import time as _t
         self._last_read_at = _t.monotonic()   # backpressure: o dream cede quando há conversa/recall ativo
         with self._rlock:
-            cands = apply_filter(self._candidates(namespace, layers, metadata_filter), metadata_filter)
+            cands = apply_filter(self._candidates(namespace, layers, metadata_filter, query_text=query_text), metadata_filter)
         return rank(cands, query_embedding, query_text, limit)
 
     @_locked
