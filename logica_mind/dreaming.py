@@ -25,6 +25,28 @@ from .core import _age_seconds
 if TYPE_CHECKING:
     from .core import LogicaMind
 
+# content-type → forgetting half-life in days. None = permanent (never decays).
+# A decision is load-bearing and should survive; a handoff is transient. Type is
+# read from metadata["type"] or any matching tag; unknown types use the global HL.
+_HALF_LIVES = {
+    "decision": None, "milestone": None, "identity": None, "preference": None,
+    "project": 120.0, "feature": 120.0, "bugfix": 90.0, "discovery": 90.0,
+    "note": 60.0, "problem": 45.0, "handoff": 30.0, "status": 14.0, "transient": 7.0,
+}
+
+
+def _half_life_for(mem, default_days):
+    """Resolve a memory's forgetting half-life from its type. Returns None to mean
+    'permanent' (skip pruning), a float of days, or the global default if unknown."""
+    md = mem.metadata or {}
+    t = (md.get("type") or md.get("content_type") or "").lower().strip()
+    if t in _HALF_LIVES:
+        return _HALF_LIVES[t]
+    for tag in (mem.tags or []):
+        if str(tag).lower() in _HALF_LIVES:
+            return _HALF_LIVES[str(tag).lower()]
+    return default_days
+
 
 @dataclass
 class DreamReport:
@@ -35,6 +57,7 @@ class DreamReport:
     forgotten: int = 0
     derived: int = 0
     inferred: int = 0
+    evolved: int = 0
     user_synthesized: bool = False
     timestamp: str = field(default_factory=now_iso)
     namespace: str = ""
@@ -97,6 +120,29 @@ def load_dreams(store, namespace: Optional[str] = None, limit: int = 50) -> List
         return []
 
 
+def dream_summary(store, namespace: Optional[str] = None) -> dict:
+    """Aggregate totals across ALL retained dream cycles (namespace-filtered), so
+    the UI summary shows real numbers, not just the fetched page."""
+    out = {"cycles": 0, "distilled": 0, "reinforced": 0, "forgotten": 0,
+           "derived": 0, "inferred": 0, "graph_edges": 0, "ops": 0}
+    path = _journal_path(store)
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            reports = json.load(f)
+        if namespace:
+            reports = [r for r in reports if r.get("namespace") == namespace or not r.get("namespace")]
+        out["cycles"] = len(reports)
+        for r in reports:
+            for k in ("distilled", "reinforced", "forgotten", "derived", "inferred", "graph_edges"):
+                out[k] += int(r.get(k) or 0)
+        out["ops"] = sum(out[k] for k in ("distilled", "reinforced", "forgotten", "derived", "inferred", "graph_edges"))
+    except Exception:
+        pass
+    return out
+
+
 class Dreamer:
     def __init__(
         self,
@@ -108,6 +154,7 @@ class Dreamer:
         synthesize_user: bool = True,
         derive_user: bool = True,
         infer_links: bool = False,
+        evolve: bool = False,
         extract_graph: bool = False,
         prune_layers: Optional[List[MemoryLayer]] = None,
     ):
@@ -119,6 +166,7 @@ class Dreamer:
         self.do_user = synthesize_user
         self.do_derive = derive_user
         self.do_infer = infer_links
+        self.do_evolve = evolve
         self.extract_graph = extract_graph
         # which layers decay/forget (configurable per-layer policy); episodic by
         # default. GRAPH and USER are NEVER raw-pruned here: hard-deleting graph
@@ -146,6 +194,8 @@ class Dreamer:
             report.derived = self.mind.derive()
         if self.do_infer:
             report.inferred = self.mind.infer_links()
+        if self.do_evolve:
+            self._evolve(report)
         if self.do_user:
             report.user_synthesized = bool(self.mind.user.synthesize())
         save_dream(report, self.mind.store)
@@ -164,6 +214,10 @@ class Dreamer:
             e for e in m.store.all(m.namespace, [MemoryLayer.EPISODIC])
             if not (e.metadata or {}).get("consolidated")
         ]
+        # distill the most RECENT unconsolidated turns first: fresh content yields
+        # new facts, instead of re-chewing the oldest turns whose facts the store
+        # already holds (which read as distilled=0 on a mature store).
+        episodic.sort(key=lambda e: e.created_at or "", reverse=True)
         batch = episodic[: self.episodic_batch]
         if not batch:
             return
@@ -214,7 +268,9 @@ class Dreamer:
     def _reinforce(self, report: DreamReport) -> None:
         m = self.mind
         changed: List[Memory] = []
-        for mem in m.store.all(m.namespace):
+        # with_embeddings=False: só lemos importance/access_count — carregar os 43k×384 embeddings (que
+        # nem tocamos) era metade do 127% CPU/ciclo que prendia a GIL e degradava o recall. (fix Camada 0)
+        for mem in m.store.all(m.namespace, with_embeddings=False):
             if mem.access_count <= 0:
                 continue
             boost = min(0.30, mem.access_count * 0.02)
@@ -223,22 +279,66 @@ class Dreamer:
                 mem.importance = new_imp
                 changed.append(mem)
         if changed:
-            m.store.add(changed)
+            # bump_importance (UPDATE-only) em vez de add(): add() gravaria embedding=NULL (o mem veio
+            # sem vetor) = APAGARIA o embedding de toda memória reforçada = data-loss. (fix Camada 0)
+            m.store.bump_importance(m.namespace, [(x.id, x.importance) for x in changed])
             report.reinforced = len(changed)
 
     # ---- 3. decay / forget -------------------------------------------------
+    def _evolve(self, report: DreamReport, limit: int = 40) -> None:
+        """A-MEM-style self-organizing metadata: a memory with no life/work
+        dimension inherits one from its nearest neighbours (majority vote over the
+        k most similar memories that DO have a dimension). Fully offline and
+        deterministic — it lets the keyless path acquire categorization over time
+        without an LLM. Fail-soft: a memory with no embedding is skipped."""
+        from collections import Counter
+        m = self.mind
+        sem = m.store.all(m.namespace, [MemoryLayer.SEMANTIC])
+        undimensioned = [x for x in sem if not (x.metadata or {}).get("dimension")]
+        for mem in undimensioned[:limit]:
+            if not mem.embedding:
+                continue
+            try:
+                hits = m.store.search(m.namespace, mem.embedding, mem.content,
+                                      [MemoryLayer.SEMANTIC], 6)
+            except Exception:
+                continue
+            votes = Counter()
+            for h in hits:
+                if h.memory.id == mem.id:
+                    continue
+                d = (h.memory.metadata or {}).get("dimension")
+                if d and h.score >= 0.45:                 # only confident neighbours vote
+                    votes[d] += 1
+            if votes:
+                md = dict(mem.metadata or {})
+                md["dimension"] = votes.most_common(1)[0][0]
+                md["dimension_source"] = "neighbor-evolved"
+                mem.metadata = md
+                m.store.add([mem])                        # upsert by id
+                report.evolved += 1
+
     def _prune(self, report: DreamReport) -> None:
         m = self.mind
         # decay/forget the configured layers (episodic by default; semantic too if
         # asked). Belt-and-suspenders even if a future caller bypasses the __init__
         # filter: never raw-delete a USER row, and never delete an OPEN graph edge
         # (valid_to is None) — those are governed by synthesize()/valid_to, not decay.
-        for mem in m.store.all(m.namespace, self.prune_layers):
+        for mem in m.store.all(m.namespace, self.prune_layers, with_embeddings=False):
             if mem.layer == MemoryLayer.USER:
                 continue
             if mem.layer == MemoryLayer.GRAPH and (mem.metadata or {}).get("valid_to") is None:
                 continue
-            rec = recency_score(_age_seconds(mem.created_at), m.half_life_days)
+            # content-type-aware half-life: a recorded decision should outlive a
+            # transient handoff. The type comes from metadata/tags; durable types
+            # decay slowly (or never), ephemeral ones fast. Falls back to the global
+            # half-life when no type is known.
+            hl = _half_life_for(mem, m.half_life_days)
+            if hl is None:                       # type marked permanent → never decays
+                continue
+            # frequent recall extends a memory's life (access-reinforcement), up to 3x
+            hl *= min(3.0, 1.0 + 0.5 * mem.access_count)
+            rec = recency_score(_age_seconds(mem.created_at), hl)
             strength = mem.importance * rec
             if mem.access_count == 0 and strength < self.prune_floor:
                 if m.store.delete(m.namespace, mem.id):

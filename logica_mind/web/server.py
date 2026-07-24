@@ -1460,8 +1460,15 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
 
                 # ---- observability ----
                 elif path == "/api/health":
-                    self._json({"ok": True, "store": getattr(mind.store, "name", "?"),
-                                "namespaces": len(mind.store.namespaces())})
+                    # LIVENESS O(1): NÃO chamar namespaces() — é @_locked no _conn de ESCRITA e trava
+                    # atrás do dream (all()/add()); aí o probe do client estoura → healthy()=false →
+                    # o LogicaOS pula o LM e cai no vault. Contagem foi pra /api/namespaces. (fix Camada 0)
+                    _h = {"ok": True, "store": getattr(mind.store, "name", "?")}
+                    _lr = getattr(mind.store, "_last_read_at", None)
+                    if _lr is not None:
+                        import time as _t
+                        _h["read_age_s"] = round(_t.monotonic() - _lr, 1)
+                    self._json(_h)
 
                 elif path == "/api/analytics":
                     # everything the Analytics view needs, in one call (all real data)

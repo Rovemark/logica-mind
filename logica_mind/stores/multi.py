@@ -150,6 +150,14 @@ class MultiStore(Store):
         except Exception:
             pass
 
+    def bump_importance(self, namespace: str, pairs) -> None:
+        # SÓ o PRIMARY (stores[0] = SQLite), como o touch(): importância vive no store primário; escrever
+        # no mirror Obsidian custaria um get-scan do vault por id. UPDATE-only, nunca insere.
+        try:
+            self.stores[0].bump_importance(namespace, pairs)
+        except Exception:
+            pass
+
     # Fast read aggregations — delegate to the PRIMARY store that supports them
     # (the children hold the same logical set; summing would double-count). The
     # primary is SQLite, which answers these with one SQL query instead of

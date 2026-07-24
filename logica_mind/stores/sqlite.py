@@ -216,6 +216,8 @@ class SQLiteStore(Store):
         # SEM @_locked de propósito: a LEITURA roda na conexão dedicada (_rconn/_rlock), não no lock de
         # ESCRITA — assim o recall NÃO trava atrás do dream cycle/captura (que seguram o RLock de escrita).
         # SQL already scoped by metadata_filter; apply_filter is a cheap safety net.
+        import time as _t
+        self._last_read_at = _t.monotonic()   # backpressure: o dream cede quando há conversa/recall ativo
         with self._rlock:
             cands = apply_filter(self._candidates(namespace, layers, metadata_filter), metadata_filter)
         return rank(cands, query_embedding, query_text, limit)
@@ -384,6 +386,18 @@ class SQLiteStore(Store):
             f"UPDATE memories SET access_count = access_count + 1, last_recalled_at = ? "
             f"WHERE namespace = ? AND id IN ({placeholders})",
             [now, namespace, *ids],
+        )
+        self._conn.commit()
+
+    @_locked
+    def bump_importance(self, namespace: str, pairs) -> None:
+        """UPDATE-only da importância (NÃO toca embedding). Pro dream reforçar sem carregar/reescrever
+        os vetores — o add() gravaria embedding=NULL quando None (= data-loss). Espelha touch()."""
+        if not pairs:
+            return
+        self._conn.executemany(
+            "UPDATE memories SET importance = ? WHERE namespace = ? AND id = ?",
+            [(float(imp), namespace, mid) for (mid, imp) in pairs],
         )
         self._conn.commit()
 

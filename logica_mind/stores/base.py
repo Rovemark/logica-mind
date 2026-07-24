@@ -299,5 +299,15 @@ class Store(ABC):
         memory into a backend that didn't already hold it."""
         pass
 
+    def bump_importance(self, namespace: str, pairs) -> None:
+        """UPDATE-only da importância (pairs = [(id, importance), ...]). Default SEGURO: get→set→add,
+        onde get() traz o embedding, então add() o preserva (nada de data-loss). Stores com UPDATE
+        barato (SQLite) sobrescrevem. Usado pelo dream em vez de add() ao reforçar sem carregar vetor."""
+        for mid, imp in (pairs or []):
+            m = self.get(namespace, mid)
+            if m is not None:
+                m.importance = imp
+                self.add([m])
+
     def close(self) -> None:  # optional resource cleanup
         pass
