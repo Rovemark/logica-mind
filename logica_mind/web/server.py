@@ -1153,6 +1153,28 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                               layers=layers, focus=foc, depth=dep, limit=lim,
                                               orphans=orph))
 
+                elif path == "/api/predict":
+                    # MODELO CAUSAL: o salto "lembra fatos" → "prevê e age". Lê as arestas causais do
+                    # grafo temporal (predicados 'causa'/'leva_a'/'previne'/...) e responde:
+                    #   ?entity=X            → predict (o que X causa) + causes (o que causou X) + chain (2ª ordem)
+                    #   (sem entity)         → summary (quantas arestas causais existem)
+                    # Read-only, aditivo, reusa o TemporalGraph (anti-redundância).
+                    from ..causal import CausalModel
+                    cm = CausalModel(mind.for_namespace(ns).graph)
+                    _ent = (first(qs, "entity") or first(qs, "cause") or "").strip()
+                    _at = first(qs, "at") or None
+                    _depth = int(first(qs, "depth", "2") or 2)
+                    if not _ent:
+                        self._json({"namespace": ns, "summary": cm.summary(at=_at)})
+                    else:
+                        self._json({
+                            "namespace": ns, "entity": _ent,
+                            "predict": cm.predict(_ent, at=_at),
+                            "causes": cm.causes(_ent, at=_at),
+                            "chain": cm.chain(_ent, depth=_depth, at=_at),
+                            "summary": cm.summary(at=_at),
+                        })
+
                 elif path == "/api/timerange":
                     # true min/max created_at via a cheap data-layer MIN/MAX (no row
                     # materialization, not bounded by the candidate window). Use the
