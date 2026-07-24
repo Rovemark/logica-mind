@@ -140,13 +140,15 @@ class MultiStore(Store):
         return max(counts) if counts else 0
 
     def touch(self, namespace: str, ids: List[str]) -> None:
-        # each child's touch is update-only, so this never inserts into a backend
-        # that didn't already hold the memory (no write amplification / leakage)
-        for s in self.stores:
-            try:
-                s.touch(namespace, ids)
-            except Exception:
-                pass
+        # SÓ o PRIMARY (stores[0] = SQLite): as stats de acesso (access_count/last_recalled_at) que o
+        # ranking/forget usam vivem no store primário. Os secundários (ex.: Obsidian) são MIRROR humano-
+        # legível e o touch deles fazia get()-scan do vault por id → ~4.5s POR RECALL (era o gargalo real
+        # do recall, > que a busca inteira). Atualizar a frontmatter do mirror não vale esse custo no
+        # caminho quente. update-only, nunca insere onde não existia.
+        try:
+            self.stores[0].touch(namespace, ids)
+        except Exception:
+            pass
 
     # Fast read aggregations — delegate to the PRIMARY store that supports them
     # (the children hold the same logical set; summing would double-count). The
@@ -187,6 +189,32 @@ class MultiStore(Store):
                 return s.filter_memories(namespace, layers, dimension, category,
                                          session, limit, offset, with_embeddings)
         return []
+
+    def mentions(self, namespace, name, limit=0, with_embeddings=False):
+        for s in self.stores:
+            if hasattr(s, "mentions"):
+                return s.mentions(namespace, name, limit=limit, with_embeddings=with_embeddings)
+        return self.all(namespace, with_embeddings=with_embeddings)   # correct (slow) fallback
+
+    def tagged(self, namespace=None, key="channel"):
+        for s in self.stores:
+            if hasattr(s, "tagged"):
+                return s.tagged(namespace, key)
+        return []
+
+    def change_token(self, namespace=None):
+        for s in self.stores:
+            if hasattr(s, "change_token"):
+                return s.change_token(namespace)
+        return None
+
+    def set_embeddings(self, namespace, pairs):
+        n = 0
+        pairs = list(pairs)
+        for s in self.stores:
+            if hasattr(s, "set_embeddings"):
+                n = max(n, s.set_embeddings(namespace, pairs))
+        return n
 
     def dimensioned(self, namespace=None):
         for s in self.stores:
