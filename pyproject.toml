@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "logica-mind"
-version = "0.2.26"
+version = "0.4.17"
 description = "Pluggable, multi-store memory for any AI system — episodic, semantic, temporal-graph and dialectic user memory in one library."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,9 +32,13 @@ voyage = ["voyageai>=0.2"]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.39"]
 local = ["sentence-transformers>=2.2"]
+# true semantic embeddings WITHOUT torch (~50MB of wheels vs ~2GB):
+onnx = ["onnxruntime>=1.17", "tokenizers>=0.15"]
+# at-rest encryption for the SQLite store (SQLiteStore(encryption_key=...)):
+sqlcipher = ["sqlcipher3-binary>=0.5.4"]
 postgres = ["psycopg[binary]>=3.1"]
 redis = ["redis>=5.0"]
-all = ["voyageai>=0.2", "openai>=1.0", "anthropic>=0.39", "sentence-transformers>=2.2",
+all = ["openai>=1.0", "anthropic>=0.39", "sentence-transformers>=2.2",
        "psycopg[binary]>=3.1", "redis>=5.0"]
 dev = ["pytest>=7.0"]
 
@@ -46,6 +50,11 @@ Changelog = "https://github.com/Rovemark/logica-mind/blob/main/CHANGELOG.md"
 
 [project.scripts]
 logica-mind = "logica_mind.cli:main"
+
+[tool.hatch.build.targets.sdist]
+# keep the sdist lean: code + tests + docs text; the README's images live on
+# GitHub (absolute raw URLs), so 25MB of GIF/PNG don't belong in every download
+exclude = ["docs/img", "logica_mind/web/app/node_modules", "bench/data"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["logica_mind"]
