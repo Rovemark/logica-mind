@@ -77,6 +77,18 @@ class ObsidianStore(Store):
         self._cc_lock = threading.Lock()
         self._cc: dict = {}
         self._cc_cap = 16
+        # LEITURA no caminho de recall/all: DESLIGADA por padrão. O SQLite primário já é
+        # superset COMPLETO do vault (FTS5 lexical + ranking vetorial sobre o corpus inteiro),
+        # então parsear+cachear os ~30k .md do namespace a cada recall/__all__ só INCHAVA a RAM
+        # (ratchet multi-GB) sem cobrir nada novo. Obsidian segue como MIRROR de escrita
+        # (add/get/delete/namespaces intactos → o vault humano continua completo). Religar: LM_OBSIDIAN_READ=1.
+        self._read = os.environ.get("LM_OBSIDIAN_READ", "").strip().lower() in ("1", "true", "yes", "on")
+        # teto de segurança do cache (se a leitura for religada): não cacheia listas gigantes,
+        # que eram exatamente a entrada tamanho-corpus que ratcheava a RAM.
+        try:
+            self._cc_obj_max = int(os.environ.get("LM_OBSIDIAN_CACHE_MAX", "4000"))
+        except ValueError:
+            self._cc_obj_max = 4000
 
     def _path(self, m: Memory) -> str:
         d = os.path.join(self.vault, m.namespace, m.layer.value)
@@ -197,18 +209,33 @@ class ObsidianStore(Store):
         with self._cc_lock:
             if ck not in self._cc and len(self._cc) >= self._cc_cap:
                 self._cc.pop(next(iter(self._cc)), None)   # evita crescer sem limite
-            self._cc[ck] = (sig, out)
+            # NÃO cacheia corpora gigantes (a entrada tamanho-corpus era o que ratcheava a RAM):
+            # um namespace grande volta a ser transiente (relê se preciso) em vez de ficar retido em RAM.
+            if len(out) <= self._cc_obj_max:
+                self._cc[ck] = (sig, out)
         return out
 
     def search(self, namespace, query_embedding, query_text, layers=None, limit=20, metadata_filter=None) -> List[SearchResult]:
-        # markdown store is lexical; ignore embedding
+        # markdown store é lexical E REDUNDANTE com o FTS5 do SQLite primário; por padrão NÃO
+        # participa do recall (evita parsear/cachear ~30k docs por busca → RAM). Religar: LM_OBSIDIAN_READ=1.
+        if not self._read:
+            return []
         cands = apply_filter(self._candidates(namespace, layers), metadata_filter)
         return rank(cands, None, query_text, limit)
 
     def get(self, namespace: str, memory_id: str) -> Optional[Memory]:
-        for m in self._candidates(namespace, None):
-            if m.id == memory_id:
-                return m
+        # lê o arquivo específico DIRETO (O(nº de layers)), sem parsear o corpus inteiro.
+        base = os.path.join(self.vault, namespace)
+        if not os.path.isdir(base):
+            return None
+        try:
+            layer_dirs = os.listdir(base)
+        except OSError:
+            return None
+        for layer_dir in layer_dirs:
+            p = os.path.join(base, layer_dir, f"{memory_id}.md")
+            if os.path.isfile(p):
+                return self._load(p)
         return None
 
     def delete(self, namespace: str, memory_id: str) -> bool:
@@ -223,6 +250,10 @@ class ObsidianStore(Store):
         return False
 
     def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
+        # write-mirror: por padrão não devolve o corpus (o SQLite primário cobre dream/reinforce/__all__
+        # e é superset completo). Evita o parse+cache dos ~30k .md que ratcheava a RAM. Religar: LM_OBSIDIAN_READ=1.
+        if not self._read:
+            return []
         return self._candidates(namespace, layers)
 
     def touch(self, namespace: str, ids: List[str]) -> None:
