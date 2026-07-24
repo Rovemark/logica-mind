@@ -47,6 +47,14 @@ _INHIBIT = (
     "reduz", "reduziu", "reduzir", "diminui", "diminuiu",
     "prevent", "prevents", "reduce", "reduces", "block", "blocks", "worsen",
 )
+# Efeitos NEGATIVOS (o que o organismo deve TEMER prever) — usado por risks().
+_NEGATIVE = (
+    "churn", "cancelamento", "cancela", "perda", "perde", "perder", "prejuízo", "prejuizo",
+    "queda", "cair", "reclamação", "reclamacao", "reclama", "insatisf", "abandono", "abandon",
+    "falha", "falhou", "falhar", "erro", "bug", "atraso", "atrasa", "atrasar", "risco",
+    "down", "outage", "downtime", "vazamento", "fraude", "ban", "bloqueio", "multa", "processo",
+    "loss", "lose", "fail", "failure", "delay", "damage", "complaint", "attrition", "leak", "fine",
+)
 
 
 def is_causal(predicate: str) -> bool:
@@ -174,6 +182,28 @@ class CausalModel:
                     "old": round(old, 3), "new": new, "direction": "up" if correct else "down",
                 })
         return updated
+
+    def risks(self, min_conf: float = 0.55, at: Optional[str] = None) -> List[Dict]:
+        """Riscos previstos: arestas causais de ALTA confiança que PROMOVEM um efeito NEGATIVO
+        (churn, perda, falha, atraso…). É o 'prevê E age' — o organismo antevê o que pode dar
+        errado, pra alertar/agir antes. Ranqueado por confiança; severidade alta ≥0.75."""
+        out: List[Dict] = []
+        for e in self._causal_edges(at):
+            eff = e.object.lower()
+            if not any(r in eff for r in _NEGATIVE):
+                continue
+            if _polarity(e.predicate) != "promotes":
+                continue   # 'previne churn' é bom, não risco
+            conf = self._conf(e)
+            if conf < min_conf:
+                continue
+            out.append({
+                "cause": e.subject, "effect": e.object, "predicate": e.predicate,
+                "confidence": round(conf, 3), "since": e.valid_from,
+                "severity": "alta" if conf >= 0.75 else "media",
+            })
+        out.sort(key=lambda x: x["confidence"], reverse=True)
+        return out
 
     def summary(self, at: Optional[str] = None) -> Dict:
         ce = self._causal_edges(at)

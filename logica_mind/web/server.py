@@ -1176,7 +1176,9 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     _at = first(qs, "at") or None
                     _depth = int(first(qs, "depth", "2") or 2)
                     if not _ent:
-                        self._json({"namespace": ns, "summary": cm.summary(at=_at)})
+                        # sem entidade → panorama: quantas relações causais + os RISCOS previstos
+                        # (caminhos de alta confiança que levam a mal — o 'prevê e age').
+                        self._json({"namespace": ns, "summary": cm.summary(at=_at), "risks": cm.risks(at=_at)})
                     else:
                         self._json({
                             "namespace": ns, "entity": _ent,
