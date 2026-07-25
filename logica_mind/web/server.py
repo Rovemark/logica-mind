@@ -21,11 +21,60 @@ import os
 import re
 import threading
 import time as _time
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from ..types import MemoryLayer
 from ..stores.base import _tokset
+
+
+class _BoundedHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer com TETO de threads.
+
+    O ThreadingHTTPServer cria UMA THREAD POR REQUISIÇÃO, sem limite nenhum. Se um
+    handler trava — tipicamente esperando o lock do store enquanto uma operação longa
+    (dream/consolidação) o segura — a thread não morre, e cada requisição nova empilha
+    mais uma. Medido em produção: **3.803 threads / 2,9 GB / `/api/recall` devolvendo
+    HTTP 000**, enquanto `/api/health` (arquivo estático) seguia 200 em 0,5 ms e
+    escondia o colapso. O processo não se recupera sozinho: abre thread mais rápido do
+    que consegue fechar.
+
+    Com teto, o pior caso deixa de ser vazamento (morte progressiva do processo) e vira
+    FILA (fica lento e volta ao normal quando a operação longa solta o lock). Somado ao
+    `Handler.timeout`, uma conexão travada devolve a vaga em vez de segurá-la pra sempre.
+
+    Tamanho do pool: LOGICA_MIND_MAX_WORKERS (default 32).
+    """
+
+    daemon_threads = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        try:
+            n = int(os.environ.get("LOGICA_MIND_MAX_WORKERS", "32") or 32)
+        except ValueError:
+            n = 32
+        self._pool = ThreadPoolExecutor(max_workers=max(4, n), thread_name_prefix="lm-http")
+
+    # Substitui o "uma thread por request" do ThreadingMixIn pelo pool limitado.
+    def process_request(self, request, client_address):
+        self._pool.submit(self._serve_one, request, client_address)
+
+    def _serve_one(self, request, client_address):
+        try:
+            self.finish_request(request, client_address)
+        except Exception:
+            self.handle_error(request, client_address)
+        finally:
+            self.shutdown_request(request)
+
+    def server_close(self):
+        try:
+            self._pool.shutdown(wait=False)
+        except Exception:
+            pass
+        super().server_close()
 
 
 def _session_names_path(store) -> str | None:
@@ -386,6 +435,11 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
     _PUBLIC_READ = os.environ.get("LOGICA_MIND_PUBLIC", "").lower() in ("1", "true", "yes")
 
     class Handler(BaseHTTPRequestHandler):
+        # Teto de socket: sem isto, um cliente que abre a conexão e trava (ou some sem
+        # fechar) segura a thread do handler PARA SEMPRE. Com timeout, a thread morre e
+        # devolve a vaga do pool. Ajustável por LOGICA_MIND_HTTP_TIMEOUT.
+        timeout = float(os.environ.get("LOGICA_MIND_HTTP_TIMEOUT", "120") or 120)
+
         def log_message(self, *args):
             pass
 
@@ -1645,7 +1699,7 @@ def serve(mind, host: str = "127.0.0.1", port: int = 8420, open_browser: bool = 
         print("⚠️  non-loopback host without LOGICA_MIND_TOKEN — remote /api calls "
               "will return 401 (loopback callers keep working). Set LOGICA_MIND_TOKEN "
               "to use the dashboard remotely.")
-    httpd = ThreadingHTTPServer((host, port), make_handler(mind, allow_writes=allow_writes, token=token))
+    httpd = _BoundedHTTPServer((host, port), make_handler(mind, allow_writes=allow_writes, token=token))
     url = f"http://{host}:{port}"
     n = len(mind.store.namespaces())
     print(f"🧠 Logica Mind dashboard → {url}  ({n} namespace{'s' if n != 1 else ''})")
