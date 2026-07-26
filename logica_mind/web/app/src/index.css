@@ -1,23 +1,32 @@
+/* Fontes OFICIAIS do Brand Kit Rovemark, hospedadas localmente (o kit manda "baixe e hospede").
+   Sem CDN: o appliance do cliente roda em rede fechada. */
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
 @import "tailwindcss";
 
 :root {
   /* dark is the default (applies even before JS sets data-theme) */
-  --bg: #0a0d14; --bg2: #0d1119; --panel: #11161f; --panel2: #161c28; --line: #222a3a;
-  --txt: #e8eef7; --dim: #8a96a9; --dim2: #5a6477; --accent: #7c9cff; --accent2: #a78bfa;
-  --good: #4ade80; --gold: #fbbf24; --warn: #fb7185;
-  --episodic: #f59e0b; --semantic: #7c9cff; --graph: #a78bfa; --user: #4ade80;
-  --shadow: 0 10px 40px rgba(0, 0, 0, .45);
-  --graph-bg: radial-gradient(circle at 50% 35%, #121a2e 0, #0a0d14 72%);
-  --glass-bg: #0b0e14ee;
+  --bg: #111318; --bg2: #14171E; --panel: #191C23; --panel2: #22262F; --line: #2C313B;
+  --txt: #F4F1EA; --dim: #A7AFBD; --dim2: #6F7784; --accent: #3455E8; --accent2: #7C5CFC;
+  --good: #17A884; --gold: #E99A2E; --warn: #E99A2E;
+  --episodic: #E99A2E; --semantic: #3455E8; --graph: #7C5CFC; --user: #17A884;
+  --shadow: 0 8px 24px rgb(17 19 24 / 40%);
+  --graph-bg: radial-gradient(circle at 50% 35%, #1A1F2B 0, #111318 72%);
+  --glass-bg: #111318ee;
 }
 :root[data-theme="light"] {
-  --bg: #f6f8fc; --bg2: #ffffff; --panel: #ffffff; --panel2: #eef1f7; --line: #e1e6f0;
-  --txt: #182032; --dim: #5b647a; --dim2: #95a0b5; --accent: #4f6bff; --accent2: #8b5cf6;
-  --good: #16a34a; --gold: #c2740a; --warn: #e11d48;
-  --episodic: #c2740a; --semantic: #4f6bff; --graph: #8b5cf6; --user: #16a34a;
-  --shadow: 0 10px 38px rgba(30, 41, 71, .12);
-  --graph-bg: radial-gradient(circle at 50% 30%, #ffffff 0, #e9eef7 78%);
-  --glass-bg: #ffffffe8;
+  --bg: #F4F1EA; --bg2: #ffffff; --panel: #ffffff; --panel2: #EAE6DC; --line: #D8D3C8;
+  --txt: #111318; --dim: #6F7784; --dim2: #97A0AE; --accent: #3455E8; --accent2: #6344DD;
+  --good: #08775D; --gold: #9C5C05; --warn: #9C5C05;
+  --episodic: #9C5C05; --semantic: #3455E8; --graph: #6344DD; --user: #08775D;
+  --shadow: 0 8px 24px rgb(17 19 24 / 8%);
+  --graph-bg: radial-gradient(circle at 50% 30%, #ffffff 0, #EAE6DC 78%);
+  --glass-bg: #F4F1EAe8;
 }
 
 html, body, #root { height: 100%; margin: 0; }
@@ -63,3 +72,9 @@ button { font: inherit; cursor: pointer; }
 [dir="rtl"] .lucide-send,
 [dir="rtl"] .lucide-move-right,
 [dir="rtl"] .lucide-log-in { transform: scaleX(-1); }
+
+
+/* Tipografia oficial do Brand Kit: Manrope na interface, IBM Plex Mono em métricas e labels
+   técnicos (regra explícita do kit). */
+body { font-family: Manrope, system-ui, -apple-system, sans-serif; }
+code, pre, .mono, [class*="mono"] { font-family: 'IBM Plex Mono', Menlo, monospace; }
