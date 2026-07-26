@@ -94,13 +94,36 @@ def save_dream(report: DreamReport, store) -> None:
     try:
         existing = []
         if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                if not isinstance(existing, list):
+                    existing = []
+            except Exception as read_err:
+                # 🔴 DIÁRIO CORROMPIDO NÃO PODE PARALISAR O SONHO PRA SEMPRE.
+                # Como estava, um json.load quebrado estourava a função inteira: o ciclo falhava,
+                # tentava de novo no próximo, e o erro se repetia INDEFINIDAMENTE — queimando CPU
+                # (medido: 65-93% no processo) e derrubando a latência do recall junto (6,8 s).
+                # Medido em produção: 3 bytes de lixo colados no fim inutilizaram 200 ciclos.
+                # Agora: guarda o arquivo ruim pra perícia e recomeça, em vez de travar.
+                try:
+                    os.replace(path, path + ".corrupt")
+                except Exception:
+                    pass
+                print(f"[logica-mind] dream journal corrompido ({read_err}) — "
+                      f"movido para {os.path.basename(path)}.corrupt e recomeçado",
+                      file=sys.stderr)
+                existing = []
         existing.append(report.to_dict())
         # keep only the last 200 dream cycles
         existing = existing[-200:]
-        with open(path, "w", encoding="utf-8") as f:
+        # ESCRITA ATÔMICA (tmp + replace): a corrupção veio de um `open(w)` interrompido/concorrente,
+        # que deixa o arquivo pela metade. Com tmp+replace, ou o conteúdo novo aparece inteiro, ou
+        # o antigo continua intacto — nunca um meio-termo inválido.
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(existing, f, ensure_ascii=False)
+        os.replace(tmp, path)
     except Exception as e:
         print(f"[logica-mind] could not save dream journal ({e})", file=sys.stderr)
 
