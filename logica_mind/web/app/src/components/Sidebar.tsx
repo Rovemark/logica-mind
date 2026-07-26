@@ -1,4 +1,6 @@
-import { Brain, Settings as SettingsIcon } from "lucide-react";
+import { useState } from "react";
+import { Brain, Settings as SettingsIcon, Sun, Moon } from "lucide-react";
+import { getTheme, setTheme, effective } from "../theme";
 import { VIEWS, CATS, type ViewKey } from "../nav";
 import { ALL, type NsItem } from "../api";
 import { useI18n } from "../i18n";
@@ -70,10 +72,16 @@ export default function Sidebar({
 
       {/* Assinatura institucional — wordmark OFICIAL do kit, sem recolorir.
           Regra do kit: fundo claro → logo preta; escuro → branca. */}
-      <div className="mt-auto flex items-center justify-center gap-1.5 border-t border-[var(--line)] px-3 py-3 opacity-55">
-        <span className="text-[9px] uppercase tracking-[0.14em] text-[var(--dim2)]">por</span>
-        <img src="/rovemark-logo-white.svg" alt="Rovemark" className="lr-logo-dark h-[11px] w-auto" />
-        <img src="/rovemark-logo-black.svg" alt="Rovemark" className="lr-logo-light h-[11px] w-auto" />
+      <div className="mt-auto flex items-center gap-2 border-t border-[var(--line)] px-3 py-2.5">
+        {/* Alternador de tema VISÍVEL. Existia só dentro de Configurações — o dono não achava,
+            e concluía que o painel não tinha modo claro. O mecanismo sempre funcionou
+            (theme.ts + initTheme no boot); faltava a porta de entrada. */}
+        <ThemeToggle />
+        <div className="ml-auto flex items-center gap-1.5 opacity-55">
+          <span className="text-[9px] uppercase tracking-[0.14em] text-[var(--dim2)]">por</span>
+          <img src="/rovemark-logo-white.svg" alt="Rovemark" className="lr-logo-dark h-[11px] w-auto" />
+          <img src="/rovemark-logo-black.svg" alt="Rovemark" className="lr-logo-light h-[11px] w-auto" />
+        </div>
       </div>
     </aside>
   );
@@ -90,5 +98,29 @@ function NsRow({ active, dot, name, count, onClick }:
       <span className="flex-1 whitespace-nowrap overflow-hidden text-ellipsis font-medium">{name}</span>
       <span className="text-[var(--dim2)] text-xs tabular-nums">{count}</span>
     </div>
+  );
+}
+
+
+/** Alterna claro/escuro em um clique. Lê o tema EFETIVO (resolve o "auto") pra o ícone nunca
+ *  mentir sobre o que está na tela. */
+function ThemeToggle() {
+  const [tema, setTema] = useState<"dark" | "light">(() => effective(getTheme()));
+  const alternar = () => {
+    const novo = tema === "dark" ? "light" : "dark";
+    setTheme(novo);
+    setTema(novo);
+  };
+  return (
+    <button
+      onClick={alternar}
+      title={tema === "dark" ? "Mudar para o tema claro" : "Mudar para o tema escuro"}
+      className="flex items-center gap-1.5 rounded-[8px] border border-[var(--line)] px-2 py-1
+                 text-[11px] font-medium text-[var(--dim)] transition
+                 hover:border-[var(--accent)] hover:text-[var(--txt)]"
+    >
+      {tema === "dark" ? <Sun size={13} /> : <Moon size={13} />}
+      <span>{tema === "dark" ? "Claro" : "Escuro"}</span>
+    </button>
   );
 }
