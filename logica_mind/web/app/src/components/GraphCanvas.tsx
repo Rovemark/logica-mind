@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { forceSimulation, forceManyBody, forceLink, forceCollide, forceCenter, forceRadial, forceX, forceY } from "d3-force";
 import { PALETTE, type GraphData } from "../api";
 import { drawOrb, resetOrbs } from "../lib/orb";
+import { CREME, clearColorCache } from "../lib/color";
 
 export interface GraphHandle { reheat: () => void; fit: () => void; center: (id: string) => void; }
 
@@ -12,8 +13,8 @@ const PCLASS_RGB: Record<string, string> = {
   social: "245,158,11", has: "74,222,128", causal: "251,113,133",
   locative: "34,211,238", temporal: "167,139,250", is_a: "124,156,255", other: "148,163,184",
 };
-const COMENTION_RGB = "120,140,170";   // dashed — "talked about together"
-const SEMANTIC_RGB = "150,130,200";    // dotted — latent affinity
+const COMENTION_RGB = "110,153,196";   // dashed — "talked about together"
+const SEMANTIC_RGB = "160,119,207";    // dotted — latent affinity
 
 // node radius scales with PageRank centrality, so hubs read as hubs
 function baseRad(n: any, hover: boolean): number {
@@ -131,7 +132,38 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
   }
   function draw() {
     const g = G.current, c = g.ctx; if (!c) return; const t = g.t;
-    c.clearRect(0, 0, g.W, g.H); c.save(); c.translate(t.x, t.y); c.scale(t.k, t.k);
+    const light = document.documentElement.getAttribute("data-theme") === "light";
+    // FUNDO OPACO — e não clearRect. Este é o conserto que faz todo o resto
+    // funcionar: com os pixels transparentes, o modo de composição aditivo soma
+    // contra o CONTEÚDO DO CANVAS, não contra o fundo do CSS. Sobre destino
+    // transparente `lighter` degenera e o brilho não soma sobre nada — era por
+    // isso que o halo existia no código e não aparecia na tela.
+    c.globalCompositeOperation = "source-over"; c.globalAlpha = 1;
+    if (!g.bgGrad || g.bgW !== g.W || g.bgH !== g.H || g.bgLight !== light) {
+      const gr = c.createRadialGradient(g.W * .5, g.H * .38, 0, g.W * .5, g.H * .38, Math.max(g.W, g.H) * .78);
+      // O fundo é trabalho: ele compra FAIXA DINÂMICA. Não devolve saturação
+      // (quem devolve é tirar o branco), mas é o que deixa o miolo estourar sem
+      // que o resto lave junto.
+      if (light) { gr.addColorStop(0, "#FFFFFF"); gr.addColorStop(.62, "#F2EFE8"); gr.addColorStop(1, "#E5E0D3"); }
+      else { gr.addColorStop(0, "#0B0F18"); gr.addColorStop(.58, "#06080E"); gr.addColorStop(1, "#030407"); }
+      g.bgGrad = gr; g.bgW = g.W; g.bgH = g.H; g.bgLight = light;
+    }
+    c.fillStyle = g.bgGrad; c.fillRect(0, 0, g.W, g.H);
+    c.save(); c.translate(t.x, t.y); c.scale(t.k, t.k);
+    // TIER por PERCENTIL (eixo "calor", intrínseco ao dado — assado no sprite,
+    // custo zero por quadro). PageRank tem cauda longa: com corte ABSOLUTO todo
+    // mundo cairia em tier 0 e a hierarquia sumiria.
+    if (g.tierSig !== g.nodes.length) {
+      const cs = g.nodes.map((n: any) => n.centrality || 0).sort((a: number, b: number) => a - b);
+      const p60 = cs[(cs.length * 0.60) | 0] || 0, p90 = cs[(cs.length * 0.90) | 0] || 0;
+      const porGrau = !(p90 > p60);                    // PageRank degenerado → cai pro grau
+      g.nodes.forEach((n: any) => {
+        if (porGrau) { const d = ((g.adj[n.id] || new Set()) as Set<string>).size;
+          n._tier = d >= 8 ? 2 : d >= 3 ? 1 : 0; }
+        else { const v = n.centrality || 0; n._tier = v >= p90 ? 2 : v >= p60 ? 1 : 0; }
+      });
+      g.tierSig = g.nodes.length;
+    }
     const hi = g.hover, nbr = hi ? (g.adj[hi] || new Set()) : null;
     // Path mode: spotlight an ordered path, dim everything else
     const pids = pathRef.current || [];
@@ -147,7 +179,6 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       ? new Set<string>([spot as string, ...((g.adj[spot as string] || new Set()) as Set<string>)])
       : gSpot ? new Set<string>(g.nodes.filter((n: any) => n._g === gSpot).map((n: any) => n.id)) : null;
     // theme-aware ink so labels/edges read on both the light and dark canvas
-    const light = document.documentElement.getAttribute("data-theme") === "light";
     // Respiração do halo. Só corre quando HÁ algo aceso — o loop lá embaixo só
     // repinta nesse caso, então o grafo parado continua em ~0% de CPU.
     const _pulso = (hi || spot || g.groupSpot) ? Math.sin(performance.now() / 620) * 0.5 + 0.5 : 0;
@@ -196,6 +227,11 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     // the full per-edge grammar (arrows, dashes, per-edge labels) is reserved for small
     // graphs where you can actually see it. (Obsidian likewise drops detail at scale.)
     const big = g.nodes.length > 1200;
+    // AMORTECEDOR DE DENSIDADE. Luz aditiva soma: o que é bonito com 200 nós
+    // vira mancha branca com 4000. Cada célula cede alpha conforme a população
+    // cresce, pra que o AGREGADO permaneça legível. Piso de 0.34 — abaixo disso
+    // a topologia some, e a malha é o cérebro.
+    const _dens = Math.max(0.34, Math.min(1, Math.sqrt(1200 / Math.max(1, g.nodes.length))));
     if (g.moving || big) {
       // edges grouped BY COLOUR — a handful of strokes (one per edge type/predicate
       // class), not one per edge, so the batched draw stays cheap yet keeps the
@@ -210,16 +246,33 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
           : kind === "suggested" ? "251,191,36"
           : (PCLASS_RGB[l.pclass || "other"] || PCLASS_RGB.other);
         (_grp[rgb] = _grp[rgb] || []).push(A, B); });
+      // SINAPSE: bainha larga e fraca + axônio fino e forte, ambos compostos como
+      // luz. O fio passa a EMITIR em vez de ser pintado. Como as arestas já vêm
+      // agrupadas POR COR, isto custa 2 traços por classe de predicado (~14 no
+      // total) — e não 2 por aresta (~40.000). É por isso que "núcleo + halo"
+      // aqui é barato e seria proibitivo num renderizador ingênuo.
       for (const rgb in _grp) {
-        c.strokeStyle = rgb === "_d" ? edgeDead : `rgba(${rgb},0.55)`;
-        c.beginPath(); const arr = _grp[rgb];
-        for (let i = 0; i < arr.length; i += 2) { c.moveTo(arr[i].x, arr[i].y); c.lineTo(arr[i + 1].x, arr[i + 1].y); }
-        c.stroke();
+        const arr = _grp[rgb];
+        const p = new Path2D();
+        for (let i = 0; i < arr.length; i += 2) { p.moveTo(arr[i].x, arr[i].y); p.lineTo(arr[i + 1].x, arr[i + 1].y); }
+        if (rgb === "_d") {           // superada: continua cinza e chapada, de propósito
+          c.globalCompositeOperation = "source-over";
+          c.lineWidth = 0.9 / Math.sqrt(t.k); c.strokeStyle = edgeDead; c.stroke(p); continue;
+        }
+        c.globalCompositeOperation = light ? "multiply" : "lighter";
+        c.lineWidth = 2.7 / Math.sqrt(t.k); c.strokeStyle = `rgba(${rgb},0.09)`; c.stroke(p);   // bainha
+        c.lineWidth = 0.9 / Math.sqrt(t.k); c.strokeStyle = `rgba(${rgb},0.62)`; c.stroke(p);   // axônio
       }
+      c.globalCompositeOperation = "source-over";
       // esferas também no caminho barato — o sprite já vem pronto, então custa um
       // drawImage; e abaixo de ~1.6px de tela o próprio drawOrb cai pra ponto chapado.
       g.nodes.forEach((n: any) => { const r = baseRad(n, false) / Math.sqrt(t.k);
-        drawOrb(c, n.x, n.y, r, nodeColor(n), { light, rTela: r * t.k }); });
+        const _tr = (n._tier || 0) as 0 | 1 | 2;
+        // Corona AMBIENTE desligada no caminho denso. Medido na tela: com ~4000
+        // nós amontoados no miolo, centenas de halos somando estouram tudo pra
+        // branco — vira mancha, não cérebro. O aceso (foco/vizinho) nunca é
+        // cortado, porque é justamente ele que precisa furar a papa.
+        drawOrb(c, n.x, n.y, r, nodeColor(n), { tier: _tr, glow: 0, somaA: _dens, light, rTela: r * t.k }); });
       // settled big graph: labels only when zoomed in enough to read them, and only for
       // nodes inside the viewport (culled) so it stays cheap at thousands of nodes.
       if (!g.moving && t.k > 0.8) {
@@ -243,7 +296,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       // the picked node's subgraph redrawn ON TOP — others stay visible but ghosted.
       if (spotN || gSpot) {
         c.restore();
-        c.fillStyle = light ? "rgba(244,247,251,0.82)" : "rgba(9,12,18,0.82)";
+        c.fillStyle = light ? "rgba(242,239,232,0.62)" : "rgba(6,8,14,0.62)";
         c.fillRect(0, 0, g.W, g.H);
         c.save(); c.translate(t.x, t.y); c.scale(t.k, t.k);
         const members: any[] = spotN
@@ -296,15 +349,29 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
         const lit = spotN ? (l.source === spot || l.target === spot)
                           : (spotSet.has(l.source) && spotSet.has(l.target));
         if (lit) { alpha = Math.max(alpha, 0.8); width = Math.max(width, 1.5); }
-        else { alpha *= 0.06; arrow = false; }
+        // PISO DURO de 0.22. Era 0.06 — a 1,8% de alpha efetivo a malha some, e
+        // A MALHA É O CÉREBRO. O apagado tem que continuar sendo uma rede
+        // visível, só fria; sumir não é apagar, é destruir a leitura do grafo.
+        else { alpha = Math.max(alpha * 0.35, 0.22); arrow = false; }
       } else if (pathSet) {                                // Path-mode spotlight
         if (onPath) { rgb = "251,191,36"; alpha = 0.95; width = Math.max(width, 2.6); }
-        else { alpha *= 0.1; arrow = false; }
+        else { alpha = Math.max(alpha * 0.35, 0.22); arrow = false; }
       }
+      // bainha do axônio: a curva já está no caminho atual, então é um traço a
+      // mais — largo e quase transparente. É ele que faz o fio parecer emitir
+      // luz sem engordar. (Não vai nas tracejadas: o dash já é o sinal delas.)
+      if (!dash) {
+        c.globalCompositeOperation = light ? "multiply" : "lighter";
+        c.lineWidth = (width * 3.0) / Math.sqrt(t.k);
+        c.strokeStyle = `rgba(${rgb},${(alpha * 0.16).toFixed(3)})`;
+        c.stroke();
+      }
+      c.globalCompositeOperation = light ? "multiply" : "lighter";
       c.strokeStyle = `rgba(${rgb},${alpha})`;
       c.lineWidth = width / Math.sqrt(t.k);
       if (dash) c.setLineDash(dash.map((d) => d / t.k));
       c.stroke(); c.setLineDash([]);
+      c.globalCompositeOperation = "source-over";
       if (arrow && t.k > 0.7 && active) {                 // directional arrowhead at the target
         const ang = Math.atan2(B.y - my, B.x - mx);
         const br = baseRad(B, false) / Math.sqrt(t.k);
@@ -324,21 +391,32 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       const active = (!hi || n.id === hi || (nbr && nbr.has(n.id))) && !dimmed;
       const dim = dimmed;
       const col = nodeColor(n), rad = baseRad(n, n.id === hi);
-      // Esfera de vidro. Aceso (foco, vizinho, holofote, caminho) ganha o halo do
-      // HUD — núcleo quente + brilho largo; apagado perde presença sem sumir.
+      // NEURÔNIO. Dois eixos ortogonais, nenhuma camada nova:
+      //  A) CALOR — intrínseco ao dado (tier), já assado no sprite.
+      //  B) ESTADO — da interação; só multiplica alpha e raio.
+      // Corona ambiente só a partir do tier 1 e forte só no tier 2: isso não é
+      // estética, é o que impede a papa aditiva. Menos de 10% dos nós são hub,
+      // então o campo fica de células nítidas com poucas âncoras quentes.
       const _r = rad / Math.sqrt(t.k);
       const _foco = n.id === hi || (spotSet && n.id === spot);
-      const _aceso = _foco || (nbr && nbr.has(n.id)) || onP;
-      c.save();
-      if (dim) c.globalAlpha = 0.28; else if (!active) c.globalAlpha = 0.5;
+      const _viz = !!(nbr && nbr.has(n.id));
+      const _tier = (n._tier || 0) as 0 | 1 | 2;
+      // piso duro de 0.34: abaixo disso a topologia simplesmente some da tela
+      const _somaA = dim ? 0.34 : (active || onP ? _dens : _dens * 0.62);
+      const _glow = dim ? 0 : _foco ? 0.95 : _viz || onP ? 0.42 : [0, 0.08, 0.18][_tier];
+      // portão de zoom: só a corona AMBIENTE encolhe ao afastar (foco e vizinho
+      // nunca são cortados, senão o hover perde sentido justo quando é mais útil)
+      const _amb = !_foco && !_viz && !onP ? Math.max(0, Math.min(1, (t.k - 0.28) / 0.5)) : 1;
       drawOrb(c, n.x, n.y, _r, col, {
-        glow: _aceso ? (_foco ? 1 : 0.42) : 0,
-        pulse: _pulso, light, rTela: _r * t.k,
+        tier: _tier, glow: _glow * _amb, coronaR: _foco ? 3.0 : _viz ? 2.3 : 1.9,
+        somaA: _somaA, pulse: _pulso, light, rTela: _r * t.k,
       });
-      c.restore();
-      // o aro de "compartilhado" continua: o vidro embeleza, mas não pode APAGAR
+      // O nó em FOCO ganha o anel creme — o creme é reservado ao que está vivo.
+      if (_foco) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283);
+        c.lineWidth = 1.5 / t.k; c.strokeStyle = `rgba(${CREME},.55)`; c.stroke(); }
+      // o aro de "compartilhado" continua: a luz embeleza, mas não pode APAGAR
       // a informação que o nó carrega.
-      if (n.shared && !dim) { c.beginPath(); c.arc(n.x, n.y, _r, 0, 6.283); c.lineWidth = 1.8 / t.k; c.strokeStyle = nodeRing(true); c.stroke(); }
+      else if (n.shared && !dim) { c.beginPath(); c.arc(n.x, n.y, _r, 0, 6.283); c.lineWidth = 1.8 / t.k; c.strokeStyle = nodeRing(true); c.stroke(); }
       if (onP) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(251,191,36,.95)"; c.stroke(); }
       else if (spotSet && n.id === spot) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.2 / t.k; c.strokeStyle = "rgba(124,156,255,.95)"; c.stroke(); }
       else if (n.bridge && !dim) { c.beginPath(); c.arc(n.x, n.y, (rad + 2.5) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 1.4 / t.k; c.setLineDash([2 / t.k, 2 / t.k]); c.strokeStyle = "rgba(245,158,11,.85)"; c.stroke(); c.setLineDash([]); }
@@ -561,7 +639,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       const _light = document.documentElement.getAttribute("data-theme") === "light" ? 1 : 0;
       // o corpo da esfera é calibrado por tema (no claro precisa de mais densidade,
       // senão o vidro some no Ivory) → na virada, joga fora os sprites em cache.
-      if (g.lastLight !== undefined && g.lastLight !== _light) resetOrbs();
+      if (g.lastLight !== undefined && g.lastLight !== _light) { resetOrbs(); clearColorCache(); }
       g.lastLight = _light;
       // Com algo ACESO, o balde de tempo faz o sig mudar ~30x/s e o halo respira.
       // Sem nada aceso o balde é 0 e a suspensão em repouso (~0% CPU) continua.
