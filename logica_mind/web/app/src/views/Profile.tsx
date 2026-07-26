@@ -101,7 +101,8 @@ export default function Profile({ ns }: { ns: string }) {
 
       {/* map mode: the group → dimension → category graph */}
       {mode === "map" && (() => {
-        const { data: gd, meta } = buildCatGraph(dims, (g) => t(GRP_KEY[g] as any) || g);
+        const tdim = (d: DimensionEntry) => { const k = "dim_" + d.id; const v = t(k as any); return v === k ? d.label : v; };
+        const { data: gd, meta } = buildCatGraph(dims.map((d) => ({ ...d, label: tdim(d) })), (g) => t(GRP_KEY[g] as any) || g);
         return gd.nodes.length ? (
           <div className="h-[600px] mt-4">
             <GraphCanvas ref={graphRef} data={gd} communities={false}
@@ -171,11 +172,12 @@ export default function Profile({ ns }: { ns: string }) {
 }
 
 function DimCard({ d, color, onOpen, t }: { d: DimensionEntry; color: string; onOpen: (f: MemFilter) => void; t: (k: any) => string }) {
+  const k = "dim_" + d.id, tv = t(k), label = tv === k ? d.label : tv;
   return (
     <div className="card-surface px-4 py-3">
-      <button onClick={() => onOpen({ dimension: d.id, label: d.label })} title={t("open_in_memories")}
+      <button onClick={() => onOpen({ dimension: d.id, label })} title={t("open_in_memories")}
         className="w-full flex items-center gap-2 mb-2 text-left group">
-        <span className="text-[13px] font-semibold group-hover:text-[var(--accent)]">{d.label}</span>
+        <span className="text-[13px] font-semibold group-hover:text-[var(--accent)]">{label}</span>
         {d.maslow && <span className="text-[10px] text-[var(--dim2)] bg-[var(--panel2)] border border-[var(--line)] px-1.5 py-px rounded-full">{t(MASLOW_KEY[d.maslow] as any) || d.maslow}</span>}
         <span className="ml-auto text-[12px] tabular-nums font-bold" style={{ color }}>{d.count}</span>
       </button>

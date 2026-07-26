@@ -67,6 +67,14 @@ export default function Sidebar({
           <SettingsIcon size={16} /> {t("settings")}
         </button>
       </div>
+
+      {/* Assinatura institucional — wordmark OFICIAL do kit, sem recolorir.
+          Regra do kit: fundo claro → logo preta; escuro → branca. */}
+      <div className="mt-auto flex items-center justify-center gap-1.5 border-t border-[var(--line)] px-3 py-3 opacity-55">
+        <span className="text-[9px] uppercase tracking-[0.14em] text-[var(--dim2)]">por</span>
+        <img src="/rovemark-logo-white.svg" alt="Rovemark" className="lr-logo-dark h-[11px] w-auto" />
+        <img src="/rovemark-logo-black.svg" alt="Rovemark" className="lr-logo-light h-[11px] w-auto" />
+      </div>
     </aside>
   );
 }

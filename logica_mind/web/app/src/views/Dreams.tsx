@@ -3,7 +3,7 @@ import {
   Moon, Layers, Zap, Scissors, GitMerge, Brain, Network,
   AlertTriangle, TrendingDown, ChevronDown, ChevronUp, Activity, Sparkles
 } from "lucide-react";
-import { api, tShort, type DreamReport, type ContestedPair, type ForgetCurveEntry, type SurpriseEvent } from "../api";
+import { api, tShort, type DreamReport, type ContestedPair, type ForgetCurveEntry, type SurpriseEvent, type DreamCadence, type DreamSummary } from "../api";
 import Pager, { paginate } from "../components/Pager";
 import { useI18n } from "../i18n";
 
@@ -281,41 +281,88 @@ function DreamCard({ report }: { report: DreamReport }) {
   );
 }
 
+// ---- cadence settings (when + how much the dream runs) ----------------------
+function DreamSettings() {
+  const { t } = useI18n();
+  const [cfg, setCfg] = useState<DreamCadence | null>(null);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { api.dreamConfig().then(d => setCfg(d.dream)).catch(() => {}); }, []);
+  if (!cfg) return null;
+  const save = async (patch: Partial<DreamCadence>) => {
+    const next = { ...cfg, ...patch }; setCfg(next);
+    try { await api.setDreamConfig(patch); setSaved(true); setTimeout(() => setSaved(false), 1500); } catch { /* fail-soft */ }
+  };
+  return (
+    <div className="card-surface mb-3 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Moon size={14} className="text-[var(--accent2)] flex-none" />
+        <span className="text-[13.5px] font-semibold flex-1">{t("dream_cadence")}</span>
+        {saved && <span className="text-[11px] text-[var(--good)]">✓ {t("saved")}</span>}
+        <button onClick={() => save({ auto: !cfg.auto })}
+          className={`text-[11px] px-2.5 py-1 rounded-full font-semibold flex-none ${cfg.auto ? "text-[var(--good)] bg-[color-mix(in_srgb,var(--good)_15%,transparent)]" : "text-[var(--dim2)] border border-[var(--line)]"}`}>
+          {cfg.auto ? t("dream_auto_on") : t("dream_auto_off")}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-3 max-[420px]:grid-cols-1">
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-[var(--dim2)] uppercase tracking-[.5px]">{t("dream_interval")}</span>
+          <input type="number" min={0.05} step={0.5} defaultValue={cfg.interval_hours}
+            onBlur={e => save({ interval_hours: parseFloat(e.target.value) || cfg.interval_hours })}
+            className="bg-[var(--panel2)] border border-[var(--line)] rounded-[8px] px-2.5 py-1.5 text-[13px] tabular-nums" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11px] text-[var(--dim2)] uppercase tracking-[.5px]">{t("dream_batch")}</span>
+          <input type="number" min={1} max={2000} step={10} defaultValue={cfg.batch}
+            onBlur={e => save({ batch: parseInt(e.target.value) || cfg.batch })}
+            className="bg-[var(--panel2)] border border-[var(--line)] rounded-[8px] px-2.5 py-1.5 text-[13px] tabular-nums" />
+        </label>
+      </div>
+      <div className="text-[11px] text-[var(--dim2)] mt-2 leading-snug">{t("dream_cadence_hint")}</div>
+    </div>
+  );
+}
+
 // ---- main view --------------------------------------------------------------
 export default function Dreams({ ns }: { ns: string }) {
   const { t } = useI18n();
   const [dreams, setDreams] = useState<DreamReport[]>([]);
+  const [summary, setSummary] = useState<DreamSummary | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    api.dreams(ns).then(d => { setDreams(d.dreams || []); setLoaded(true); }).catch(() => setLoaded(true));
+    api.dreams(ns).then(d => { setDreams(d.dreams || []); setSummary(d.summary || null); setLoaded(true); }).catch(() => setLoaded(true));
     setPage(1);
   }, [ns]);
   const dpg = paginate(dreams, page, 8);
 
-  const totalOps  = dreams.reduce((a, r) => a + r.distilled + r.reinforced + r.forgotten + r.derived + r.inferred, 0);
-  const totalForgotten = dreams.reduce((a, r) => a + r.forgotten, 0);
-  const totalDistilled = dreams.reduce((a, r) => a + r.distilled, 0);
+  // real totals across ALL retained cycles (from the server), not just the page
+  const cycles         = summary?.cycles ?? dreams.length;
+  const totalOps       = summary?.ops ?? dreams.reduce((a, r) => a + r.distilled + r.reinforced + r.forgotten + r.derived + r.inferred, 0);
+  const totalForgotten = summary?.forgotten ?? dreams.reduce((a, r) => a + r.forgotten, 0);
+  const totalDistilled = summary?.distilled ?? dreams.reduce((a, r) => a + r.distilled, 0);
 
   return (
     <div className="fadein">
       <div className="flex items-center gap-3 mb-5">
         <h2 className="m-0 text-[18px] font-bold tracking-tight">{t("dream_journal")}</h2>
-        {dreams.length > 0 && (
-          <span className="text-[var(--dim2)] text-[12px]">{dreams.length} {t("dream_cycle").toLowerCase()}s</span>
+        {cycles > 0 && (
+          <span className="text-[var(--dim2)] text-[12px]">{cycles} {t("dream_cycle").toLowerCase()}s</span>
         )}
       </div>
 
       {/* summary strip — always visible */}
       {loaded && (
         <div className="flex gap-3 mb-4 flex-wrap max-[640px]:grid max-[640px]:grid-cols-2">
-          <StatCard icon={Moon}     value={dreams.length}    label={t("dream_cycle") + "s"} color="var(--accent2)"  />
+          <StatCard icon={Moon}     value={cycles}           label={t("dream_cycle") + "s"} color="var(--accent2)"  />
           <StatCard icon={Layers}   value={totalDistilled}   label={t("distilled")}          color="var(--accent)"   />
           <StatCard icon={Scissors} value={totalForgotten}   label={t("forgotten")}          color="var(--dim)"      />
           <StatCard icon={Activity} value={totalOps}         label={t("total_ops")}          color="var(--gold)"     />
         </div>
       )}
+
+      {/* cadence settings — when & how much the dream runs */}
+      <DreamSettings />
 
       {/* always-visible moat sections */}
       <ForgetCurveSection ns={ns} />

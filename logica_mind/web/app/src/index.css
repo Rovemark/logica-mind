@@ -78,3 +78,10 @@ button { font: inherit; cursor: pointer; }
    técnicos (regra explícita do kit). */
 body { font-family: Manrope, system-ui, -apple-system, sans-serif; }
 code, pre, .mono, [class*="mono"] { font-family: 'IBM Plex Mono', Menlo, monospace; }
+
+
+/* Wordmark da Rovemark troca com o tema — regra do kit (claro → preta; escuro → branca). */
+.lr-logo-dark { display: block; }
+.lr-logo-light { display: none; }
+:root[data-theme="light"] .lr-logo-dark { display: none; }
+:root[data-theme="light"] .lr-logo-light { display: block; }

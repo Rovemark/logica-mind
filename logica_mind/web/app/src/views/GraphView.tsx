@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb, Spline } from "lucide-react";
-import { api, tShort, type GraphData, type PathResult, type SuggestedLink } from "../api";
+import { Hexagon, Clock, Timer, RotateCw, Maximize2, Palette, X, Search, SlidersHorizontal, Check, Route, ArrowRight, Lightbulb, Spline, Orbit, ListFilter } from "lucide-react";
+import { api, tShort, valueColor, type GraphData, type PathResult, type SuggestedLink } from "../api";
 import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
 import NodeDetail from "../components/NodeDetail";
 import { useI18n } from "../i18n";
-import { AREAS, dimArea, dimColor, type Area } from "../lifearea";
+import { AREAS, dimArea, type Area } from "../lifearea";
 import { predLabel } from "../predlabel";
 
-type ColorBy = "namespace" | "community" | "area" | "centrality";
+type ColorBy = "namespace" | "community" | "area" | "type" | "channel" | "source" | "project" | "squad" | "centrality";
+// hub label icons (zero-asset): entity types + a couple of channel cues
+const TYPE_ICON: Record<string, string> = { Person: "👤", Organization: "🏢", Product: "📦", Place: "📍", Project: "🧩", Concept: "💡" };
+// graph ORGANISATION (layout engine): organic web · facet orbits (hubs with their
+// members around them — the org-map look) · concentric rings by importance.
+type LayoutMode = "force" | "orbit" | "rings";
+const LAYOUTS: LayoutMode[] = ["force", "orbit", "rings"];
 
 // predicate-class palette — must match the canvas edge grammar (PCLASS_RGB)
 const PCLASS_HEX: Record<string, string> = {
@@ -16,22 +22,61 @@ const PCLASS_HEX: Record<string, string> = {
 };
 // node tint for the Centrality colour mode: cool (low) → hot (high)
 const centColor = (c: number) => `hsl(${Math.round(210 - 210 * Math.min(1, Math.max(0, c)))},72%,55%)`;
+// human-readable label for a dimension id (strip the area prefix, spaces for _)
+const dimLabel = (d: string) => d.replace(/^(biz|project|org)_/, "").replace(/_/g, " ");
 
 export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: { ns: string; colorFor: (n: string) => string; onOpenMemory?: (m: any) => void; focusEntity?: { name: string; n: number } | null }) {
   const { t } = useI18n();
+  // dimension label in the USER'S language (dim_* keys cover the whole taxonomy);
+  // ids the taxonomy doesn't know fall back to the prettified raw id
+  const dimName = (d: string) => { const k = "dim_" + d; const s = t(k as any); return s === k ? dimLabel(d) : s; };
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
   const [loaded, setLoaded] = useState(false);       // first load done (gates the full-screen spinner)
   const [refetching, setRefetching] = useState(false); // a toggle is reloading — keep the graph visible
   const [showOrphans, setShowOrphans] = useState(false); // Obsidian-style: hide link-less nodes by default
   const reqRef = useRef(0);                           // stale-guard: ignore out-of-order responses
   const [history, setHistory] = useState(true);
-  const [colorBy, setColorBy] = useState<ColorBy>("area");   // colour by life-area when available (multi-colour + meaningful); falls back to namespace if the data has no dimensions
+  // colour facet — persisted like the layout; defaults to life-area (multi-colour +
+  // meaningful) and falls back to namespace if the dataset has no dimensions
+  const [colorBy, setColorBy] = useState<ColorBy>(() => {
+    const v = localStorage.getItem("graph_colorBy") as ColorBy | null;
+    return v && ["namespace", "community", "area", "type", "channel", "source", "project", "squad", "centrality"].includes(v) ? v : "area";
+  });
+  useEffect(() => { localStorage.setItem("graph_colorBy", colorBy); }, [colorBy]);
+  // layout/organisation mode — persisted so the user's preferred view sticks
+  const [layout, setLayout] = useState<LayoutMode>(() => {
+    const v = localStorage.getItem("graph_layout") as LayoutMode | null;
+    return v && LAYOUTS.includes(v) ? v : "force";
+  });
+  const [layoutMenu, setLayoutMenu] = useState(false);
+  useEffect(() => { localStorage.setItem("graph_layout", layout); }, [layout]);
+  // first-visit hint: surface the layout/facet superpowers once, then never again
+  const [hint, setHint] = useState(() => !localStorage.getItem("graph_hint_seen"));
+  const dismissHint = () => { localStorage.setItem("graph_hint_seen", "1"); setHint(false); };
+  useEffect(() => { if (!hint) return; const t2 = setTimeout(dismissHint, 18000); return () => clearTimeout(t2); }, [hint]);
   const [coMention, setCoMention] = useState(true);
   const [semantic, setSemantic] = useState(false);
   const [suggest, setSuggest] = useState(false);
   const [suggestedLinks, setSuggestedLinks] = useState<SuggestedLink[]>([]);
   const [tintQuery, setTintQuery] = useState("");
-  const [areaFilter, setAreaFilter] = useState<Area | null>(null);
+  // generic facet-value filter (multi-select): chips for every value of the ACTIVE
+  // colour facet (channels, agents, areas, types…) — toggle values OFF to keep only
+  // the ones you want (e.g. "só telegram + whatsapp"). Reset when the facet changes.
+  const [facetOff, setFacetOff] = useState<Set<string>>(new Set());
+  useEffect(() => { setFacetOff(new Set()); }, [colorBy]);
+  // the value filter lives in a collapsible RIGHT SIDEBAR (chips overflowed the
+  // toolbar on facets with many values) — open/closed state is persisted
+  const [facetPanel, setFacetPanel] = useState(() => localStorage.getItem("graph_facet_panel") === "1");
+  useEffect(() => { localStorage.setItem("graph_facet_panel", facetPanel ? "1" : "0"); }, [facetPanel]);
+  // the toolbar wraps on narrow screens — the sidebar anchors right below it
+  const tbRef = useRef<HTMLDivElement>(null);
+  const [tbH, setTbH] = useState(34);
+  useEffect(() => {
+    const el = tbRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setTbH(el.offsetHeight));
+    ro.observe(el); setTbH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
   const [minConf, setMinConf] = useState(0);
   const [predOff, setPredOff] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -68,7 +113,22 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   }, [ns, history, at, coMention, semantic, focusNode, depth]);
 
   // reset transient view state when switching namespace
-  useEffect(() => { setPicked(null); setScrub(false); setAt(null); setAreaFilter(null); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); setPathRes(null); }, [ns]);
+  useEffect(() => { setPicked(null); setScrub(false); setAt(null); setFacetOff(new Set()); setQuery(""); setPredOff(new Set()); setMinConf(0); setFocusNode(null); setPathRes(null); }, [ns]);
+
+  // keyboard: Esc clears filters/highlights; l/c/f toggle the layout/colour/filter menus
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Escape") { setFacetOff(new Set()); setTintQuery(""); setPicked(null); setLayoutMenu(false); setColorMenu(false); setFiltersOpen(false); }
+      else if (e.key === "l") setLayoutMenu((v) => !v);
+      else if (e.key === "c") setColorMenu((v) => !v);
+      else if (e.key === "f") setFiltersOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // suggested links (predicted-but-missing edges) — opt-in overlay
   useEffect(() => {
@@ -82,7 +142,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     const id = hover.id, cached = hoverCache.current[id];
     if (cached) { setHoverInfo(cached); return; }
     let alive = true;
-    api.node(ns, id).then((d) => { if (!alive) return; const info = { name: id, type: d.type || "", mems: (d.memories || []).slice(0, 3) }; hoverCache.current[id] = info; setHoverInfo(info); }).catch(() => {});
+    const nodeType = data.nodes.find((n) => n.id === id)?.type || "";
+    // preview=true → fast path (top mentioning memories only, no heavy graph scan)
+    api.node(ns, id, true).then((d) => { if (!alive) return; const info = { name: id, type: nodeType || d.type || "", mems: (d.memories || []).slice(0, 3) }; hoverCache.current[id] = info; setHoverInfo(info); }).catch(() => {});
     return () => { alive = false; };
   }, [hover?.id, ns]);
 
@@ -95,6 +157,51 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     return s;
   }, [data]);
   const hasAreas = areasPresent.size > 0;
+  // distinct dimensions present, grouped by life-area — each dimension now gets its
+  // OWN colour (34 of them), not just the 4 area buckets, so the legend mirrors that
+  const dimsByArea = useMemo(() => {
+    const by: Record<string, string[]> = {}; const seen = new Set<string>();
+    data.nodes.forEach((n) => { if (n.dimension && !seen.has(n.dimension)) { seen.add(n.dimension); (by[dimArea(n.dimension)] ||= []).push(n.dimension); } });
+    for (const k in by) by[k].sort();
+    return by;
+  }, [data]);
+  // entity types present (Concept/Product/Person/Organization/Place/Project) — covers
+  // ALL graph nodes (unlike dimensions, which only the semantic layer carries)
+  const typesPresent = useMemo(() => {
+    const s = new Set<string>(); data.nodes.forEach((n) => { if (n.type) s.add(n.type); });
+    return [...s].sort();
+  }, [data]);
+  const hasTypes = typesPresent.length > 0;
+  // channels present (whatsapp/telegram/voice/sessions/… — whatever the host app tags)
+  const channelsPresent = useMemo(() => {
+    const s = new Set<string>(); data.nodes.forEach((n) => { if (n.channel) s.add(n.channel); });
+    return [...s].sort();
+  }, [data]);
+  const hasChannels = channelsPresent.length > 0;
+  // presence of the metadata-voted facets (source/project/squad) — greys the options out
+  const facetPresence = useMemo(() => {
+    const p = { source: false, project: false, squad: false };
+    data.nodes.forEach((n: any) => { if (n.source) p.source = true; if (n.project) p.project = true; if (n.squad) p.squad = true; });
+    return p;
+  }, [data]);
+  // RAW facet value of a node under the active colour facet ("—" = no value) —
+  // null facet (community/centrality) means the chip filter doesn't apply.
+  const facetVal = useMemo(() => {
+    if (colorBy === "namespace") return (n: any) => (n.namespaces && n.namespaces[0]) || "—";
+    if (colorBy === "area") return (n: any) => n.dimension || "—";
+    if (colorBy === "type") return (n: any) => n.type || "—";
+    if (colorBy === "channel" || colorBy === "source" || colorBy === "project" || colorBy === "squad")
+      return (n: any) => n[colorBy] || "—";
+    return null;
+  }, [colorBy]);
+  // distinct values of the active facet with counts (chips), busiest first
+  const facetValues = useMemo(() => {
+    if (!facetVal) return [] as { v: string; n: number }[];
+    const c: Record<string, number> = {};
+    data.nodes.forEach((n) => { const v = facetVal(n); c[v] = (c[v] || 0) + 1; });
+    return Object.entries(c).map(([v, n]) => ({ v, n })).sort((a, b) => b.n - a.n);
+  }, [data, facetVal]);
+  const facetCount = useMemo(() => Object.fromEntries(facetValues.map((x) => [x.v, x.n])) as Record<string, number>, [facetValues]);
   // default is "area" (colourful + meaningful); if this dataset has no life-areas
   // yet, fall back to namespace colouring so it isn't an all-grey graph.
   useEffect(() => { if (loaded && !hasAreas && colorBy === "area") setColorBy("namespace"); }, [loaded, hasAreas]);
@@ -106,12 +213,13 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     return [...s];
   }, [data]);
 
-  // apply the filters: life-area subset (drops nodes), then per-link min-confidence
-  // + relation-type (drops links only, so node positions stay put)
+  // apply the filters: facet-value subset (drops nodes — e.g. keep only the
+  // telegram + whatsapp channels), then per-link min-confidence + relation-type
+  // (drops links only, so node positions stay put)
   const shown: GraphData = useMemo(() => {
     let nodes = data.nodes, links = data.links;
-    if (colorBy === "area" && areaFilter) {
-      const keep = new Set(nodes.filter((n) => n.dimension && dimArea(n.dimension) === areaFilter).map((n) => n.id));
+    if (facetVal && facetOff.size) {
+      const keep = new Set(nodes.filter((n) => !facetOff.has(facetVal(n))).map((n) => n.id));
       nodes = nodes.filter((n) => keep.has(n.id));
       links = links.filter((l) => keep.has(l.source) && keep.has(l.target));
     }
@@ -136,7 +244,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
       nodes = nodes.filter((n) => deg.has(n.id));
     }
     return { nodes, links };
-  }, [data, colorBy, areaFilter, minConf, predOff, t, suggest, suggestedLinks, showOrphans]);
+  }, [data, colorBy, facetVal, facetOff, minConf, predOff, t, suggest, suggestedLinks, showOrphans]);
 
   // how many link-less nodes the graph currently holds (for the toggle's count badge)
   const orphanCount = useMemo(() => {
@@ -152,10 +260,39 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
   // canvas keys a repaint on nodeTint identity, so an unstable closure would defeat
   // idle-suspend by repainting on every render.
   const tint = useMemo(() => tq ? (n: any) => (n.id.toLowerCase().includes(tq) ? "#fbbf24" : "var(--dim2)")
-    : colorBy === "area" ? (n: any) => (n.dimension ? dimColor(n.dimension) : "var(--dim2)")
+    : colorBy === "area" ? (n: any) => (n.dimension ? valueColor(n.dimension) : "var(--dim2)")
+    : colorBy === "type" ? (n: any) => valueColor(n.type)
+    : (colorBy === "channel" || colorBy === "source" || colorBy === "project" || colorBy === "squad")
+      ? (n: any) => (n[colorBy] ? valueColor(n[colorBy]) : "var(--dim2)")
     : colorBy === "centrality" ? (n: any) => centColor(n.centrality || 0)
     : undefined, [tq, colorBy]);
   const communities = colorBy === "community" && !tq;
+  // facet→group mapping for the orbit/rings layouts: hubs/sectors follow the ACTIVE
+  // colour facet — "colour by agent" + orbit = one orbit per agent, by type = one per
+  // entity type, by life-area = one per dimension. Community grouping is resolved
+  // inside the canvas (it owns the connected components).
+  const groupOf = useMemo(() => {
+    // RAW values as group keys (same keys as facetVal/chips/colours) — the canvas
+    // prettifies labels via labelOf, so hub-solo and chips speak the same language.
+    if (colorBy === "area") return (n: any) => n.dimension || null;
+    if (colorBy === "type") return (n: any) => n.type || null;
+    if (colorBy === "channel" || colorBy === "source" || colorBy === "project" || colorBy === "squad")
+      return (n: any) => n[colorBy] || null;
+    if (colorBy === "community") return undefined;
+    return (n: any) => (n.namespaces && n.namespaces[0]) || null;
+  }, [colorBy]);
+  // pretty hub labels (emoji cues, dimension ids humanized)
+  const hubLabel = useMemo(() => (k: string) => {
+    if (k === "—") return k;
+    if (colorBy === "area") return dimName(k);
+    if (colorBy === "type") return `${TYPE_ICON[k] || "❖"} ${k}`;
+    if (colorBy === "channel") return `${k === "voice" ? "🎙" : "💬"} ${k}`;
+    if (colorBy === "namespace") return `🤖 ${k}`;
+    return k;
+  }, [colorBy]);
+  // shift+click on a hub → keep ONLY that group (same semantics as chip solo)
+  const onGroupSolo = useMemo(() => (k: string) =>
+    setFacetOff(new Set(facetValues.map((x) => x.v).filter((v) => v !== k))), [facetValues]);
 
   async function toggleScrub() {
     if (scrub) { setScrub(false); setAt(null); return; }
@@ -176,7 +313,17 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     if (!pathFrom.trim() || !pathTo.trim()) return;
     try { setPathRes(await api.path(ns, pathFrom.trim(), pathTo.trim())); } catch { setPathRes(null); }
   }
-  const pathIds = pathRes?.found ? pathRes.path : undefined;
+  // only spotlight a path whose nodes are all VISIBLE — after a filter/focus/scrub
+  // change, a stale path would point at nodes that aren't on the canvas anymore
+  const shownIds = useMemo(() => new Set(shown.nodes.map((n) => n.id)), [shown]);
+  const pathIds = pathRes?.found && pathRes.path.every((id) => shownIds.has(id)) ? pathRes.path : undefined;
+
+  // ghost-state guard: if the focused node fell out of the visible set (facet filter,
+  // temporal scrub, namespace data change), drop the focus instead of showing a
+  // banner for an invisible node over an empty canvas
+  useEffect(() => {
+    if (focusNode && loaded && !refetching && !shownIds.has(focusNode)) setFocusNode(null);
+  }, [focusNode, loaded, refetching, shownIds]);
 
   const Btn = ({ on, onClick, icon: Icon, children, title }: any) => (
     <button onClick={onClick} title={title}
@@ -190,6 +337,11 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
     { id: "namespace", key: "graph_color_namespace" },
     { id: "community", key: "graph_color_community" },
     { id: "area", key: "graph_color_area", disabled: !hasAreas },
+    { id: "type", key: "graph_color_type", disabled: !hasTypes },
+    { id: "channel", key: "graph_color_channel", disabled: !hasChannels },
+    { id: "source", key: "graph_color_source", disabled: !facetPresence.source },
+    { id: "project", key: "graph_color_project", disabled: !facetPresence.project },
+    { id: "squad", key: "graph_color_squad", disabled: !facetPresence.squad },
     { id: "centrality", key: "graph_color_centrality" },
   ];
   const legendNs = useMemo(() => {
@@ -223,12 +375,30 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
         )}
 
         {/* ── top filter bar ── */}
-        <div className="absolute top-3 right-3 flex gap-1.5 z-[4] flex-wrap justify-end max-w-[78%]">
+        <div ref={tbRef} className="absolute top-3 right-3 flex gap-1.5 z-[4] flex-wrap justify-end max-w-[78%]">
           {/* search / focus */}
           <div className="glass border border-[var(--line)] rounded-[9px] px-2 flex items-center gap-1.5 text-[12px]" title={t("tip_search")}>
             <Search size={12} className="text-[var(--dim2)]" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && runSearch(query)}
               placeholder={t("graph_search")} className="bg-transparent outline-none w-[120px] py-[7px] text-[var(--txt)]" />
+          </div>
+          {/* layout / organisation */}
+          <div className="relative">
+            <Btn on={layoutMenu || layout !== "force"} onClick={() => setLayoutMenu((v) => !v)} icon={Orbit} title={t("tip_layout")}>
+              {t(("graph_layout_" + layout) as any)}
+            </Btn>
+            {layoutMenu && (
+              <div className="absolute right-0 mt-1 glass border border-[var(--line)] rounded-[11px] p-1.5 w-[170px] shadow-[var(--shadow)]">
+                <div className="text-[var(--dim2)] text-[10px] uppercase tracking-[.6px] px-2 py-1">{t("graph_layout_by")}</div>
+                {LAYOUTS.map((m) => (
+                  <button key={m} onClick={() => { setLayout(m); setLayoutMenu(false); }}
+                    className={`w-full text-left px-2 py-1.5 rounded-lg text-[12.5px] flex items-center gap-2
+                      ${layout === m ? "bg-[var(--panel2)] text-[var(--txt)]" : "text-[var(--dim)] hover:text-[var(--txt)] hover:bg-[var(--panel2)]"}`}>
+                    {layout === m ? <Check size={13} /> : <span className="w-[13px]" />}{t(("graph_layout_" + m) as any)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           {/* colour-by */}
           <div className="relative">
@@ -239,7 +409,7 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
               <div className="absolute right-0 mt-1 glass border border-[var(--line)] rounded-[11px] p-1.5 w-[170px] shadow-[var(--shadow)]">
                 <div className="text-[var(--dim2)] text-[10px] uppercase tracking-[.6px] px-2 py-1">{t("graph_color_by")}</div>
                 {COLOR_OPTS.map((o) => (
-                  <button key={o.id} disabled={o.disabled} onClick={() => { setColorBy(o.id); setColorMenu(false); if (o.id !== "area") setAreaFilter(null); }}
+                  <button key={o.id} disabled={o.disabled} onClick={() => { setColorBy(o.id); setColorMenu(false); }}
                     className={`w-full text-left px-2 py-1.5 rounded-lg text-[12.5px] flex items-center gap-2 disabled:opacity-30
                       ${colorBy === o.id ? "bg-[var(--panel2)] text-[var(--txt)]" : "text-[var(--dim)] hover:text-[var(--txt)] hover:bg-[var(--panel2)]"}`}>
                     {colorBy === o.id ? <Check size={13} /> : <span className="w-[13px]" />}{t(o.key as any)}
@@ -296,6 +466,14 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
               </div>
             )}
           </div>
+          {/* facet-value filter toggle — opens the right sidebar with one row per
+              value of the active colour facet (lives in the toolbar so it never
+              collides with the wrapped button rows) */}
+          {facetVal && facetValues.length > 1 && (
+            <Btn on={facetPanel || facetOff.size > 0} onClick={() => setFacetPanel((v) => !v)} icon={ListFilter} title={t("tip_facet_chip")}>
+              {facetOff.size > 0 ? `${facetValues.length - facetOff.size}/${facetValues.length}` : facetValues.length}
+            </Btn>
+          )}
           <Btn on={pathOpen || !!pathIds} onClick={() => { setPathOpen((v) => !v); if (pathOpen) setPathRes(null); }} icon={Route} title={t("tip_path")}>{t("graph_path")}</Btn>
           <Btn on={history} onClick={() => setHistory((v) => !v)} icon={Clock} title={t("tip_history")}>{t("graph_history")}</Btn>
           <Btn on={scrub} onClick={toggleScrub} icon={Timer} title={t("tip_time")}>{t("graph_time")}</Btn>
@@ -332,21 +510,68 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           </div>
         )}
 
-        {/* life-area filter chips — only in the Life-area colour mode */}
-        {colorBy === "area" && hasAreas && (
-          <div className="absolute top-[52px] right-3 flex gap-1.5 z-[3] flex-wrap justify-end max-w-[78%]">
-            {AREAS.filter((a) => areasPresent.has(a.id)).map((a) => {
-              const on = areaFilter === a.id;
-              return (
-                <button key={a.id} onClick={() => setAreaFilter(on ? null : a.id)}
-                  className="glass border rounded-full px-2.5 py-[5px] text-[11px] inline-flex items-center gap-1.5"
-                  style={{ borderColor: on ? a.color : "var(--line)", color: on ? a.color : "var(--dim)", background: on ? `${a.color}1a` : undefined }}>
-                  <span className="w-2 h-2 rounded-full" style={{ background: a.color }} /> {a.label}
-                </button>
-              );
-            })}
+        {/* first-visit hint — one-time pointer at the layout/facet superpowers */}
+        {hint && loaded && shown.nodes.length > 0 && (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[5] glass border border-[var(--accent)]/50 rounded-[12px] px-3.5 py-2 flex items-center gap-2.5 text-[12px] text-[var(--dim)] shadow-[var(--shadow)] max-w-[80%]">
+            <Orbit size={14} className="text-[var(--accent)] flex-none" />
+            <span>{t("graph_first_hint")}</span>
+            <button onClick={dismissHint} className="text-[var(--dim2)] hover:text-[var(--txt)] flex-none"><X size={13} /></button>
           </div>
         )}
+
+        {/* facet-value filter — collapsible RIGHT SIDEBAR, one row per value of the
+            ACTIVE colour facet (channels, agents, areas, types…). Multi-select: click
+            hides/shows a value ("keep only telegram + whatsapp" = switch the rest
+            off); shift+click solos. Collapsed it is a single button, so the bar never
+            overflows the toolbar again. */}
+        {facetVal && facetValues.length > 1 && facetPanel && (() => {
+          const facetLabel = t((COLOR_OPTS.find((o) => o.id === colorBy)?.key ?? "graph_color_namespace") as any);
+          const visible = facetValues.length - facetOff.size;
+          return (
+            <div style={{ top: 12 + tbH + 8 }}
+              className="absolute right-3 bottom-3 z-[4] w-[236px] max-w-[70%] glass border border-[var(--line)] rounded-[12px] shadow-[var(--shadow)] flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-2 border-b border-[var(--line)] flex-none">
+                <span className="text-[10px] uppercase tracking-[.6px] text-[var(--dim2)] inline-flex items-center gap-1.5 min-w-0">
+                  <ListFilter size={11} className="flex-none" />
+                  <span className="truncate">{facetLabel}</span>
+                  <span className="tabular-nums flex-none">· {facetOff.size > 0 ? `${visible}/${facetValues.length}` : facetValues.length}</span>
+                </span>
+                <button onClick={() => setFacetPanel(false)} title={t("close")} className="text-[var(--dim2)] hover:text-[var(--txt)] flex-none"><X size={13} /></button>
+              </div>
+              {facetOff.size > 0 && (
+                <button onClick={() => setFacetOff(new Set())}
+                  className="mx-2.5 mt-2 flex-none border border-[var(--accent)]/60 rounded-[8px] px-2.5 py-[5px] text-[11px] text-[var(--accent)] inline-flex items-center justify-center gap-1">
+                  <X size={11} /> {t("graph_filter_show_all")}
+                </button>
+              )}
+              <div className="flex-1 overflow-y-auto px-1.5 py-1.5">
+                {facetValues.map(({ v, n }) => {
+                  const on = !facetOff.has(v);
+                  const col = v === "—" ? "var(--dim2)" : valueColor(v);
+                  const label = colorBy === "area" && v !== "—" ? dimName(v) : v;
+                  return (
+                    <button key={v} title={t("tip_facet_chip")}
+                      onClick={(e) => setFacetOff((s) => {
+                        if (e.shiftKey) {                   // shift+click → SOLO this value (or un-solo back to all)
+                          const others = facetValues.map((x) => x.v).filter((x) => x !== v);
+                          const isSolo = s.size === others.length && others.every((o) => s.has(o));
+                          return isSolo ? new Set<string>() : new Set(others);
+                        }
+                        const ns2 = new Set(s); if (ns2.has(v)) ns2.delete(v); else ns2.add(v); return ns2;
+                      })}
+                      className={`w-full flex items-center gap-2 px-2 py-[5px] rounded-[8px] text-left text-[11.5px] hover:bg-[var(--panel2)] ${on ? "" : "opacity-45"}`}
+                      style={{ color: on ? col : "var(--dim)" }}>
+                      <span className="w-2 h-2 rounded-full flex-none" style={{ background: col }} />
+                      <span className={`flex-1 truncate ${on ? "" : "line-through"}`}>{label}</span>
+                      <span className="tabular-nums text-[var(--dim2)] flex-none">{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="px-3 py-2 border-t border-[var(--line)] text-[10px] leading-snug text-[var(--dim2)] flex-none">{t("tip_facet_chip")}</div>
+            </div>
+          );
+        })()}
 
         {!loaded ? (
           <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("loading")}</div>
@@ -354,7 +579,9 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
           <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("graph_empty")}</div>
         ) : (
           <GraphCanvas ref={gref} data={shown} communities={communities} colorFor={colorFor} onPick={setPicked} nodeTint={tint}
-            onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} pathIds={pathIds} />
+            onHover={(id, x, y) => setHover(id ? { id, x, y } : null)} pathIds={pathIds}
+            layout={layout} groupKey={colorBy} groupOf={groupOf} spotlight={picked}
+            centerLabel={ns === "__all__" ? "✦" : ns} labelOf={hubLabel} onGroupSolo={onGroupSolo} />
         )}
 
         {/* hover preview — the entity's top facts without a click (Obsidian-style) */}
@@ -396,13 +623,31 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
                     <div className="h-2 rounded-full" style={{ background: "linear-gradient(90deg, hsl(210,72%,55%), hsl(120,72%,55%), hsl(40,72%,55%), hsl(0,72%,55%))" }} />
                     <div className="flex justify-between text-[10px] text-[var(--dim2)]"><span>{t("cent_low")}</span><span>{t("cent_hub")}</span></div>
                   </div>
-                ) : colorBy === "area" ? (
+                ) : (colorBy === "type" || colorBy === "channel" || colorBy === "source" || colorBy === "project" || colorBy === "squad") ? (
                   <div className="flex flex-col gap-1.5">
-                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_area")}</div>
-                    {AREAS.filter((a) => areasPresent.has(a.id)).map((a) => (
-                      <span key={a.id} className="inline-flex items-center gap-2 text-[var(--dim)]">
-                        <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: a.color }} /> {a.label}
+                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t(("graph_colored_by_" + colorBy) as any)}</div>
+                    {facetValues.filter((f) => f.v !== "—").map(({ v, n }) => (
+                      <span key={v} className="inline-flex items-center gap-2 text-[var(--dim)]">
+                        <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(v) }} />
+                        <span className="truncate">{v}</span>
+                        <span className="tabular-nums text-[var(--dim2)]">{n}</span>
                       </span>
+                    ))}
+                  </div>
+                ) : colorBy === "area" ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="text-[var(--dim2)] text-[10px] mb-0.5">{t("graph_colored_by_area")}</div>
+                    {AREAS.filter((a) => dimsByArea[a.id]?.length).map((a) => (
+                      <div key={a.id} className="flex flex-col gap-1">
+                        <span className="text-[var(--dim2)] text-[10px] uppercase tracking-[.5px]" style={{ color: a.color }}>{t(("area_" + a.id) as any)}</span>
+                        {dimsByArea[a.id].map((dim) => (
+                          <span key={dim} className="inline-flex items-center gap-2 text-[var(--dim)] pl-1">
+                            <span className="w-2.5 h-2.5 rounded-full flex-none" style={{ background: valueColor(dim) }} />
+                            <span className="truncate">{dimName(dim)}</span>
+                            <span className="tabular-nums text-[var(--dim2)]">{facetCount[dim] ?? ""}</span>
+                          </span>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 ) : (
