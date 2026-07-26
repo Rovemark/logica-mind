@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { forceSimulation, forceManyBody, forceLink, forceCollide, forceCenter, forceRadial, forceX, forceY } from "d3-force";
 import { PALETTE, type GraphData } from "../api";
+import { drawOrb, resetOrbs } from "../lib/orb";
 
 export interface GraphHandle { reheat: () => void; fit: () => void; center: (id: string) => void; }
 
@@ -147,6 +148,9 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       : gSpot ? new Set<string>(g.nodes.filter((n: any) => n._g === gSpot).map((n: any) => n.id)) : null;
     // theme-aware ink so labels/edges read on both the light and dark canvas
     const light = document.documentElement.getAttribute("data-theme") === "light";
+    // Respiração do halo. Só corre quando HÁ algo aceso — o loop lá embaixo só
+    // repinta nesse caso, então o grafo parado continua em ~0% de CPU.
+    const _pulso = (hi || spot || g.groupSpot) ? Math.sin(performance.now() / 620) * 0.5 + 0.5 : 0;
     const edgeDead = light ? "rgba(120,130,150,.35)" : "rgba(90,100,120,.28)";
     const labelFill = light ? "#1f2940" : "#e8eef7", labelFillDim = light ? "#8a93a6" : "#5a6477";
     const labelStroke = light ? "rgba(255,255,255,.9)" : "#0a0d14";
@@ -212,8 +216,10 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
         for (let i = 0; i < arr.length; i += 2) { c.moveTo(arr[i].x, arr[i].y); c.lineTo(arr[i + 1].x, arr[i + 1].y); }
         c.stroke();
       }
+      // esferas também no caminho barato — o sprite já vem pronto, então custa um
+      // drawImage; e abaixo de ~1.6px de tela o próprio drawOrb cai pra ponto chapado.
       g.nodes.forEach((n: any) => { const r = baseRad(n, false) / Math.sqrt(t.k);
-        c.beginPath(); c.arc(n.x, n.y, r, 0, 6.283); c.fillStyle = nodeColor(n); c.fill(); });
+        drawOrb(c, n.x, n.y, r, nodeColor(n), { light, rTela: r * t.k }); });
       // settled big graph: labels only when zoomed in enough to read them, and only for
       // nodes inside the viewport (culled) so it stays cheap at thousands of nodes.
       if (!g.moving && t.k > 0.8) {
@@ -228,7 +234,8 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       if (hi && g.byId[hi]) { const H = g.byId[hi], nb = g.adj[hi] || new Set();
         c.strokeStyle = light ? "rgba(40,55,90,.75)" : "rgba(255,255,255,.65)"; c.lineWidth = 1.6 / Math.sqrt(t.k); c.beginPath();
         nb.forEach((id: string) => { const B = g.byId[id]; if (B) { c.moveTo(H.x, H.y); c.lineTo(B.x, B.y); } }); c.stroke();
-        c.beginPath(); c.arc(H.x, H.y, (baseRad(H, true) + 2) / Math.sqrt(t.k), 0, 6.283); c.fillStyle = nodeColor(H); c.fill();
+        { const _rh = (baseRad(H, true) + 2) / Math.sqrt(t.k);
+          drawOrb(c, H.x, H.y, _rh, nodeColor(H), { glow: 1, pulse: _pulso, light, rTela: _rh * t.k }); }
         c.fillStyle = labelFill; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke;
         const lab = (n: any) => { const ly = n.y - (baseRad(n, n.id === hi) + 5) / t.k; c.strokeText(n.id, n.x, ly); c.fillText(n.id, n.x, ly); };
         lab(H); nb.forEach((id: string) => { const B = g.byId[id]; if (B) lab(B); }); }
@@ -250,7 +257,8 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
             const A = g.byId[l.source], B = g.byId[l.target]; if (A && B) { c.moveTo(A.x, A.y); c.lineTo(B.x, B.y); } } });
         }
         c.stroke();
-        const dot = (n: any, ring = false) => { c.beginPath(); c.arc(n.x, n.y, (baseRad(n, ring) + (ring ? 2 : 0)) / Math.sqrt(t.k), 0, 6.283); c.fillStyle = nodeColor(n); c.fill(); };
+        const dot = (n: any, ring = false) => { const _rd = (baseRad(n, ring) + (ring ? 2 : 0)) / Math.sqrt(t.k);
+          drawOrb(c, n.x, n.y, _rd, nodeColor(n), { glow: ring ? 1 : 0.35, pulse: _pulso, light, rTela: _rd * t.k }); };
         members.forEach((B: any) => dot(B, spotN ? B === spotN : false));
         c.fillStyle = labelFill; c.font = `${11 / t.k}px -apple-system,sans-serif`; c.textAlign = "center"; c.lineWidth = 3 / t.k; c.strokeStyle = labelStroke;
         const lab2 = (n: any) => { const ly = n.y - (baseRad(n, false) + 5) / t.k; c.strokeText(n.id, n.x, ly); c.fillText(n.id, n.x, ly); };
@@ -316,10 +324,21 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       const active = (!hi || n.id === hi || (nbr && nbr.has(n.id))) && !dimmed;
       const dim = dimmed;
       const col = nodeColor(n), rad = baseRad(n, n.id === hi);
-      if (n.id === hi || (nbr && nbr.has(n.id))) { c.beginPath(); c.arc(n.x, n.y, rad + 7 / t.k, 0, 6.283); c.fillStyle = col + "33"; c.fill(); }
-      c.beginPath(); c.arc(n.x, n.y, rad / Math.sqrt(t.k), 0, 6.283);
-      c.fillStyle = dim ? col + "1f" : (active ? col : col + "44"); c.fill();
-      c.lineWidth = (n.shared ? 2 : 1.4) / t.k; c.strokeStyle = nodeRing(!!n.shared); c.stroke();
+      // Esfera de vidro. Aceso (foco, vizinho, holofote, caminho) ganha o halo do
+      // HUD — núcleo quente + brilho largo; apagado perde presença sem sumir.
+      const _r = rad / Math.sqrt(t.k);
+      const _foco = n.id === hi || (spotSet && n.id === spot);
+      const _aceso = _foco || (nbr && nbr.has(n.id)) || onP;
+      c.save();
+      if (dim) c.globalAlpha = 0.28; else if (!active) c.globalAlpha = 0.5;
+      drawOrb(c, n.x, n.y, _r, col, {
+        glow: _aceso ? (_foco ? 1 : 0.42) : 0,
+        pulse: _pulso, light, rTela: _r * t.k,
+      });
+      c.restore();
+      // o aro de "compartilhado" continua: o vidro embeleza, mas não pode APAGAR
+      // a informação que o nó carrega.
+      if (n.shared && !dim) { c.beginPath(); c.arc(n.x, n.y, _r, 0, 6.283); c.lineWidth = 1.8 / t.k; c.strokeStyle = nodeRing(true); c.stroke(); }
       if (onP) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.4 / t.k; c.strokeStyle = "rgba(251,191,36,.95)"; c.stroke(); }
       else if (spotSet && n.id === spot) { c.beginPath(); c.arc(n.x, n.y, (rad + 3) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 2.2 / t.k; c.strokeStyle = "rgba(124,156,255,.95)"; c.stroke(); }
       else if (n.bridge && !dim) { c.beginPath(); c.arc(n.x, n.y, (rad + 2.5) / Math.sqrt(t.k), 0, 6.283); c.lineWidth = 1.4 / t.k; c.setLineDash([2 / t.k, 2 / t.k]); c.strokeStyle = "rgba(245,158,11,.85)"; c.stroke(); c.setLineDash([]); }
@@ -540,7 +559,14 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
       // sig so an OS dark/light flip repaints. When idle → draw() never runs, so a
       // 1000-node graph sits at ~0% CPU instead of repainting 60x/second.
       const _light = document.documentElement.getAttribute("data-theme") === "light" ? 1 : 0;
-      const sig = `${g.t.x | 0},${g.t.y | 0},${g.t.k.toFixed(3)},${g.hover},${g.moving ? 1 : 0},${_light},${g.groupSpot || ""}`;
+      // o corpo da esfera é calibrado por tema (no claro precisa de mais densidade,
+      // senão o vidro some no Ivory) → na virada, joga fora os sprites em cache.
+      if (g.lastLight !== undefined && g.lastLight !== _light) resetOrbs();
+      g.lastLight = _light;
+      // Com algo ACESO, o balde de tempo faz o sig mudar ~30x/s e o halo respira.
+      // Sem nada aceso o balde é 0 e a suspensão em repouso (~0% CPU) continua.
+      const _lit = (g.hover || g.groupSpot || spotRef.current) ? ((performance.now() / 33) | 0) : 0;
+      const sig = `${g.t.x | 0},${g.t.y | 0},${g.t.k.toFixed(3)},${g.hover},${g.moving ? 1 : 0},${_light},${g.groupSpot || ""},${_lit}`;
       if (g.hot || g.dirty || sig !== g.lastSig) { draw(); g.lastSig = sig; g.dirty = false; }
       g.raf = requestAnimationFrame(loop);
     }; loop();
