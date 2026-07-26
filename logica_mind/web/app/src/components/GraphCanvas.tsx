@@ -474,7 +474,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     let _ringN = 0; g.nodes.forEach((n: any) => { n._core = _coreOk ? g.comp[n.id] === _gi : true; if (!n._core) _ringN++; });
     // ring radius scales with how many nodes sit on it, so they spread along the
     // circumference instead of piling into a thick crowded band.
-    g.ringR = _ringN ? Math.min(2400, Math.max(1100, Math.round(_ringN * 3.2))) : 0;
+    g.ringR = _ringN ? Math.min(1500, Math.max(700, Math.round(_ringN * 2.1))) : 0;
     // ── layout targets (orbit / rings) ──────────────────────────────────────────
     // The alternative layouts are TARGET-driven: every node gets a (_tx,_ty) and a
     // gentle forceX/forceY pulls it there — so switching layouts MORPHS the graph
@@ -580,18 +580,30 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
     const bigG = g.nodes.length > 1200;
     if (layoutMode === "force") {
       g.sim = forceSimulation(g.nodes)
-        .force("charge", forceManyBody().strength(bigG ? -260 : -220).distanceMax(bigG ? 650 : 1000).theta(bigG ? 1.5 : 0.85))
+        .force("charge", forceManyBody().strength(bigG ? -420 : -220).distanceMax(bigG ? 1400 : 1000).theta(bigG ? 1.5 : 0.85))
         .force("link", forceLink(g.links.map((l: any) => ({ source: l.source, target: l.target })))
                          .id((d: any) => d.id).distance(38))
         // forceCenter locks the centre of mass at the origin (no drift / off-centre
         // clumping); forceRadial pulls the connected CORE to the centre (radius 0) and
         // pushes fragments/orphans out to a ring → the Obsidian centred globe.
         .force("center", forceCenter(0, 0))
-        .force("radial", forceRadial((d: any) => (d._core ? 0 : g.ringR), 0, 0).strength((d: any) => (d._core ? 0.12 : 0.30)))
+        // O anel dos fragmentos era DURO demais (0.30): órfãos eram arremessados
+        // pra uma circunferência perfeita a 2400px do miolo, e o resultado era o
+        // pior dos dois mundos — miolo empastado e um arco vazio muito longe.
+        // O Obsidian não faz isso: fragmentos flutuam PERTO, em ilhas soltas.
+        // Com 0.09 eles ficam periféricos sem virar geometria.
+        .force("radial", forceRadial((d: any) => (d._core ? 0 : g.ringR), 0, 0).strength((d: any) => (d._core ? 0.10 : 0.03)))
         .alphaDecay(bigG ? 0.06 : 0.03)
         .velocityDecay(bigG ? 0.5 : 0.42)
         .stop();
-      if (!bigG) g.sim.force("collide", forceCollide().radius((d: any) => baseRad(d, false) + 5));
+      // COLISÃO SEMPRE LIGADA. Estava desligada em grafo grande — e é exatamente
+      // por isso que tudo empilhava no miolo: sem ela, nada impede dois nós de
+      // ocupar o mesmo pixel. É a força que dá o RESPIRO do Obsidian. O medo era
+      // custo, mas forceCollide usa quadtree (O(n log n)); com uma iteração só,
+      // milhares de nós continuam assentando em segundos.
+      g.sim.force("collide", forceCollide()
+        .radius((d: any) => baseRad(d, false) + 7)
+        .iterations(2));
     } else {
       // target-driven layouts (orbit/rings): the STRUCTURE comes from the (_tx,_ty)
       // targets, not from the springs — so links are weak, charge is short-range
