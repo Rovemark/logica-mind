@@ -10,6 +10,7 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: dark;
   /* dark is the default (applies even before JS sets data-theme) */
   --bg: #111318; --bg2: #14171E; --panel: #191C23; --panel2: #22262F; --line: #2C313B;
   --txt: #F4F1EA; --dim: #A7AFBD; --dim2: #6F7784; --accent: #3455E8; --accent2: #7C5CFC;
@@ -20,6 +21,7 @@
   --glass-bg: #111318ee;
 }
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg: #F4F1EA; --bg2: #ffffff; --panel: #ffffff; --panel2: #EAE6DC; --line: #D8D3C8;
   --txt: #111318; --dim: #6F7784; --dim2: #97A0AE; --accent: #3455E8; --accent2: #6344DD;
   --good: #08775D; --gold: #9C5C05; --warn: #9C5C05;
@@ -36,7 +38,10 @@ body {
 }
 * { box-sizing: border-box; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: #222b3d; border-radius: 6px; }
+/* Era #222b3d fixo — um risco azul-escuro atravessando o Ivory no tema claro.
+   Agora segue a linha do tema, como no Logica Router. */
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* layer accents reused as utility-ish classes */
