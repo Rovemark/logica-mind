@@ -26,12 +26,56 @@ def _has(module: str) -> bool:
 
 
 def _claude_bin() -> str:
-    return os.environ.get("LOGICA_MIND_CLAUDE_BIN", "claude")
+    # `or "claude"`: uma env DEFINIDA-PORÉM-VAZIA (fácil de acontecer em template de deploy)
+    # devolveria "" e quebraria a detecção inteira sem dizer por quê.
+    return os.environ.get("LOGICA_MIND_CLAUDE_BIN") or "claude"
+
+
+def _search_path() -> str:
+    """PATH ampliado com os lugares onde gerenciadores de versão instalam binários globais.
+
+    Um serviço iniciado por supervisor (PM2, systemd, launchd) herda um PATH MÍNIMO e não
+    enxerga ~/.nvm/versions/node/*/bin nem ~/.local/bin — que é justamente onde o `npm -g`
+    coloca a CLI. Sem isto, `shutil.which("claude")` devolve None com o binário instalado,
+    o picker desiste do CLI e cai num provedor com credencial inválida → 401 → o extractor
+    devolve vazio → a captura de memória vira ZERO em silêncio.
+    """
+    import glob
+    home = os.path.expanduser("~")
+    extras = [
+        os.path.join(home, ".local", "bin"),
+        os.path.join(home, ".bun", "bin"),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+    ]
+    extras += sorted(glob.glob(os.path.join(home, ".nvm", "versions", "node", "*", "bin")))
+    return os.pathsep.join([p for p in [os.environ.get("PATH", "")] + extras if p])
+
+
+def _resolved_claude_bin() -> str:
+    """Caminho ABSOLUTO da CLI (ou o nome nu, se não resolver — aí o spawn falha explícito)."""
+    import shutil
+    return shutil.which(_claude_bin(), path=_search_path()) or _claude_bin()
 
 
 def _claude_cli_present() -> bool:
     import shutil
-    return shutil.which(_claude_bin()) is not None
+    return shutil.which(_claude_bin(), path=_search_path()) is not None
+
+
+def _local_anthropic_gateway() -> Optional[Any]:
+    """A self-hosted / proxy Anthropic Messages endpoint, if ANTHROPIC_BASE_URL
+    points at one. Zero-dep — covers any local gateway without an SDK."""
+    base = os.environ.get("ANTHROPIC_BASE_URL")
+    if not base:
+        return None
+    from .llm.http_llm import AnthropicCompatLLM
+    model = os.environ.get("LOGICA_MIND_LLM_MODEL", "claude-haiku-4-5-20251001")
+    # a dedicated gateway key (so a deployment can point at a proxy without
+    # clobbering ANTHROPIC_API_KEY, which the hosted SDK provider also reads)
+    key = os.environ.get("LOGICA_MIND_GATEWAY_KEY") or os.environ.get("ANTHROPIC_API_KEY", "")
+    llm = AnthropicCompatLLM(base, model, api_key=key)
+    return llm if llm.available else None
 
 
 def _build_llm(provider: str) -> Optional[Any]:
@@ -44,38 +88,60 @@ def _build_llm(provider: str) -> Optional[Any]:
         if provider == "openai" and env.get("OPENAI_API_KEY") and _has("openai"):
             from .llm.openai import OpenAILLM
             return OpenAILLM()
+        if provider in ("local", "openai-compat", "ollama", "lmstudio", "mlx", "llamacpp"):
+            from .llm.http_llm import detect_local_openai
+            return detect_local_openai()
+        if provider in ("anthropic-gateway", "gateway"):
+            return _local_anthropic_gateway()
         if provider == "claude-cli" and _claude_cli_present():
             from .llm.claude_cli import ClaudeCLILLM
-            llm = ClaudeCLILLM(binary=_claude_bin())
+            # Passa o caminho ABSOLUTO resolvido: sob supervisor o PATH do processo não
+            # alcança ~/.nvm/... e um `binary="claude"` acharia na checagem mas falharia no spawn.
+            llm = ClaudeCLILLM(binary=_resolved_claude_bin())
             return llm if llm.available else None
     except Exception:
         return None
     return None
 
 
-# API keys are explicit intent → auto-used. The local Claude CLI is detected and
-# surfaced, but only ENABLED on request (LOGICA_MIND_LLM=claude-cli): merely
-# having Claude Code installed shouldn't silently change a library's behavior or
-# spawn subprocesses. This keeps `LogicaMind()` deterministic by default.
-_LLM_AUTO_ORDER = ["anthropic", "openai"]
-_LLM_ALL = ["anthropic", "openai", "claude-cli"]
+# Every provider the picker can build. The AUTO order (below) is deliberately
+# network-free unless you CONFIGURE a local/gateway endpoint — `LogicaMind()` must
+# stay deterministic and never spawn subprocesses or probe ports just by being
+# constructed. The dashboard's picker probes on demand instead.
+_LLM_ALL = ["anthropic", "openai", "local", "ollama", "lmstudio", "mlx", "llamacpp",
+            "anthropic-gateway", "gateway", "claude-cli"]
+
+
+def _auto_order() -> "list[str]":
+    order = ["anthropic", "openai"]                       # explicit keys = clear intent
+    if (os.environ.get("LOGICA_MIND_LLM_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("LOGICA_MIND_AUTODETECT_LOCAL", "").lower() in ("1", "true", "yes")):
+        order.append("local")                            # opt-in local open-source probe
+    if os.environ.get("ANTHROPIC_BASE_URL"):
+        order.append("anthropic-gateway")                # configured gateway only
+    return order
 
 
 def auto_llm() -> Optional[Any]:
-    """The best LLM to use on this machine, or None.
-
-    With ``LOGICA_MIND_LLM`` set (``anthropic`` / ``openai`` / ``claude-cli``),
-    that provider is used. Otherwise auto-detects from explicit API keys only
-    (Anthropic → OpenAI). When a provider is active, a single ``remember()``
-    decomposes a message into atomic facts, categorizes them across life/work
-    dimensions, and reconciles them in place."""
+    """The best LLM to use, or None. Order: explicit hosted keys, then — only when
+    configured — a local open-source model (Ollama / LM Studio / llama.cpp / vLLM /
+    MLX) or a self-hosted Anthropic gateway. Force any provider (incl. the Claude
+    CLI) with ``LOGICA_MIND_LLM``. Network-free unless you point it somewhere, so
+    construction stays deterministic. When a provider is active, ``remember()`` and
+    sleep-time consolidation distill raw turns into categorized, durable facts."""
     forced = os.environ.get("LOGICA_MIND_LLM", "").strip().lower()
-    order = [forced] if forced in _LLM_ALL else _LLM_AUTO_ORDER
+    order = [forced] if forced in _LLM_ALL else _auto_order()
     for provider in order:
         llm = _build_llm(provider)
         if llm is not None and getattr(llm, "available", True):
             return llm
     return None
+
+
+def build_llm_by_id(provider: str) -> Optional[Any]:
+    """Construct a specific provider on demand (for the dashboard's LLM picker),
+    bypassing the auto order. Returns the live LLM or None if unavailable."""
+    return _build_llm((provider or "").strip().lower())
 
 
 def auto_embedder() -> Optional[Any]:
@@ -98,6 +164,11 @@ def detect() -> Dict[str, List[Dict[str, Any]]]:
     """A structured catalog of every integration — what's detected in the
     environment and whether its package is installed. Pure inspection."""
     env = os.environ
+    try:                       # best-effort probe for a running local open-source LLM
+        from .llm.http_llm import detect_local_openai
+        _local_detected = detect_local_openai()
+    except Exception:
+        _local_detected = None
     llm = [
         {"id": "anthropic", "label": "Anthropic · Claude", "model": "claude-haiku-4-5",
          "env": "ANTHROPIC_API_KEY", "detected": bool(env.get("ANTHROPIC_API_KEY")), "installed": _has("anthropic")},
@@ -105,6 +176,12 @@ def detect() -> Dict[str, List[Dict[str, Any]]]:
          "env": "OPENAI_API_KEY", "detected": bool(env.get("OPENAI_API_KEY")), "installed": _has("openai")},
         {"id": "claude-cli", "label": "Claude CLI · local", "model": "your Claude Code, no API key",
          "env": None, "detected": _claude_cli_present(), "installed": _claude_cli_present()},
+        {"id": "local", "label": "Local · open-source LLM",
+         "model": (getattr(_local_detected, "model", None) or "Ollama / LM Studio / llama.cpp / vLLM / MLX"),
+         "env": "LOGICA_MIND_LLM_BASE_URL", "detected": bool(_local_detected), "installed": True},
+        {"id": "anthropic-gateway", "label": "Anthropic gateway · self-hosted / proxy",
+         "model": env.get("LOGICA_MIND_LLM_MODEL", "claude-haiku-4-5"),
+         "env": "ANTHROPIC_BASE_URL", "detected": bool(env.get("ANTHROPIC_BASE_URL")), "installed": True},
     ]
     embedders = [
         {"id": "voyage", "label": "Voyage", "model": "voyage-3-lite",
