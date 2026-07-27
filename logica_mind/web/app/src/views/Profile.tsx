@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import HaloLoading from "../components/HaloLoading";
 import { Send, Layers as LayersIcon, UserRound, FolderGit2, Building2, DollarSign, LayoutGrid, Network } from "lucide-react";
 import { api, type DimensionsData, type DimensionEntry, type GraphData } from "../api";
 import GraphCanvas, { type GraphHandle } from "../components/GraphCanvas";
@@ -154,7 +155,7 @@ export default function Profile({ ns }: { ns: string }) {
 
       {/* dimension cards for the active group */}
       {!loaded ? (
-        <div className="text-[var(--dim)] py-10 text-center">{t("loading")}</div>
+        <HaloLoading size={84} className="py-10" />
       ) : tabDims.length === 0 ? (
         <div className="card-surface text-center py-10 text-[var(--dim)]">
           <LayersIcon size={24} className="mx-auto mb-2.5 text-[var(--dim2)]" />

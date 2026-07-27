@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import HaloLoading from "../components/HaloLoading";
 import { api, LAYERS, type Memory, type Stats } from "../api";
 import MemoryCard from "../components/MemoryCard";
 import InsightList from "../components/InsightList";
@@ -32,7 +33,7 @@ export default function Overview({ ns }: { ns: string }) {
         </>
       )}
       <div className="text-[var(--dim2)] text-[12px] uppercase tracking-[.7px] mb-2.5">{t("recent_activity")}</div>
-      {!loaded ? <div className="text-[var(--dim)] text-center py-10">{t("loading")}</div>
+      {!loaded ? <HaloLoading size={84} className="py-10" />
         : recent.length ? recent.map((m) => <MemoryCard key={m.id} m={m} />)
         : <div className="text-[var(--dim)] text-center py-10">{t("no_memories_yet")}</div>}
     </div>

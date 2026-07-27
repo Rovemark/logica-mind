@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import HaloLoading from "../components/HaloLoading";
 import { X } from "lucide-react";
 import { api, LAYERS, type Memory } from "../api";
 import MemoryCard from "../components/MemoryCard";
@@ -74,7 +75,7 @@ export default function Memories({ ns, focus, onChanged, filter }: { ns: string;
           </span>
         )}
       </div>
-      {!loaded ? <div className="text-[var(--dim)] text-center py-12">{t("loading")}</div>
+      {!loaded ? <HaloLoading size={84} className="py-12" />
         : mems.length ? (<>
         {slice.map((m) => <MemoryCard key={m.id} m={m} highlight={hl === m.id} onDelete={() => del(m)} />)}
         <Pager page={cp} pages={pages} onPage={setPage} />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import HaloLoading from "../components/HaloLoading";
 import { X, GitCommitHorizontal, Trash2, Locate } from "lucide-react";
 import { api, tShort, type Memory } from "../api";
 import MemoryCard from "./MemoryCard";
@@ -175,7 +176,7 @@ export default function NodeDetail({
 
       <div className="text-[var(--dim2)] text-[10px] uppercase tracking-[.7px] mt-3.5 mb-2">{t("memories")} · {t("click_to_open")}</div>
       {loading ? (
-        <div className="text-[var(--dim)] text-[13px] py-4 text-center">{t("loading")}</div>
+        <HaloLoading size={44} className="py-4" />
       ) : mems.length ? (
         mems.map((m) => <MemoryCard key={m.id} m={m} onClick={() => onOpenMemory(m)} />)
       ) : (

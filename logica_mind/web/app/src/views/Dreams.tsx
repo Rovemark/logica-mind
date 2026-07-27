@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import HaloLoading from "../components/HaloLoading";
 import {
   Moon, Layers, Zap, Scissors, GitMerge, Brain, Network,
   AlertTriangle, TrendingDown, ChevronDown, ChevronUp, Activity, Sparkles
@@ -374,7 +375,7 @@ export default function Dreams({ ns }: { ns: string }) {
         {t("dream_journal")} · {t("dream_cycle")}s
       </div>
       {!loaded ? (
-        <div className="card-surface text-center py-10 text-[var(--dim)]">{t("loading")}</div>
+        <div className="card-surface py-10"><HaloLoading size={72} /></div>
       ) : dreams.length === 0 ? (
         <div className="card-surface py-10 text-center">
           <Moon size={28} className="text-[var(--dim2)] mx-auto mb-3" />

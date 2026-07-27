@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import HaloLoading from "../components/HaloLoading";
 import { Database, Network, GitBranch, Users, MessagesSquare, AlertTriangle, Gauge, Activity, ShieldCheck } from "lucide-react";
 import { api, tShort, type AnalyticsData } from "../api";
 import Pager, { paginate } from "../components/Pager";
@@ -117,7 +118,7 @@ export default function Analytics({ ns, colorFor }: { ns: string; colorFor: (n: 
     api.analytics(ns, range).then((r) => { setD(r); setLoaded(true); }).catch(() => setLoaded(true));
   }, [ns, range]);
 
-  if (!loaded) return <div className="fadein text-[var(--dim)] py-16 text-center">{t("loading")}</div>;
+  if (!loaded) return <div className="fadein py-16"><HaloLoading size={96} /></div>;
   if (!d) return <div className="fadein text-[var(--dim)] py-16 text-center">{t("nothing_here")}</div>;
 
   const tot = d.totals;

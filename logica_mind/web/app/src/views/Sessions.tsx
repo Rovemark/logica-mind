@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import HaloLoading from "../components/HaloLoading";
 import { MessagesSquare, Pencil, Check, X, Download, Users, Activity, Link2, CheckCircle2 } from "lucide-react";
 import { api, tShort, type SessionItem, type Memory, type SessionRecordMeta } from "../api";
 import MemoryCard, { SourceBadge } from "../components/MemoryCard";
@@ -152,7 +153,7 @@ export default function Sessions({ ns }: { ns: string }) {
             {importing ? t("importing") : "↓ Claude"}
           </button>
         </div>
-        {!loaded ? <div className="text-[var(--dim)] card-surface text-center py-10">{t("loading")}</div>
+        {!loaded ? <div className="card-surface py-10"><HaloLoading size={72} /></div>
           : sessions.length ? (<>{spg.slice.map((s, i) => {
           const on = sel && sel.id === s.id && sel.namespace === s.namespace;
           const isEditing = editing === s.id;
