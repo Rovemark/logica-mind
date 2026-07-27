@@ -99,3 +99,28 @@ code, pre, .mono, [class*="mono"] { font-family: 'IBM Plex Mono', Menlo, monospa
 /* micro-interação universal: botão cede ao toque */
 button:not(:disabled) { transition: transform .12s ease; }
 button:not(:disabled):active { transform: scale(.97); }
+
+/* A animação OFICIAL do kit (motion/halo-loader.css): sprite 10×6 quadros em
+   steps() — cada quadro é arte final, nada interpolado. É o "halo vivo". */
+.logicaos-halo {
+  --size: 240px;
+  width: var(--size);
+  height: var(--size);
+  background: url("/logicaos-halo-sprite.webp") 0 0 / 1000% 600% no-repeat;
+  animation: logicaos-halo-flow 3s steps(9, end) infinite;
+}
+@keyframes logicaos-halo-flow {
+  0% { background-position: 0 0; }
+  16.666% { background-position: -900% 0; }
+  16.667% { background-position: 0 -100%; }
+  33.333% { background-position: -900% -100%; }
+  33.334% { background-position: 0 -200%; }
+  50% { background-position: -900% -200%; }
+  50.001% { background-position: 0 -300%; }
+  66.666% { background-position: -900% -300%; }
+  66.667% { background-position: 0 -400%; }
+  83.333% { background-position: -900% -400%; }
+  83.334% { background-position: 0 -500%; }
+  100% { background-position: -900% -500%; }
+}
+@media (prefers-reduced-motion: reduce) { .logicaos-halo { animation: none; } }
