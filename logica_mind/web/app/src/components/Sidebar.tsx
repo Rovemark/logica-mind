@@ -79,7 +79,7 @@ export default function Sidebar({
             e concluía que o painel não tinha modo claro. O mecanismo sempre funcionou
             (theme.ts + initTheme no boot); faltava a porta de entrada. */}
         <ThemeToggle />
-        <div className="ml-auto flex items-center gap-1.5 opacity-55">
+        <div className="ml-auto flex items-center gap-1.5 opacity-55 transition-opacity duration-300 hover:opacity-90" title="Logica Mind — produto Rovemark">
           <span className="text-[9px] uppercase tracking-[0.14em] text-[var(--dim2)]">por</span>
           <img src="/rovemark-logo-white.svg" alt="Rovemark" className="lr-logo-dark h-[11px] w-auto" />
           <img src="/rovemark-logo-black.svg" alt="Rovemark" className="lr-logo-light h-[11px] w-auto" />
