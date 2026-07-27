@@ -123,6 +123,27 @@ export default function App() {
         <DemoBanner onChange={bump} />
         <div className="flex-1 min-h-0 overflow-auto px-6 pt-[22px] pb-[30px] max-[820px]:px-3.5 max-[820px]:pb-[92px]">
           <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} filter={memFilter} focusEntity={graphFocus} />
+          {/* Rodapé DE PÁGINA — fecha o conteúdo de toda view (o grafo ocupa a
+              altura toda, então nele o rodapé fica logo abaixo da dobra, como
+              deve ser): produto à esquerda, marca-mãe à direita. */}
+          <footer className="mt-12 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-[var(--line)] pt-5">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7">
+                <img src="/logicaos-halo-dark-64.png" alt="" className="lr-logo-dark w-full h-full" />
+                <img src="/logicaos-halo-light-64.png" alt="" className="lr-logo-light w-full h-full" />
+              </span>
+              <span>
+                <b className="block text-[12.5px] leading-tight tracking-tight">LogicaOS</b>
+                <span className="mono text-[9px] uppercase tracking-[0.14em] text-[var(--dim2)]">The Operating Layer for Sovereign AI</span>
+              </span>
+            </div>
+            <div className="ml-auto flex items-center gap-1.5 opacity-60 transition-opacity duration-300 hover:opacity-100"
+              title="Logica Mind — produto Rovemark · Ambrosio Company">
+              <span className="text-[9.5px] uppercase tracking-[0.14em] text-[var(--dim2)]">por</span>
+              <img src="/rovemark-logo-white.svg" alt="Rovemark" className="lr-logo-dark h-[13px] w-auto" />
+              <img src="/rovemark-logo-black.svg" alt="Rovemark" className="lr-logo-light h-[13px] w-auto" />
+            </div>
+          </footer>
         </div>
       </main>
 
