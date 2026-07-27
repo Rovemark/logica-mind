@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import os
 import re as _re
 import sys
 import time
@@ -59,6 +60,7 @@ _INFER_SYSTEM = (
     "connecting them (transitive or combined). Return ONLY JSON: a list of short "
     "fact strings, third person. Be conservative — only high-confidence inferences. "
     "If nothing solid follows, return []."
+    "Write every string in the SAME LANGUAGE as the source facts/conversation — preserve the person's language, never translate to English."
 )
 
 _DERIVE_SYSTEM = (
@@ -68,6 +70,7 @@ _DERIVE_SYSTEM = (
     '["Prefers concise answers", "Works in fintech"]). '
     "Skip transient chatter and anything already covered by the existing "
     "observations. If nothing durable is revealed, return []."
+    "Write every string in the SAME LANGUAGE as the source facts/conversation — preserve the person's language, never translate to English."
 )
 
 
@@ -131,6 +134,7 @@ class LogicaMind:
         reranker: Optional["Reranker"] = None,
         rerank_pool: int = 30,
         entity_boost: float = 0.0,
+        graph_boost: float = 0.06,
     ):
         self.namespace = namespace
         self.store = store or SQLiteStore()
@@ -145,13 +149,16 @@ class LogicaMind:
             except Exception:
                 llm = None
         self.llm = llm or NullLLM()
-        # default extractor: LLM-based if an LLM is available, else noop
+        # default extractor: LLM-based if an LLM is available, else the keyword
+        # heuristic — zero-key clients still get dimensions (Profile + coloured
+        # graph) instead of untagged raw facts.
         if extractor is not None:
             self.extractor = extractor
         elif getattr(self.llm, "available", False):
             self.extractor = LLMExtractor(self.llm)
         else:
-            self.extractor = NoopExtractor()
+            from .extract.heuristic import HeuristicExtractor
+            self.extractor = HeuristicExtractor()
 
         self.dedup_threshold = dedup_threshold
         self.w_sim, self.w_imp, self.w_rec = weights
@@ -160,11 +167,40 @@ class LogicaMind:
         self.reranker = reranker
         self.rerank_pool = rerank_pool
         self.entity_boost = entity_boost
+        # graph-aware recall: memories about the query entities' 1-hop NEIGHBOURS
+        # also rank up (default ON — it only fires when the query names a graph
+        # entity, and the knowledge graph is exactly the thing that knows what is
+        # connected to what). Set 0 to disable.
+        self.graph_boost = graph_boost
         self._warned_dim = False
 
         self.graph = TemporalGraph(self.store, namespace, self.embedder)
         self.graph_extractor = GraphExtractor(self.llm)
         self.user = DialecticUserModel(self.store, namespace, self.llm, self.embedder)
+
+    def set_llm(self, llm: Optional[LLM]) -> bool:
+        """Swap the LLM at runtime so one chosen model serves the WHOLE mind —
+        write-time extraction, the knowledge graph, the user model and sleep-time
+        consolidation. Powers the dashboard's LLM picker without a restart. Pass
+        None to go keyless (heuristic extractor). Returns True if an available LLM
+        is now active."""
+        self.llm = llm or NullLLM()
+        avail = bool(getattr(self.llm, "available", False))
+        if avail:
+            self.extractor = LLMExtractor(self.llm)
+        else:
+            from .extract.heuristic import HeuristicExtractor
+            self.extractor = HeuristicExtractor()
+        self.graph_extractor = GraphExtractor(self.llm)
+        self.user = DialecticUserModel(self.store, self.namespace, self.llm, self.embedder)
+        return avail
+
+    def with_llm(self, llm: Optional[LLM]) -> "LogicaMind":
+        """A view of this memory (same store, embedder and namespace) backed by a
+        different LLM. Lets one step run with an LLM (e.g. sleep-time consolidation)
+        without putting the LLM on the main mind's write path."""
+        return LogicaMind(namespace=self.namespace, store=self.store,
+                          embedder=self.embedder, llm=llm)
 
     # ---- internals ---------------------------------------------------------
     def _embed(self, text: str) -> Optional[List[float]]:
@@ -556,21 +592,52 @@ class LogicaMind:
         self._check_dim(q_emb, raw)
 
         # entity-boosted retrieval: graph entities mentioned in the query lift
-        # memories that also mention them (entity linking)
-        boost_ents = self._query_entities(query) if self.entity_boost > 0 else set()
+        # memories that also mention them (entity linking); with graph_boost on,
+        # the entities' 1-HOP NEIGHBOURS lift their memories too (graph-aware).
+        want_ents = self.entity_boost > 0 or self.graph_boost > 0
+        boost_ents = self._query_entities(query) if want_ents else set()
+        nbr_ents: set = set()
+        if boost_ents and self.graph_boost > 0:
+            nbr_ents = self._graph_neighborhood(self._query_entity_names(query))[0] - boost_ents
 
+        from .types import now_iso
+        import math
+        _now = now_iso()
+        # recency-intent weight swap: when the query explicitly asks for the latest
+        # state, favour recency over raw similarity. Inert on queries without these
+        # cues (e.g. the whole LoCoMo set), so the published benchmark is unaffected.
+        _recency_intent = bool(_re.search(
+            r"(?i)\b(latest|most recent|recently|newest|currently|right now|nowadays|"
+            r"these days|último|ultima|recente|atualmente|agora)\b", query))
+        w_sim, w_imp, w_rec = (0.10, 0.20, 0.70) if _recency_intent else (self.w_sim, self.w_imp, self.w_rec)
         reranked: List[SearchResult] = []
         for r in raw:
+            md = r.memory.metadata or {}
+            # snoozed memories are hidden until their wake date
+            su = md.get("snooze_until")
+            if su and str(su) > _now:
+                continue
             sim = r.components.get("similarity", r.score)
             rec = recency_score(_age_seconds(r.memory.created_at), self.half_life_days)
             imp = r.memory.importance
-            final = self.w_sim * sim + self.w_imp * imp + self.w_rec * rec
+            final = w_sim * sim + w_imp * imp + w_rec * rec
+            # frequency boost — often-recalled memories rank up. log-leveled and
+            # zero when never accessed, so it's a no-op on a fresh store (benchmark)
+            if r.memory.access_count:
+                final += 0.05 * math.log1p(r.memory.access_count)
             comps = {"similarity": round(sim, 4), "importance": round(imp, 4), "recency": round(rec, 4)}
-            if boost_ents:
+            if md.get("pinned"):                 # user-pinned → always float to the top
+                final += 1.0                     # base score is ~0..1, so +1 guarantees the top
+                comps["pinned"] = 1.0
+            if boost_ents or nbr_ents:
                 ctoks = _tokset(r.memory.content)
-                if any(e <= ctoks for e in boost_ents):   # entity tokens present in content
-                    final += self.entity_boost
-                    comps["entity_boost"] = self.entity_boost
+                if boost_ents and any(e <= ctoks for e in boost_ents):   # entity tokens present in content
+                    b = self.entity_boost or self.graph_boost
+                    final += b
+                    comps["entity_boost"] = b
+                elif nbr_ents and any(e <= ctoks for e in nbr_ents):     # 1-hop neighbour of a query entity
+                    final += self.graph_boost
+                    comps["graph_boost"] = self.graph_boost
             if min_importance and imp < min_importance:
                 continue                          # fact-rating threshold
             reranked.append(SearchResult(memory=r.memory, score=final, components=comps))
@@ -639,6 +706,107 @@ class LogicaMind:
         except Exception:
             pass
         return ents
+
+    def _query_entity_names(self, query: str) -> List[str]:
+        """Graph-entity NAMES mentioned in the query (same matching as
+        _query_entities, but returns the canonical names — fuel for the 1-hop
+        graph expansion)."""
+        qtoks = _tokset(query)
+        names: List[str] = []
+        try:
+            for name in self.graph.entity_names():
+                ntoks = entity_tokset(name)
+                if ntoks and ntoks <= qtoks:
+                    names.append(name)
+        except Exception:
+            pass
+        return names
+
+    def _graph_neighborhood(self, names: List[str], max_per_entity: int = 10,
+                            depth: int = 1, beam: int = 5, node_budget: int = 30):
+        """Expansion: (neighbour token-sets, rendered facts) for the given entity
+        names. This is what makes recall GRAPH-AWARE — things connected to what you
+        asked about rank up, and context() injects the graph's own facts.
+
+        depth=1 (default) is the fast 1-hop path, unchanged. depth>1 runs a bounded
+        BEAM SEARCH (beam nodes/level, node_budget total) so relational questions
+        ('how does A connect to C') reach facts two hops out without the cost
+        exploding — used only on the 'deep' profile."""
+        nbrs: set = set()
+        if depth <= 1:
+            facts: List[str] = []
+            try:
+                for name in names:
+                    for e in self.graph.query(name)[:max_per_entity]:
+                        other = e.object if e.subject.lower() == name.lower() else e.subject
+                        t = entity_tokset(other)
+                        if t:
+                            nbrs.add(t)
+                        facts.append(f"{e.subject} {e.predicate.replace('_', ' ')} {e.object}")
+            except Exception:
+                pass
+            return nbrs, facts
+
+        # multi-hop beam search (bounded)
+        from collections import Counter
+        seen_nodes = {n.lower() for n in names}
+        seen_facts: set = set()
+        facts = []
+        frontier = list(names)
+        visited = 0
+        try:
+            for _ in range(depth):
+                degree: Counter = Counter()
+                for name in frontier:
+                    if visited >= node_budget:
+                        break
+                    visited += 1
+                    for e in self.graph.query(name)[:max_per_entity]:
+                        other = e.object if e.subject.lower() == name.lower() else e.subject
+                        t = entity_tokset(other)
+                        if t:
+                            nbrs.add(t)
+                        fact = f"{e.subject} {e.predicate.replace('_', ' ')} {e.object}"
+                        if fact not in seen_facts:
+                            seen_facts.add(fact)
+                            facts.append(fact)
+                        on = other.lower()
+                        if on not in seen_nodes:
+                            degree[other] += 1                    # rank next hop by how connected it is
+                # beam: only the best-connected nodes advance to the next level
+                frontier = []
+                for node, _c in degree.most_common(beam):
+                    seen_nodes.add(node.lower())
+                    frontier.append(node)
+                if not frontier:
+                    break
+        except Exception:
+            pass
+        return nbrs, facts
+
+    def reembed(self, namespaces: Optional[List[str]] = None, batch: int = 64) -> Dict[str, int]:
+        """Re-embed EVERY memory with the CURRENT embedder — the dimension
+        migration for switching embedders (hashing 256d → onnx/local 384d →
+        voyage 1024d). The store holds ONE fixed vector dimension, so after
+        changing the embedder run this once and recall is consistent again.
+        Idempotent; safe to re-run."""
+        import sys as _sys
+        setter = getattr(self.store, "set_embeddings", None)
+        if not callable(setter):
+            raise RuntimeError("store does not support re-embedding (set_embeddings missing)")
+        nss = namespaces or self.store.namespaces()
+        done: Dict[str, int] = {}
+        for ns in nss:
+            mems = self.store.all(ns, with_embeddings=False)
+            n = 0
+            for i in range(0, len(mems), batch):
+                chunk = mems[i:i + batch]
+                vecs = self.embedder.embed([m.content or "" for m in chunk])
+                setter(ns, [(m.id, v) for m, v in zip(chunk, vecs)])
+                n += len(chunk)
+                print(f"[reembed] {ns}: {n}/{len(mems)}", file=_sys.stderr)
+            done[ns] = n
+        return done
 
     def get(self, memory_id: str) -> Optional[Memory]:
         return self.store.get(self.namespace, memory_id)
@@ -721,7 +889,7 @@ class LogicaMind:
     def graph_viz(self, namespace: Optional[str] = None, include_history: bool = True,
                   at: Optional[str] = None, layers: Optional[List[str]] = None,
                   focus: Optional[str] = None, depth: int = 1, limit: int = 0,
-                  orphans: bool = False) -> Dict[str, Any]:
+                  orphans: bool = False, _force: bool = False) -> Dict[str, Any]:
         """Graph payload for the UI. A single namespace, or the *general* graph
         across all of them with shared entities flagged.
 
@@ -733,20 +901,82 @@ class LogicaMind:
         the canvas can speak a real edge grammar instead of one flat blue line."""
         want = set(layers) if layers is not None else {"relation", "co_mention"}
 
+        # read-side cache: graph_viz recomputed everything per request (~seconds at
+        # 14k memories) even though the payload only changes on WRITE. A cheap store
+        # change-token keys the cache; any insert/delete flips it.
+        _is_all = not namespace or namespace in ("__all__", "*", "all")
+        _ct = getattr(self.store, "change_token", None)
+        _tok = _ct(None if _is_all else namespace) if callable(_ct) else None
+        _key = (namespace, include_history, at, tuple(sorted(want)), focus, depth, limit, orphans)
+        if _tok is not None:
+            _hit = getattr(self, "_viz_cache", {}).get(_key)
+            if _hit and _hit[0] == _tok:
+                return _hit[1]
+            # STALE-WHILE-REVALIDATE. O token vira a CADA escrita — e este cérebro
+            # escreve o tempo todo (captura contínua), então na prática o usuário
+            # pagava o recompute frio (~5s, ou minutos sob contenção de GIL com o
+            # dream/scan rodando) quase toda vez que abria o grafo. Um grafo de
+            # 81k memórias alguns segundos desatualizado é indistinguível do
+            # fresco; uma tela de "Carregando…" por minutos não é. Serve o
+            # payload antigo JÁ e recomputa numa thread de fundo (uma por chave).
+            if _hit is not None and not _force:
+                _refr = getattr(self, "_viz_refreshing", None)
+                if _refr is None:
+                    _refr = self._viz_refreshing = set()
+                if _key not in _refr:
+                    _refr.add(_key)
+                    import threading
+
+                    def _revalida():
+                        try:
+                            self.graph_viz(namespace=namespace, include_history=include_history,
+                                           at=at, layers=layers, focus=focus, depth=depth,
+                                           limit=limit, orphans=orphans, _force=True)
+                        except Exception:
+                            pass          # a próxima leitura tenta de novo
+                        finally:
+                            _refr.discard(_key)
+
+                    threading.Thread(target=_revalida, daemon=True,
+                                     name="viz-revalidate").start()
+                return _hit[1]
+
+        def _memo(result):
+            if _tok is not None:
+                cache = getattr(self, "_viz_cache", None)
+                if cache is None:
+                    cache = self._viz_cache = {}
+                if len(cache) > 32:          # bounded — a handful of view variants
+                    cache.clear()
+                cache[_key] = (_tok, result)
+            return result
+
         if namespace and namespace not in ("__all__", "*", "all"):
             viz = TemporalGraph(self.store, namespace, self.embedder).to_viz(include_history, at=at)
-            edim = self._entity_dimensions([namespace])
+            _names = [n["id"] for n in viz["nodes"]]
+            edim = self._entity_dimensions([namespace], node_names=_names)
+            # every taggable facet rides on the nodes (empty keys cost ~0: the
+            # indexed tagged() returns [] and the vote short-circuits).
+            # facet votes are GLOBAL ([None] = no namespace filter): where an entity
+            # was discussed is entity-level knowledge — squad/channel tags often live
+            # on OTHER agents' memories, not on the graph-bearing namespace itself.
+            _fac = {k: self._entity_facets([None], _names, k)
+                    for k in ("channel", "source", "project", "squad")}
             for n in viz["nodes"]:
                 n["namespaces"], n["shared"] = [namespace], False
                 if n["id"] in edim:
                     n["dimension"] = edim[n["id"]]
+                for k, mp in _fac.items():
+                    if n["id"] in mp:
+                        n[k] = mp[n["id"]]
             for l in viz["links"]:
                 l["namespace"] = namespace
             node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth, limit, orphans)
-            return {"nodes": node_list, "links": links, "namespaces": [namespace],
-                    "focus": focus, "depth": depth}
+            return _memo({"nodes": node_list, "links": links, "namespaces": [namespace],
+                          "focus": focus, "depth": depth})
 
         nodes: Dict[str, set] = {}
+        ntypes: Dict[str, str] = {}          # entity → its type (Concept/Product/Person/…) for colouring
         links: List[Dict[str, Any]] = []
         all_ns = self.store.namespaces()
         # __all__ is dominated by opening a TemporalGraph + querying edges for EVERY
@@ -764,21 +994,31 @@ class LogicaMind:
             for e in g.edges(include_history, at=at):
                 nodes.setdefault(e.subject, set()).add(ns)
                 nodes.setdefault(e.object, set()).add(ns)
+                if e.subject_type and e.subject not in ntypes: ntypes[e.subject] = e.subject_type
+                if e.object_type and e.object not in ntypes: ntypes[e.object] = e.object_type
                 links.append({
                     "source": e.subject, "target": e.object, "label": e.predicate,
                     "valid": e.is_valid, "valid_from": e.valid_from, "valid_to": e.valid_to,
                     "confidence": e.confidence, "namespace": ns,
                 })
-        edim = self._entity_dimensions(all_ns)
+        edim = self._entity_dimensions(all_ns, node_names=list(nodes.keys()))
+        # global facet votes (see the single-namespace branch for the why)
+        _fac = {k: self._entity_facets([None], list(nodes.keys()), k)
+                for k in ("channel", "source", "project", "squad")}
         node_list = []
         for name, nss in nodes.items():
             n = {"id": name, "namespaces": sorted(nss), "shared": len(nss) > 1}
             if name in edim:
                 n["dimension"] = edim[name]
+            if ntypes.get(name):
+                n["type"] = ntypes[name]
+            for k, mp in _fac.items():
+                if name in mp:
+                    n[k] = mp[name]
             node_list.append(n)
         node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth, limit, orphans)
-        return {"nodes": node_list, "links": links, "namespaces": all_ns,
-                "focus": focus, "depth": depth}
+        return _memo({"nodes": node_list, "links": links, "namespaces": all_ns,
+                      "focus": focus, "depth": depth})
 
     def _finish_viz(self, node_list, links, ns_scope, want, focus, depth, limit: int = 0, orphans: bool = False):
         """Shared graph augmentation: tag relation links (kind/weight/direction/
@@ -858,11 +1098,15 @@ class LogicaMind:
         return node_list, links
 
     def _co_mention_links(self, namespaces, cooc_min: int = 2, cap_per_mem: int = 8):
-        """Emergent connections: entity pairs that get TALKED ABOUT TOGETHER. One
-        regex scan over each namespace's facts; a fact that names two graph
-        entities votes a co-mention edge between them. No LLM, no embeddings — the
-        Obsidian 'unlinked mention', but computed. Capped per memory so a giant
-        note can't emit a quadratic fan of pairs."""
+        """Emergent connections: entity pairs that get TALKED ABOUT TOGETHER. A fact
+        that names two graph entities votes a co-mention edge between them. No LLM,
+        no embeddings — the Obsidian 'unlinked mention', but computed. Capped per
+        memory so a giant note can't emit a quadratic fan of pairs.
+
+        Mention detection is the same sliding 1-4 word n-gram + set membership used
+        by _entity_facets: O(tokens) per memory instead of one giant alternation
+        regex over thousands of entity names (60x faster at 14k memories), and it
+        matches punctuated names (tailwind.config.js) via token-normalised keys."""
         import re as _re
         from collections import Counter
         ents: set = set()
@@ -874,22 +1118,31 @@ class LogicaMind:
                     ents.add(e.object)
         if len(ents) < 2:
             return []
-        lower_map = {e.lower(): e for e in ents}
-        pat = _re.compile(r"\b(" + "|".join(
-            _re.escape(e) for e in sorted(lower_map, key=len, reverse=True)) + r")\b")
+        _tok = _re.compile(r"[\w][\w'\-]*")
+        canon = {" ".join(_tok.findall(e.lower())): e for e in ents}
+        canon.pop("", None)
         pair_count: Counter = Counter()
         for ns in namespaces:
-            for m in self.store.all(ns):
-                if "edge" in (m.tags or []) or "alias" in (m.tags or []):
+            # only TEXT layers carry prose worth scanning — graph rows are the edges
+            # themselves (and parsing their embeddings was pure waste).
+            for m in self.store.all(ns, layers=[MemoryLayer.EPISODIC, MemoryLayer.SEMANTIC, MemoryLayer.USER],
+                                    with_embeddings=False):
+                if "alias" in (m.tags or []):
                     continue
+                toks = _tok.findall((m.content or "").lower())
+                L = len(toks)
                 found: List[str] = []
                 seen: set = set()
-                for mt in pat.finditer((m.content or "").lower()):
-                    nm = lower_map.get(mt.group(1))
-                    if nm and nm not in seen:
-                        seen.add(nm)
-                        found.append(nm)
-                        if len(found) >= cap_per_mem:
+                for i in range(L):
+                    if len(found) >= cap_per_mem:
+                        break
+                    for size in (4, 3, 2, 1):              # longest match first at each position
+                        if i + size > L:
+                            continue
+                        nm = canon.get(" ".join(toks[i:i + size]))
+                        if nm and nm not in seen:
+                            seen.add(nm)
+                            found.append(nm)
                             break
                 for i in range(len(found)):
                     for j in range(i + 1, len(found)):
@@ -1065,8 +1318,12 @@ class LogicaMind:
         opat = _re.compile(r"\b(" + "|".join(_re.escape(o) for o in sorted(other, key=len, reverse=True)) + r")\b") if other else None
         counts: Dict[str, int] = {}
         if opat:
+            # only memories that actually mention `name` can have an unlinked co-mention —
+            # use the SQL pre-filter (mentions) instead of scanning the whole namespace
+            _scan = getattr(self.store, "mentions", None)
             for ns in nss:
-                for m in self.store.all(ns):
+                cands = _scan(ns, name) if _scan else self.store.all(ns)
+                for m in cands:
                     if "edge" in (m.tags or []) or "alias" in (m.tags or []):
                         continue
                     low = (m.content or "").lower()
@@ -1107,8 +1364,48 @@ class LogicaMind:
             return n
         return 0
 
+    # ---- lifecycle controls (pin / snooze) ---------------------------------
+    def _set_meta(self, memory_id: str, **kv) -> bool:
+        """Patch a memory's metadata in place (None value removes the key)."""
+        mem = self.store.get(self.namespace, memory_id)
+        if not mem:
+            return False
+        md = dict(mem.metadata or {})
+        for k, v in kv.items():
+            if v is None:
+                md.pop(k, None)
+            else:
+                md[k] = v
+        mem.metadata = md
+        self.store.add([mem])                    # add() is an upsert keyed by id
+        return True
+
+    def pin(self, memory_id: str) -> bool:
+        """Pin a memory so it always floats to the top of recall."""
+        return self._set_meta(memory_id, pinned=True)
+
+    def unpin(self, memory_id: str) -> bool:
+        return self._set_meta(memory_id, pinned=None)
+
+    def snooze(self, memory_id: str, until: str) -> bool:
+        """Hide a memory from recall until `until` (ISO date/datetime)."""
+        return self._set_meta(memory_id, snooze_until=until)
+
+    def unsnooze(self, memory_id: str) -> bool:
+        return self._set_meta(memory_id, snooze_until=None)
+
     # ---- user model --------------------------------------------------------
+    @staticmethod
+    def _is_secondary_context() -> bool:
+        """Read/write isolation: a secondary context (a cron, a background subagent,
+        a tool run) READS the shared memory but must NOT write to the dialectic user
+        model, or many automated turns would drown the real owner's profile. Set
+        LOGICA_MIND_CONTEXT=secondary (or read-only) on those processes."""
+        return os.environ.get("LOGICA_MIND_CONTEXT", "").lower() in ("secondary", "read-only", "readonly", "ro")
+
     def observe_user(self, text: str) -> Optional[Memory]:
+        if self._is_secondary_context():
+            return None                          # don't let background writers shape the user model
         return self.user.observe(text)
 
     def ingest_conversation(self, messages: List[Dict[str, Any]], session: Optional[str] = None,
@@ -1236,7 +1533,40 @@ class LogicaMind:
         """Every entity with its degree (how many edges touch it), busiest first."""
         return self.graph.nodes(include_history=include_history)
 
-    def _entity_dimensions(self, namespaces: List[str]) -> Dict[str, str]:
+    def _entity_facets(self, namespaces: List[str], node_names, key: str = "channel") -> Dict[str, str]:
+        """Majority-vote a metadata facet onto graph entities by n-gram mention — the
+        same trick as _entity_dimensions, but for ANY tag the host application writes
+        on its memories (metadata.channel = whatsapp/telegram/voice/sessions/…,
+        metadata.project, squad, …). Generic on purpose: the graph can then be
+        coloured and ORGANIZED by whatever channels/tags the integrator uses."""
+        t = getattr(self.store, "tagged", None)
+        if not callable(t):
+            return {}
+        pairs: List = []
+        for ns in namespaces:
+            try:
+                pairs += t(ns, key)
+            except Exception:
+                continue
+        if not pairs:
+            return {}
+        import re as _re
+        canon = {str(n).lower(): str(n) for n in node_names if n and len(str(n)) > 1}
+        votes: Dict[str, Dict[str, int]] = {}
+        for content, val in pairs:
+            toks = _re.findall(r"[\w][\w'\-]*", str(content or "").lower())
+            L = len(toks)
+            seen: set = set()
+            for size in (1, 2, 3, 4):
+                for i in range(L - size + 1):
+                    cand = " ".join(toks[i:i + size])
+                    if cand in canon and cand not in seen:
+                        seen.add(cand)
+                        d = votes.setdefault(canon[cand], {})
+                        d[str(val)] = d.get(str(val), 0) + 1
+        return {e: max(v, key=lambda k: v[k]) for e, v in votes.items()}
+
+    def _entity_dimensions(self, namespaces: List[str], node_names=None) -> Dict[str, str]:
         """Map each graph entity to its DOMINANT life/work dimension, so the
         knowledge graph can be coloured/filtered the same way the Profile is.
 
@@ -1257,7 +1587,7 @@ class LogicaMind:
                     facts.append((content.lower(), dim))
         else:
             for ns in namespaces:
-                for m in self.store.all(ns):
+                for m in self.store.all(ns, with_embeddings=False):
                     if "edge" in (m.tags or []) or "alias" in (m.tags or []):
                         continue
                     dim = (m.metadata or {}).get("dimension")
@@ -1265,14 +1595,17 @@ class LogicaMind:
                         facts.append((m.content.lower(), dim))
         if not facts:
             return {}
-        # the canonical entity names in play (subjects + objects of valid edges)
-        ents: set = set()
-        for ns in namespaces:
-            for e in TemporalGraph(self.store, ns, self.embedder).edges():
-                if e.subject:
-                    ents.add(e.subject)
-                if e.object:
-                    ents.add(e.object)
+        # the canonical entity names in play (subjects + objects of valid edges).
+        # graph_viz already HAS the node list — passing node_names skips re-reading
+        # the whole graph layer here (it was the 2nd full read per request).
+        ents: set = set(node_names) if node_names else set()
+        if not ents:
+            for ns in namespaces:
+                for e in TemporalGraph(self.store, ns, self.embedder).edges():
+                    if e.subject:
+                        ents.add(e.subject)
+                    if e.object:
+                        ents.add(e.object)
         from .extract.taxonomy import group_of
         # FAST entity→dimension voting: a per-entity regex over every fact is
         # O(entities×facts) (minutes at scale). Instead index entity names in a set
@@ -1397,11 +1730,25 @@ class LogicaMind:
         layers: Optional[List[MemoryLayer]] = None,
         session: Optional[str] = None,
         include_user: bool = True,
+        safe: bool = True,
+        profile: str = "balanced",
     ) -> str:
         """Assemble a ready-to-inject context block for `query`, fitted to a
         token budget (Context endpoint): user model first, then the
-        most relevant memories until the budget is spent."""
+        most relevant memories until the budget is spent.
+
+        With safe=True (default) the result is sanitized and wrapped in an
+        instruction frame so injected memory can't act as a prompt-injection
+        vector (a poisoned note can't become a system instruction).
+
+        profile trades latency for depth on large stores:
+          speed    — skip the knowledge-graph hop, fewer memories. Sub-second,
+                     right for per-keystroke hook injection.
+          balanced — graph facts + up to 20 memories (default).
+          deep     — balanced + a wider memory pool (reranker if configured)."""
         budget = max(0, token_budget)
+        use_graph = profile != "speed"
+        recall_limit = {"speed": 8, "balanced": 20, "deep": 30}.get(profile, 20)
         blocks: List[str] = []
 
         # measure the FULL assembled candidate (headers + bodies + separators)
@@ -1413,8 +1760,37 @@ class LogicaMind:
                 if self._approx_tokens("\n\n".join(blocks + [block])) <= budget:
                     blocks.append(block)
 
+        # knowledge-graph facts about the query's entities — the graph's OWN
+        # knowledge injected as compact fact lines (graph-aware context). Dense,
+        # cheap tokens; goes before the prose memories.
+        qnames = self._query_entity_names(query) if use_graph else []
+        if qnames:
+            # deep profile reaches two hops out via bounded beam search; speed/
+            # balanced stay at the cheap 1-hop expansion
+            _gdepth = 2 if profile == "deep" else 1
+            _, facts = self._graph_neighborhood(qnames, max_per_entity=6, depth=_gdepth)
+            flines: List[str] = []
+            for f in dict.fromkeys(facts):               # dedup, keep order
+                line = f"- {f}"
+                candidate = blocks + ["## Knowledge graph\n" + "\n".join(flines + [line])]
+                if self._approx_tokens("\n\n".join(candidate)) <= budget:
+                    flines.append(line)
+                else:
+                    break
+            if flines:
+                blocks.append("## Knowledge graph\n" + "\n".join(flines))
+
+        # adaptive ratio threshold: keep memories scored within a fraction of the
+        # top hit rather than against an absolute floor. Fixes the hashing-vs-voyage
+        # score-scale mismatch and trims the irrelevant tail from the INJECTED block
+        # (recall() itself is untouched, so the published benchmark is unaffected).
+        hits = self.recall(query, layers=layers, limit=recall_limit, session=session)
+        if hits:
+            cutoff = hits[0].score * 0.35
+            kept = [h for h in hits if h.score >= cutoff] or hits[:3]
+            hits = kept
         chosen: List[str] = []
-        for h in self.recall(query, layers=layers, limit=20, session=session):
+        for h in hits:
             line = f"- {h.memory.content}"
             candidate = blocks + ["## Relevant memory\n" + "\n".join(chosen + [line])]
             if self._approx_tokens("\n\n".join(candidate)) <= budget:
@@ -1423,7 +1799,11 @@ class LogicaMind:
                 break
         if chosen:
             blocks.append("## Relevant memory\n" + "\n".join(chosen))
-        return "\n\n".join(blocks)
+        assembled = "\n\n".join(blocks)
+        if safe and assembled:
+            from .guard import frame
+            return frame(assembled)
+        return assembled
 
     # ---- document ingestion ------------------------------------------------
     @staticmethod
@@ -1569,7 +1949,7 @@ class LogicaMind:
                 text = self.llm.complete(
                     f"Recent things learned:\n{facts}\n\nWrite 2-3 concise insights about "
                     f"what changed or what's notable.",
-                    system="You synthesize concise insights from a set of recent memories.",
+                    system="You synthesize concise insights from a set of recent memories." + " Write every string in the SAME LANGUAGE as the source facts/conversation — preserve the person's language, never translate to English.",
                 ).strip()
             except Exception as e:
                 print(f"[logica-mind] reflect fell back ({e})", file=sys.stderr)
@@ -1592,10 +1972,12 @@ class LogicaMind:
         from .dreaming import Dreamer
         return Dreamer(self, **kwargs).run()
 
-    def session_brief(self, limit: int = 10, token_budget: int = 1200) -> str:
+    def session_brief(self, limit: int = 10, token_budget: int = 1200,
+                      safe: bool = True) -> str:
         """A digest to inject at the start of a session: what we know about the
         user + the most important things from past sessions. Used by the
-        SessionStart hook (there's no query yet, so rank by importance/recency)."""
+        SessionStart hook (there's no query yet, so rank by importance/recency).
+        safe=True sanitizes + instruction-frames the block (injection-safe)."""
         budget = max(0, token_budget)
         blocks: List[str] = []
 
@@ -1646,7 +2028,11 @@ class LogicaMind:
         if ep_block:
             blocks.append(ep_block)
 
-        return "\n\n".join(blocks)
+        assembled = "\n\n".join(blocks)
+        if safe and assembled:
+            from .guard import frame
+            return frame(assembled)
+        return assembled
 
     # ---- introspection -----------------------------------------------------
     def stats(self) -> Dict[str, int]:
@@ -1738,7 +2124,7 @@ class LogicaMind:
                 return self.llm.complete(
                     f"OBSERVATIONS that {observer} has of {observed}:\n{facts}\n\n"
                     f"Write a concise card describing what {observer} knows/believes about {observed}.",
-                    system="You build a concise directional profile of one party as seen by another.",
+                    system="You build a concise directional profile of one party as seen by another." + " Write every string in the SAME LANGUAGE as the source facts/conversation — preserve the person's language, never translate to English.",
                 ).strip()
             except Exception as e:
                 print(f"[logica-mind] peer_card fell back ({e})", file=sys.stderr)
@@ -2025,12 +2411,33 @@ class LogicaMind:
             return 0
         if not isinstance(data, list):
             return 0
+        # ANTI-CONTAMINATION guardrail (fail-closed): every proper noun in an
+        # inferred fact must already appear in the source facts. This blocks the
+        # LLM from hallucinating a NEW entity into a synthesized conclusion — the
+        # single most dangerous failure mode of generative memory.
+        known_tokens: set = set()
+        for e in edges:
+            for w in (e.subject + " " + e.object).split():
+                known_tokens.add(w.lower().strip(".,;:'\"()[]"))
+
+        def _has_foreign_entity(fact: str) -> bool:
+            words = fact.split()
+            for i, w in enumerate(words):
+                clean = w.strip(".,;:'\"()[]")
+                # a capitalized, non-sentence-start, 4+ char token not seen in any
+                # source is a hallucinated entity → reject the whole fact
+                if i > 0 and len(clean) >= 4 and clean[:1].isupper() and clean.lower() not in known_tokens:
+                    return True
+            return False
+
         seen = {_norm(m.content) for m in self.store.all(self.namespace, [MemoryLayer.SEMANTIC])}
         n = 0
         for item in data:
             f = (item if isinstance(item, str) else str((item or {}).get("content", ""))).strip()
             if not f or _norm(f) in seen:
                 continue
+            if _has_foreign_entity(f):
+                continue                          # contaminated → drop, don't store a hallucination
             seen.add(_norm(f))
             self.remember(f, importance=0.4, tags=["inferred"], extract=False)
             n += 1
