@@ -121,12 +121,14 @@ export default function App() {
       <main className="flex flex-col min-w-0 min-h-0">
         <Topbar view={view} ns={ns} total={total} onOpen={() => setPalette(true)} action={<Composer ns={ns} onDone={bump} />} />
         <DemoBanner onChange={bump} />
-        <div className="flex-1 min-h-0 overflow-auto px-6 pt-[22px] pb-[30px] max-[820px]:px-3.5 max-[820px]:pb-[92px]">
+        <div className="flex-1 min-h-0 overflow-auto flex flex-col px-6 pt-[22px] pb-[30px] max-[820px]:px-3.5 max-[820px]:pb-[92px]">
           <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} filter={memFilter} focusEntity={graphFocus} />
-          {/* Rodapé DE PÁGINA — fecha o conteúdo de toda view (o grafo ocupa a
-              altura toda, então nele o rodapé fica logo abaixo da dobra, como
-              deve ser): produto à esquerda, marca-mãe à direita. */}
-          <footer className="mt-12 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-[var(--line)] pt-5">
+          {/* Rodapé DE PÁGINA — o wrapper com mt-auto desce o rodapé até o fundo
+              em view curta (em view longa ele segue o conteúdo, com respiro
+              pt-12); o -mx-6 fura o padding do container pra faixa atravessar a
+              largura INTEIRA. */}
+          <div className="mt-auto pt-12">
+          <footer className="-mx-6 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-[var(--line)] px-6 pt-5 max-[820px]:-mx-3.5 max-[820px]:px-3.5">
             <div className="flex items-center gap-2.5">
               <span className="w-7 h-7">
                 <img src="/logicaos-halo-dark-64.png" alt="" className="lr-logo-dark w-full h-full" />
@@ -140,10 +142,11 @@ export default function App() {
             <div className="ml-auto flex items-center gap-1.5 opacity-60 transition-opacity duration-300 hover:opacity-100"
               title="Logica Mind — produto Rovemark · Ambrosio Company">
               <span className="text-[9.5px] uppercase tracking-[0.14em] text-[var(--dim2)]">por</span>
-              <img src="/rovemark-logo-white.svg" alt="Rovemark" className="lr-logo-dark h-[13px] w-auto" />
-              <img src="/rovemark-logo-black.svg" alt="Rovemark" className="lr-logo-light h-[13px] w-auto" />
+              <img src="/rovemark-logo-white.svg" alt="Rovemark" className="lr-logo-dark h-[19px] w-auto" />
+              <img src="/rovemark-logo-black.svg" alt="Rovemark" className="lr-logo-light h-[19px] w-auto" />
             </div>
           </footer>
+          </div>
         </div>
       </main>
 
