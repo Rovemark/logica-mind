@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Brain, Settings as SettingsIcon, Sun, Moon } from "lucide-react";
+import { Settings as SettingsIcon, Sun, Moon } from "lucide-react";
 import { getTheme, setTheme, effective } from "../theme";
 import { VIEWS, CATS, type ViewKey } from "../nav";
 import { ALL, type NsItem } from "../api";
@@ -22,10 +22,12 @@ export default function Sidebar({
         ${open ? "max-[820px]:translate-x-0" : "max-[820px]:-translate-x-full"}`}
     >
       <div className="px-[22px] pt-5 pb-4 flex items-center gap-3 border-b border-[var(--line)] flex-none">
-        <div className="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-white
-          bg-gradient-to-br from-[var(--accent)] to-[var(--accent2)] shadow-[0_4px_14px_rgba(124,156,255,.4)]">
-          <Brain size={17} />
-        </div>
+        {/* O halo vivo do kit LogicaOS no lugar do ícone genérico de cérebro —
+            mesma assinatura do dashboard e do Router. Gira de leve no hover. */}
+        <span className="w-[34px] h-[34px] flex-none transition-transform duration-300 hover:rotate-[12deg]">
+          <img src="/logicaos-halo-dark-64.png" alt="" className="lr-logo-dark w-full h-full" />
+          <img src="/logicaos-halo-light-64.png" alt="" className="lr-logo-light w-full h-full" />
+        </span>
         <div>
           <h1 className="text-[16px] m-0 font-bold tracking-tight">Logica&nbsp;Mind</h1>
           <small className="block text-[var(--dim2)] text-[10px] tracking-[.9px] uppercase mt-px">{t("brand_sub")}</small>

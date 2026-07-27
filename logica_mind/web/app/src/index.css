@@ -90,3 +90,12 @@ code, pre, .mono, [class*="mono"] { font-family: 'IBM Plex Mono', Menlo, monospa
 .lr-logo-light { display: none; }
 :root[data-theme="light"] .lr-logo-dark { display: none; }
 :root[data-theme="light"] .lr-logo-light { display: block; }
+
+/* ── Identidade LogicaOS: respiração do halo (loader) ── */
+@keyframes lm-halo-breathe { 0%, 100% { transform: scale(1); opacity: .92; } 50% { transform: scale(1.035); opacity: 1; } }
+.lm-halo-breathe { animation: lm-halo-breathe 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .lm-halo-breathe { animation: none; } }
+
+/* micro-interação universal: botão cede ao toque */
+button:not(:disabled) { transition: transform .12s ease; }
+button:not(:disabled):active { transform: scale(.97); }

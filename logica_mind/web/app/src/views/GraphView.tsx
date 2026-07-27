@@ -574,7 +574,15 @@ export default function GraphView({ ns, colorFor, onOpenMemory, focusEntity }: {
         })()}
 
         {!loaded ? (
-          <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("loading")}</div>
+          <div className="w-full h-full grid place-items-center card-surface">
+            <div className="flex flex-col items-center gap-4">
+              <span className="relative w-[120px] h-[120px]">
+                <img src="/logicaos-halo-dark-256.png" alt="" className="lr-logo-dark absolute inset-0 w-full h-full lm-halo-breathe" />
+                <img src="/logicaos-halo-light-256.png" alt="" className="lr-logo-light absolute inset-0 w-full h-full lm-halo-breathe" />
+              </span>
+              <span className="text-[var(--dim)] text-[13px]">{t("loading")}</span>
+            </div>
+          </div>
         ) : shown.nodes.length === 0 ? (
           <div className="w-full h-full grid place-items-center text-[var(--dim)] card-surface">{t("graph_empty")}</div>
         ) : (
