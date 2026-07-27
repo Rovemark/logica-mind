@@ -260,8 +260,11 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
           c.lineWidth = 0.9 / Math.sqrt(t.k); c.strokeStyle = edgeDead; c.stroke(p); continue;
         }
         c.globalCompositeOperation = light ? "multiply" : "lighter";
-        c.lineWidth = 2.7 / Math.sqrt(t.k); c.strokeStyle = `rgba(${rgb},0.09)`; c.stroke(p);   // bainha
-        c.lineWidth = 0.9 / Math.sqrt(t.k); c.strokeStyle = `rgba(${rgb},0.62)`; c.stroke(p);   // axônio
+        // o amortecedor vale pras arestas também: 8000 fios somando a 0.62 no
+        // miolo viram névoa branca — o excesso de luz que apagava os lóbulos.
+        const _ed = Math.max(0.35, Math.min(1, Math.sqrt(2000 / Math.max(1, g.links.length))));
+        c.lineWidth = 2.7 / Math.sqrt(t.k); c.strokeStyle = `rgba(${rgb},${(0.09 * _ed).toFixed(3)})`; c.stroke(p);   // bainha
+        c.lineWidth = 0.9 / Math.sqrt(t.k); c.strokeStyle = `rgba(${rgb},${(0.62 * _ed).toFixed(3)})`; c.stroke(p);   // axônio
       }
       c.globalCompositeOperation = "source-over";
       // esferas também no caminho barato — o sprite já vem pronto, então custa um
@@ -592,7 +595,7 @@ const GraphCanvas = forwardRef<GraphHandle, Props>(function GraphCanvas(
         // pior dos dois mundos — miolo empastado e um arco vazio muito longe.
         // O Obsidian não faz isso: fragmentos flutuam PERTO, em ilhas soltas.
         // Com 0.09 eles ficam periféricos sem virar geometria.
-        .force("radial", forceRadial((d: any) => (d._core ? 0 : g.ringR), 0, 0).strength((d: any) => (d._core ? 0.10 : 0.03)))
+        .force("radial", forceRadial((d: any) => (d._core ? 0 : g.ringR), 0, 0).strength((d: any) => (d._core ? 0.015 : 0.03)))
         .alphaDecay(bigG ? 0.06 : 0.03)
         .velocityDecay(bigG ? 0.5 : 0.42)
         .stop();

@@ -130,7 +130,7 @@ export function drawOrb(
     c.save();
     c.globalCompositeOperation = modo;
     c.globalAlpha = somaA;
-    c.fillStyle = `rgb(${ladderFor(h, tier, light)[1].join(",")})`;
+    c.fillStyle = `rgb(${ladderFor(h, tier, light)[2].join(",")})`;
     c.beginPath(); c.arc(x, y, r, 0, 6.283); c.fill();
     c.restore();
     return;
