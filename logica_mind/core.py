@@ -918,8 +918,18 @@ class LogicaMind:
             # dream/scan rodando) quase toda vez que abria o grafo. Um grafo de
             # 81k memórias alguns segundos desatualizado é indistinguível do
             # fresco; uma tela de "Carregando…" por minutos não é. Serve o
-            # payload antigo JÁ e recomputa numa thread de fundo (uma por chave).
+            # payload antigo JÁ e recomputa numa thread de fundo.
+            #
+            # THROTTLE + SINGLE-FLIGHT: cada chave stale disparava a SUA thread de
+            # recompute — com o scrubber da timeline, DEZENAS de recomputes de ~12s
+            # disputando o GIL entre si (medido: 17s ocioso → 594s com só 2 threads
+            # concorrentes; era o multiplicador dos 162s). Agora: no máximo UM
+            # recompute por processo (gate), e a mesma chave não revalida mais que
+            # 1x/min. Payload até 60s velho é o preço; o SWR já assumia isso.
             if _hit is not None and not _force:
+                import time as _t
+                if len(_hit) > 2 and _t.monotonic() - _hit[2] < 60.0:
+                    return _hit[1]                     # recém-computado — nem revalida
                 _refr = getattr(self, "_viz_refreshing", None)
                 if _refr is None:
                     _refr = self._viz_refreshing = set()
@@ -941,84 +951,100 @@ class LogicaMind:
                                      name="viz-revalidate").start()
                 return _hit[1]
 
+        # gate global de recompute: UM cálculo frio por vez no processo inteiro.
+        # Sem ele, N chaves frias em paralelo custam N× o pior caso (contenção
+        # super-linear de GIL), não N cálculos honestos.
+        import threading as _th
+        _gate = getattr(self, "_viz_gate", None)
+        if _gate is None:
+            _gate = self._viz_gate = _th.Semaphore(1)
+
         def _memo(result):
             if _tok is not None:
+                import time as _t
                 cache = getattr(self, "_viz_cache", None)
                 if cache is None:
                     cache = self._viz_cache = {}
                 if len(cache) > 32:          # bounded — a handful of view variants
                     cache.clear()
-                cache[_key] = (_tok, result)
+                cache[_key] = (_tok, result, _t.monotonic())
             return result
 
-        if namespace and namespace not in ("__all__", "*", "all"):
-            viz = TemporalGraph(self.store, namespace, self.embedder).to_viz(include_history, at=at)
-            _names = [n["id"] for n in viz["nodes"]]
-            edim = self._entity_dimensions([namespace], node_names=_names)
-            # every taggable facet rides on the nodes (empty keys cost ~0: the
-            # indexed tagged() returns [] and the vote short-circuits).
-            # facet votes are GLOBAL ([None] = no namespace filter): where an entity
-            # was discussed is entity-level knowledge — squad/channel tags often live
-            # on OTHER agents' memories, not on the graph-bearing namespace itself.
-            _fac = {k: self._entity_facets([None], _names, k)
-                    for k in ("channel", "source", "project", "squad")}
-            for n in viz["nodes"]:
-                n["namespaces"], n["shared"] = [namespace], False
-                if n["id"] in edim:
-                    n["dimension"] = edim[n["id"]]
-                for k, mp in _fac.items():
-                    if n["id"] in mp:
-                        n[k] = mp[n["id"]]
-            for l in viz["links"]:
-                l["namespace"] = namespace
-            node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth, limit, orphans)
-            return _memo({"nodes": node_list, "links": links, "namespaces": [namespace],
-                          "focus": focus, "depth": depth})
+        # Cálculo FRIO — um por processo. Quem esperou o gate re-checa o cache:
+        # outra thread pode ter acabado de computar esta mesma chave.
+        with _gate:
+            if _tok is not None:
+                _hit2 = getattr(self, "_viz_cache", {}).get(_key)
+                if _hit2 and _hit2[0] == _tok:
+                    return _hit2[1]
+            if namespace and namespace not in ("__all__", "*", "all"):
+                viz = TemporalGraph(self.store, namespace, self.embedder).to_viz(include_history, at=at)
+                _names = [n["id"] for n in viz["nodes"]]
+                edim = self._entity_dimensions([namespace], node_names=_names)
+                # every taggable facet rides on the nodes (empty keys cost ~0: the
+                # indexed tagged() returns [] and the vote short-circuits).
+                # facet votes are GLOBAL ([None] = no namespace filter): where an entity
+                # was discussed is entity-level knowledge — squad/channel tags often live
+                # on OTHER agents' memories, not on the graph-bearing namespace itself.
+                _fac = {k: self._entity_facets([None], _names, k)
+                        for k in ("channel", "source", "project", "squad")}
+                for n in viz["nodes"]:
+                    n["namespaces"], n["shared"] = [namespace], False
+                    if n["id"] in edim:
+                        n["dimension"] = edim[n["id"]]
+                    for k, mp in _fac.items():
+                        if n["id"] in mp:
+                            n[k] = mp[n["id"]]
+                for l in viz["links"]:
+                    l["namespace"] = namespace
+                node_list, links = self._finish_viz(viz["nodes"], viz["links"], [namespace], want, focus, depth, limit, orphans)
+                return _memo({"nodes": node_list, "links": links, "namespaces": [namespace],
+                              "focus": focus, "depth": depth})
 
-        nodes: Dict[str, set] = {}
-        ntypes: Dict[str, str] = {}          # entity → its type (Concept/Product/Person/…) for colouring
-        links: List[Dict[str, Any]] = []
-        all_ns = self.store.namespaces()
-        # __all__ is dominated by opening a TemporalGraph + querying edges for EVERY
-        # namespace — but only namespaces with graph-layer memories have edges. Skip
-        # the empty ones (co_mention also only links already-present nodes, so it's
-        # safe). Turns an 86-namespace sweep into the 1-2 that actually have a graph.
-        _bc = getattr(self.store, "bucket_counts", None)
-        if callable(_bc):
-            _counts = _bc()
-            _withgraph = [n for n in all_ns if _counts.get(n, {}).get("graph", 0) > 0]
-            if _withgraph:
-                all_ns = _withgraph
-        for ns in all_ns:
-            g = TemporalGraph(self.store, ns, self.embedder)
-            for e in g.edges(include_history, at=at):
-                nodes.setdefault(e.subject, set()).add(ns)
-                nodes.setdefault(e.object, set()).add(ns)
-                if e.subject_type and e.subject not in ntypes: ntypes[e.subject] = e.subject_type
-                if e.object_type and e.object not in ntypes: ntypes[e.object] = e.object_type
-                links.append({
-                    "source": e.subject, "target": e.object, "label": e.predicate,
-                    "valid": e.is_valid, "valid_from": e.valid_from, "valid_to": e.valid_to,
-                    "confidence": e.confidence, "namespace": ns,
-                })
-        edim = self._entity_dimensions(all_ns, node_names=list(nodes.keys()))
-        # global facet votes (see the single-namespace branch for the why)
-        _fac = {k: self._entity_facets([None], list(nodes.keys()), k)
-                for k in ("channel", "source", "project", "squad")}
-        node_list = []
-        for name, nss in nodes.items():
-            n = {"id": name, "namespaces": sorted(nss), "shared": len(nss) > 1}
-            if name in edim:
-                n["dimension"] = edim[name]
-            if ntypes.get(name):
-                n["type"] = ntypes[name]
-            for k, mp in _fac.items():
-                if name in mp:
-                    n[k] = mp[name]
-            node_list.append(n)
-        node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth, limit, orphans)
-        return _memo({"nodes": node_list, "links": links, "namespaces": all_ns,
-                      "focus": focus, "depth": depth})
+            nodes: Dict[str, set] = {}
+            ntypes: Dict[str, str] = {}          # entity → its type (Concept/Product/Person/…) for colouring
+            links: List[Dict[str, Any]] = []
+            all_ns = self.store.namespaces()
+            # __all__ is dominated by opening a TemporalGraph + querying edges for EVERY
+            # namespace — but only namespaces with graph-layer memories have edges. Skip
+            # the empty ones (co_mention also only links already-present nodes, so it's
+            # safe). Turns an 86-namespace sweep into the 1-2 that actually have a graph.
+            _bc = getattr(self.store, "bucket_counts", None)
+            if callable(_bc):
+                _counts = _bc()
+                _withgraph = [n for n in all_ns if _counts.get(n, {}).get("graph", 0) > 0]
+                if _withgraph:
+                    all_ns = _withgraph
+            for ns in all_ns:
+                g = TemporalGraph(self.store, ns, self.embedder)
+                for e in g.edges(include_history, at=at):
+                    nodes.setdefault(e.subject, set()).add(ns)
+                    nodes.setdefault(e.object, set()).add(ns)
+                    if e.subject_type and e.subject not in ntypes: ntypes[e.subject] = e.subject_type
+                    if e.object_type and e.object not in ntypes: ntypes[e.object] = e.object_type
+                    links.append({
+                        "source": e.subject, "target": e.object, "label": e.predicate,
+                        "valid": e.is_valid, "valid_from": e.valid_from, "valid_to": e.valid_to,
+                        "confidence": e.confidence, "namespace": ns,
+                    })
+            edim = self._entity_dimensions(all_ns, node_names=list(nodes.keys()))
+            # global facet votes (see the single-namespace branch for the why)
+            _fac = {k: self._entity_facets([None], list(nodes.keys()), k)
+                    for k in ("channel", "source", "project", "squad")}
+            node_list = []
+            for name, nss in nodes.items():
+                n = {"id": name, "namespaces": sorted(nss), "shared": len(nss) > 1}
+                if name in edim:
+                    n["dimension"] = edim[name]
+                if ntypes.get(name):
+                    n["type"] = ntypes[name]
+                for k, mp in _fac.items():
+                    if name in mp:
+                        n[k] = mp[name]
+                node_list.append(n)
+            node_list, links = self._finish_viz(node_list, links, all_ns, want, focus, depth, limit, orphans)
+            return _memo({"nodes": node_list, "links": links, "namespaces": all_ns,
+                          "focus": focus, "depth": depth})
 
     def _finish_viz(self, node_list, links, ns_scope, want, focus, depth, limit: int = 0, orphans: bool = False):
         """Shared graph augmentation: tag relation links (kind/weight/direction/
@@ -1036,7 +1062,7 @@ class LogicaMind:
         node_ids = {n["id"] for n in node_list}
         rel_pairs = {frozenset((l["source"], l["target"])) for l in links}
         if "co_mention" in want:
-            for cm in self._co_mention_links(ns_scope):
+            for cm in self._co_mention_links(ns_scope, ents=node_ids):
                 if cm["source"] in node_ids and cm["target"] in node_ids \
                         and frozenset((cm["source"], cm["target"])) not in rel_pairs:
                     links.append(cm)
@@ -1097,7 +1123,7 @@ class LogicaMind:
             node_list = [n for n in node_list if n["id"] in live]
         return node_list, links
 
-    def _co_mention_links(self, namespaces, cooc_min: int = 2, cap_per_mem: int = 8):
+    def _co_mention_links(self, namespaces, cooc_min: int = 2, cap_per_mem: int = 8, ents=None):
         """Emergent connections: entity pairs that get TALKED ABOUT TOGETHER. A fact
         that names two graph entities votes a co-mention edge between them. No LLM,
         no embeddings — the Obsidian 'unlinked mention', but computed. Capped per
@@ -1109,13 +1135,19 @@ class LogicaMind:
         matches punctuated names (tailwind.config.js) via token-normalised keys."""
         import re as _re
         from collections import Counter
-        ents: set = set()
-        for ns in namespaces:
-            for e in TemporalGraph(self.store, ns, self.embedder).edges():
-                if e.subject and len(e.subject) >= 2:
-                    ents.add(e.subject)
-                if e.object and len(e.object) >= 2:
-                    ents.add(e.object)
+        # ents vem do chamador quando o grafo JA esta montado (_finish_viz tem os
+        # nos) — reabrir TemporalGraph aqui eram as leituras 3 e 4 da camada graph
+        # por request (~1,5s). O fallback reconstroi, pra chamadores avulsos.
+        if ents is None:
+            ents = set()
+            for ns in namespaces:
+                for e in TemporalGraph(self.store, ns, self.embedder).edges():
+                    if e.subject and len(e.subject) >= 2:
+                        ents.add(e.subject)
+                    if e.object and len(e.object) >= 2:
+                        ents.add(e.object)
+        else:
+            ents = {e for e in ents if e and len(e) >= 2}
         if len(ents) < 2:
             return []
         _tok = _re.compile(r"[\w][\w'\-]*")

@@ -80,9 +80,24 @@ class TemporalGraph:
     def edges(self, include_history: bool = False, at: Optional[str] = None) -> List[Edge]:
         """All edges. `at` (ISO timestamp) gives a point-in-time view: only edges
         that were valid at that instant — "what was true on date X"."""
-        mems = self.store.all(self.namespace, layers=[MemoryLayer.GRAPH])
+        # with_embeddings=False: edges never use vectors, and parsing 384 floats per
+        # row was the single biggest cost of every /api/graph request (~1.5-2s).
+        mems = self.store.all(self.namespace, layers=[MemoryLayer.GRAPH], with_embeddings=False)
         # alias rows live in the GRAPH layer too — never expose them as edges
         out = [_memory_to_edge(m) for m in mems if "alias" not in (m.tags or [])]
+        # ENTITY RESOLUTION at read time: canonicalize endpoints through the alias
+        # map, so casing/spacing variants ('OpenAI'/'Open AI') and explicit
+        # add_alias() merges collapse onto ONE node everywhere downstream (viz,
+        # dimensions, co-mentions, facets) — without rewriting stored rows.
+        amap = self._alias_map()
+        if amap:
+            for e in out:
+                cs = amap.get(_norm_entity(e.subject))
+                if cs and cs != e.subject:
+                    e.subject = cs
+                co = amap.get(_norm_entity(e.object))
+                if co and co != e.object:
+                    e.object = co
         if at is not None:
             return [e for e in out if e.valid_at(at)]
         if not include_history:
@@ -101,7 +116,7 @@ class TemporalGraph:
         read straight from metadata without building Edge objects (used by the
         entity-boost path so it doesn't materialize the whole graph per recall)."""
         names: set = set()
-        for m in self.store.all(self.namespace, layers=[MemoryLayer.GRAPH]):
+        for m in self.store.all(self.namespace, layers=[MemoryLayer.GRAPH], with_embeddings=False):
             if "alias" in (m.tags or []):
                 continue
             md = m.metadata or {}
@@ -131,7 +146,7 @@ class TemporalGraph:
         if self._amap is not None:
             return self._amap
         amap: Dict[str, str] = {}
-        rows = self.store.all(self.namespace, layers=[MemoryLayer.GRAPH])
+        rows = self.store.all(self.namespace, layers=[MemoryLayer.GRAPH], with_embeddings=False)
         for m in rows:                                    # explicit aliases first
             md = m.metadata or {}
             if "alias" in (m.tags or []) and md.get("alias_norm"):
@@ -177,7 +192,7 @@ class TemporalGraph:
     def aliases_of(self, canonical: str) -> List[str]:
         canon = self.resolve(canonical)
         out = []
-        for m in self.store.all(self.namespace, layers=[MemoryLayer.GRAPH]):
+        for m in self.store.all(self.namespace, layers=[MemoryLayer.GRAPH], with_embeddings=False):
             md = m.metadata or {}
             if "alias" in (m.tags or []) and md.get("canonical") == canon and md.get("variant"):
                 out.append(md["variant"])
@@ -420,8 +435,10 @@ class TemporalGraph:
         edges = self.edges(include_history, at=at)
         nodes = {}
         for e in edges:
-            nodes.setdefault(e.subject, {"id": e.subject})
-            nodes.setdefault(e.object, {"id": e.object})
+            s = nodes.setdefault(e.subject, {"id": e.subject})
+            if e.subject_type and "type" not in s: s["type"] = e.subject_type
+            o = nodes.setdefault(e.object, {"id": e.object})
+            if e.object_type and "type" not in o: o["type"] = e.object_type
         links = [
             {
                 "source": e.subject,

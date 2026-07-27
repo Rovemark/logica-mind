@@ -132,6 +132,17 @@ class SQLiteStore(Store):
             # F_FULLFSYNC do macOS (APFS/HFS mentem no fsync() comum, não vão ao disco físico).
             self._conn.execute("PRAGMA fullfsync=ON")
             self._conn.execute("PRAGMA synchronous=FULL")
+        if path not in (":memory:", ""):
+            # Planner com estatísticas: sem sqlite_stat1 ele escolhia idx_mem_created
+            # e varria 53k linhas pra devolver 7.4k (medido: 1.795ms → 44,7ms com
+            # ANALYZE). Roda uma vez no boot; optimize mantém depois.
+            try:
+                self._conn.execute("ANALYZE")
+                self._conn.execute("PRAGMA optimize")
+            except sqlite3.OperationalError:
+                pass
+            self._conn.execute("PRAGMA cache_size=-64000")   # 64MB de page cache
+            self._conn.execute("PRAGMA mmap_size=268435456")  # 256MB mmap — leitura sem syscall
         self._conn.executescript(_SCHEMA)
         # migrate pre-seq databases (CREATE TABLE IF NOT EXISTS won't add columns)
         for col, defn in [
@@ -339,7 +350,6 @@ class SQLiteStore(Store):
         self._conn.commit()
         return cur.rowcount
 
-    @_locked
     def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         # with_embeddings=False skips parsing the 384-float vector per row — a big
         # win for enumeration/aggregation endpoints (sessions, dimensions, analytics)
@@ -350,15 +360,28 @@ class SQLiteStore(Store):
         # ranking only. With the cap, a namespace holding more graph rows than the
         # window silently DROPPED its oldest edges from the graph/dimensions/
         # co-mentions (seen live: 7,471 edges, 2,471 invisible).
-        sql = "SELECT * FROM memories WHERE namespace = ?"
+        #
+        # LÊ PELA CONEXÃO DE LEITURA (_rconn), não pelo lock dos writers. Era
+        # @_locked na MESMA RLock do add()/dream — um ciclo de dream de dezenas de
+        # segundos serializava o graph_viz ATRÁS dele, e era o maior pedaço do
+        # multiplicador que transformava um cálculo de ~6s em 162s medidos. WAL
+        # garante leitor consistente durante escrita; search() já usava _rconn.
+        #
+        # E quando with_embeddings=False, o blob de ~1.5KB/linha nem SAI DO DISCO
+        # (antes só se pulava o parse — o I/O era pago do mesmo jeito).
+        cols = ("*" if with_embeddings
+                else "id, namespace, content, layer, NULL AS embedding, metadata, importance, "
+                     "tags, source_ids, created_at, seq, access_count, last_recalled_at, surprise_score")
+        sql = f"SELECT {cols} FROM memories WHERE namespace = ?"
         params: list = [namespace]
         if layers:
             placeholders = ",".join("?" for _ in layers)
             sql += f" AND layer IN ({placeholders})"
             params += [l.value for l in layers]
         sql += " ORDER BY created_at DESC, seq DESC, rowid DESC"
-        cur = self._conn.execute(sql, params)
-        return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
+        with self._rlock:
+            rows = self._rconn.execute(sql, params).fetchall()
+        return [self._row_to_memory(r, with_embeddings) for r in rows]
 
     @_locked
     def namespaces(self) -> List[str]:
@@ -477,13 +500,17 @@ class SQLiteStore(Store):
         read-side caches (graph_viz). COUNT catches deletes, MAX(rowid) catches
         inserts; in-place UPDATEs of old rows are rare enough that the dream cycle's
         rewrite pattern (insert+invalidate) still flips the token."""
+        # O(1): data_version vira a cada COMMIT de escrita (pega insert/update/
+        # delete), MAX(rowid) via índice pega o ponteiro de inserção. O COUNT(*)
+        # antigo era um scan de ~81k linhas A CADA request — até nos cache hits.
         if namespace:
             r = self._conn.execute(
-                "SELECT COUNT(*) AS n, COALESCE(MAX(rowid),0) AS m FROM memories WHERE namespace = ?",
+                "SELECT COALESCE(MAX(rowid),0) AS m, COUNT(*) AS n FROM memories WHERE namespace = ? ",
                 (namespace,)).fetchone()
-        else:
-            r = self._conn.execute("SELECT COUNT(*) AS n, COALESCE(MAX(rowid),0) AS m FROM memories").fetchone()
-        return f"{r['n']}:{r['m']}"
+            return f"{r['n']}:{r['m']}"
+        dv = self._conn.execute("PRAGMA data_version").fetchone()[0]
+        m = self._conn.execute("SELECT COALESCE(MAX(rowid),0) FROM memories").fetchone()[0]
+        return f"{dv}:{m}"
 
     @_locked
     def touch(self, namespace: str, ids: List[str]) -> None:
@@ -608,7 +635,10 @@ class SQLiteStore(Store):
         if namespace:
             sql += " AND namespace = ?"
             params.append(namespace)
-        return [(c, d) for c, d in self._conn.execute(sql, params).fetchall() if c and d]
+        # conexão de leitura: alimenta agregados do grafo; não pode esperar o dream
+        with self._rlock:
+            rows = self._rconn.execute(sql, params).fetchall()
+        return [(c, d) for c, d in rows if c and d]
 
     def filter_memories(self, namespace=None, layers=None, dimension=None, category=None,
                         session=None, limit=200, offset=0, with_embeddings=False):
@@ -665,7 +695,6 @@ class SQLiteStore(Store):
         cur = self._conn.execute(sql, params)
         return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
 
-    @_locked
     def tagged(self, namespace=None, key="channel"):
         """(content, value) pairs for memories carrying metadata[key] — fuel for the
         per-entity facet voting (channel / project / squad / …): whatever tag the host
@@ -679,7 +708,10 @@ class SQLiteStore(Store):
         if namespace:
             sql += " AND namespace = ?"
             params.append(namespace)
-        return [(c, v) for c, v in self._conn.execute(sql, params).fetchall() if c and v]
+        # conexão de leitura, como all() — mesmo motivo, mesmo padrão
+        with self._rlock:
+            rows = self._rconn.execute(sql, params).fetchall()
+        return [(c, v) for c, v in rows if c and v]
 
     def page(self, namespace=None, layers=None, limit=100, offset=0):
         """A bounded page of memories (newest first) — LIMIT/OFFSET in SQL so a list
