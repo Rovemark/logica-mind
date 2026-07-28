@@ -2,16 +2,22 @@ import type { ReactNode } from "react";
 import { Search } from "lucide-react";
 import { ALL } from "../api";
 import { useI18n } from "../i18n";
+import { useTick } from "../anim";
+import { num } from "../fmt";
 import HelpTip from "./HelpTip";
 
 // The header search is the global Spotlight trigger — clicking it (or ⌘K) opens
 // the command palette that searches across everything. A contextual "?" explains
 // whatever page you're on.
 export default function Topbar({
-  view, ns, total, onOpen, action,
-}: { view: string; ns: string; total: number; onOpen: () => void; action?: ReactNode }) {
+  view, ns, total, onOpen, action, pronto = true,
+}: { view: string; ns: string; total: number; onOpen: () => void; action?: ReactNode; pronto?: boolean }) {
   const { t } = useI18n();
   const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  // A contagem se recarrega sozinha a cada 8s. Sem sinal no número, o dono não
+  // sabe se a memória parou de crescer ou se o painel congelou. Só pisca quando
+  // MUDA (240ms, uma vez) — ver anim.ts.
+  const piscar = useTick(total);
   return (
     <div className="flex items-center gap-3.5 px-6 py-3.5 border-b border-[var(--line)] bg-[var(--bg2)] max-[820px]:px-3.5">
       <button onClick={onOpen}
@@ -24,7 +30,12 @@ export default function Topbar({
         </kbd>
       </button>
       <div className="ml-auto text-[var(--dim)] text-[12.5px] flex items-center gap-2 max-[820px]:hidden">
-        <b className="text-[var(--txt)]">{total}</b> {t("memories_word")} · <b className="text-[var(--txt)]">{ns === ALL ? t("all_word") : ns}</b>
+        {/* "—" enquanto a contagem não chegou: o painel diz "ainda não sei" em vez
+            de afirmar "zero". tabular-nums trava a largura pra o número não
+            empurrar o resto da linha quando salta de 3 pra 5 dígitos. */}
+        {/* num(): "85.267", não "85267" — o ponto de milhar entrega a ordem de
+            grandeza sem o olho contar casa por casa. */}
+        <b className={`text-[var(--txt)] tabular-nums ${piscar}`}>{pronto ? num(total) : "—"}</b> {t("memories_word")} · <b className="text-[var(--txt)]">{ns === ALL ? t("all_word") : ns}</b>
       </div>
       <HelpTip k={view} />
       {action && <div className="flex-none ml-1">{action}</div>}

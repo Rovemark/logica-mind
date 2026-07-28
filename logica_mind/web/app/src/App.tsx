@@ -56,6 +56,12 @@ export default function App() {
   const [rev, setRev] = useState(0);
   const [lang, setLangState] = useState<Lang>(getLang());
   const [openMem, setOpenMem] = useState<Memory | null>(null);
+  // PERGUNTA: "meu appliance tem ZERO memórias?"
+  // A contagem do topo nascia em 0 e só virava 83.749 quando /namespaces voltava.
+  // Nesse intervalo o painel afirmava, com todas as letras, que a memória estava
+  // vazia — a pior mentira que este produto pode contar. Este sinal separa
+  // "ainda não sei" de "é zero mesmo".
+  const [nsPronto, setNsPronto] = useState(false);
   const colorsRef = useRef<Record<string, string>>({});
   const [langRev, setLangRev] = useState(0);
   const t = useMemo(() => makeT(lang), [lang, langRev]);
@@ -73,7 +79,7 @@ export default function App() {
   const loadNs = () => api.namespaces().then((d) => {
     d.namespaces.forEach((n) => { if (!(n.namespace in colorsRef.current)) colorsRef.current[n.namespace] = valueColor(n.namespace); });
     setNamespaces(d.namespaces);
-  }).catch(() => {});
+  }).catch(() => {}).finally(() => setNsPronto(true));   // erro também encerra a espera: melhor "0" que "—" pra sempre
   const bump = () => { setRev((r) => r + 1); loadNs(); };   // after a write: refetch view + counts
 
   // open any memory as an Obsidian-style note pane (Properties + content + provenance)
@@ -116,10 +122,11 @@ export default function App() {
     <MemoryOpenCtx.Provider value={openMemory}>
     <div className="grid h-screen grid-cols-[256px_1fr] max-[820px]:grid-cols-[1fr]">
       <Sidebar view={view} ns={ns} namespaces={namespaces} colors={colorsRef.current}
-        open={drawer} onView={onView} onNs={onNs} onClose={closeDrawer} onSettings={() => onView("settings")} />
+        open={drawer} onView={onView} onNs={onNs} onClose={closeDrawer} onSettings={() => onView("settings")}
+        pronto={nsPronto} />
 
       <main className="flex flex-col min-w-0 min-h-0">
-        <Topbar view={view} ns={ns} total={total} onOpen={() => setPalette(true)} action={<Composer ns={ns} onDone={bump} />} />
+        <Topbar view={view} ns={ns} total={total} pronto={nsPronto} onOpen={() => setPalette(true)} action={<Composer ns={ns} onDone={bump} />} />
         <DemoBanner onChange={bump} />
         <div className="flex-1 min-h-0 overflow-auto flex flex-col px-6 pt-[22px] pb-[30px] max-[820px]:px-3.5 max-[820px]:pb-[92px]">
           <View key={`${view}-${ns}-${rev}`} ns={ns} colorFor={colorFor} onOpenMemory={openMemory} onChanged={bump} filter={memFilter} focusEntity={graphFocus} />

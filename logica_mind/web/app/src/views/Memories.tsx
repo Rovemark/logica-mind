@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import HaloLoading from "../components/HaloLoading";
+import Empty from "../components/Empty";
 import { X } from "lucide-react";
 import { api, LAYERS, type Memory } from "../api";
 import MemoryCard from "../components/MemoryCard";
@@ -62,11 +63,18 @@ export default function Memories({ ns, focus, onChanged, filter }: { ns: string;
     <div className="fadein">
       <h2 className="m-0 mb-4 text-[18px] font-bold tracking-tight">{t("memories")}</h2>
       <div className="flex gap-[7px] mb-4 flex-wrap">
+        {/* PERGUNTA: "qual filtro está ligado?" e "isto aqui é clicável?"
+            Antes o chip ativo era cinza-sobre-cinza (panel2 + line), a mesma
+            família visual do inativo — dava pra passar batido e concluir que a
+            lista estava errada. Agora o ativo assume o azul da marca (borda +
+            texto + fundo a 12%) e o inativo se ANUNCIA no hover antes do clique.
+            transition-colors 150ms: a troca é de cor, não de posição — mover o
+            chip embaixo do cursor faria o alvo fugir. */}
         {chips.map(([k, l]) => (
           <button key={k} onClick={() => setLayer(k)}
-            className={`px-[13px] py-1.5 rounded-[9px] border text-[12.5px]
-              ${layer === k ? "bg-[var(--panel2)] text-[var(--txt)] border-[var(--line)]"
-                            : "border-[var(--line)] text-[var(--dim)] hover:text-[var(--txt)]"}`}>{l}</button>
+            className={`px-[13px] py-1.5 rounded-[9px] border text-[12.5px] transition-colors duration-150
+              ${layer === k ? "bg-[var(--accent)]/12 text-[var(--accent)] border-[var(--accent)] font-semibold"
+                            : "border-[var(--line)] text-[var(--dim)] hover:text-[var(--txt)] hover:border-[var(--dim2)] hover:bg-[var(--panel2)]"}`}>{l}</button>
         ))}
         {memF && (
           <span className="flex items-center gap-1.5 px-[11px] py-1.5 rounded-[9px] text-[12.5px] font-medium bg-[var(--accent)]/12 text-[var(--accent)] border border-[var(--accent)]/40">
@@ -77,9 +85,13 @@ export default function Memories({ ns, focus, onChanged, filter }: { ns: string;
       </div>
       {!loaded ? <HaloLoading size={84} className="py-12" />
         : mems.length ? (<>
-        {slice.map((m) => <MemoryCard key={m.id} m={m} highlight={hl === m.id} onDelete={() => del(m)} />)}
+        {/* lm-cascata: os cartões precisam ser filhos DIRETOS pra o nth-child
+            valer — por isso o wrapper próprio, separado do título e dos chips. */}
+        <div className="lm-cascata">
+          {slice.map((m) => <MemoryCard key={m.id} m={m} highlight={hl === m.id} onDelete={() => del(m)} />)}
+        </div>
         <Pager page={cp} pages={pages} onPage={setPage} />
-      </>) : <div className="text-[var(--dim)] text-center py-12">{t("nothing_here")}</div>}
+      </>) : <Empty text={t("nothing_here")} />}
     </div>
   );
 }

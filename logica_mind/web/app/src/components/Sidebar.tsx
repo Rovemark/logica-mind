@@ -4,13 +4,14 @@ import { getTheme, setTheme, effective } from "../theme";
 import { VIEWS, CATS, type ViewKey } from "../nav";
 import { ALL, type NsItem } from "../api";
 import { useI18n } from "../i18n";
+import { num } from "../fmt";
 
 export default function Sidebar({
-  view, ns, namespaces, colors, open, onView, onNs, onClose, onSettings,
+  view, ns, namespaces, colors, open, onView, onNs, onClose, onSettings, pronto = true,
 }: {
   view: ViewKey; ns: string; namespaces: NsItem[]; colors: Record<string, string>;
   open: boolean; onView: (v: ViewKey) => void; onNs: (n: string) => void;
-  onClose: () => void; onSettings: () => void;
+  onClose: () => void; onSettings: () => void; pronto?: boolean;
 }) {
   const { t } = useI18n();
   const total = namespaces.reduce((a, n) => a + n.total, 0);
@@ -54,12 +55,21 @@ export default function Sidebar({
 
         <div>
           <div className="px-2 pb-1 text-[var(--dim2)] text-[10px] tracking-[.9px] uppercase font-medium">{t("agents_clones")}</div>
-          <NsRow active={ns === ALL} dot="linear-gradient(90deg,#7c9cff,#a78bfa)" name={t("all_namespaces")} count={total} onClick={() => onNs(ALL)} />
+          <NsRow active={ns === ALL} dot="linear-gradient(90deg,#7c9cff,#a78bfa)" name={t("all_namespaces")} count={total} pronto={pronto} onClick={() => onNs(ALL)} />
           {namespaces.map((n) => (
             <NsRow key={n.namespace} active={ns === n.namespace} dot={colors[n.namespace] || "#7c9cff"}
               name={n.namespace} count={n.total} onClick={() => onNs(n.namespace)} />
           ))}
-          {namespaces.length === 0 && <div className="text-[var(--dim)] text-center py-6 text-[12px]">{t("no_data_yet")}</div>}
+          {/* PERGUNTA: "não tenho nenhum agente?"
+              Enquanto /namespaces não voltou, o menu afirmava "Nenhum dado ainda"
+              — a mesma mentira do "0" no topo. Agora mostra 3 linhas-fantasma
+              (a altura de uma linha real, 30px) e só diz "vazio" DEPOIS que a
+              resposta chegou. */}
+          {namespaces.length === 0 && (pronto
+            ? <div className="text-[var(--dim)] text-center py-6 text-[12px]">{t("no_data_yet")}</div>
+            : <div className="flex flex-col gap-1 px-[11px] py-2" aria-hidden>
+                {[0, 1, 2].map((i) => <span key={i} className="lm-esqueleto h-[14px]" style={{ width: `${72 - i * 12}%` }} />)}
+              </div>)}
         </div>
       </div>
 
@@ -89,16 +99,20 @@ export default function Sidebar({
   );
 }
 
-function NsRow({ active, dot, name, count, onClick }:
-  { active: boolean; dot: string; name: string; count: number; onClick: () => void }) {
+function NsRow({ active, dot, name, count, onClick, pronto = true }:
+  { active: boolean; dot: string; name: string; count: number; onClick: () => void; pronto?: boolean }) {
   return (
+    // transition-colors 150ms: a linha se ANUNCIA antes do clique (responde
+    // "isto é clicável?"). Só cor — mover o alvo debaixo do cursor faria ele fugir.
     <div onClick={onClick}
-      className={`flex items-center gap-[9px] px-[11px] py-2 rounded-[9px] cursor-pointer border
+      className={`flex items-center gap-[9px] px-[11px] py-2 rounded-[9px] cursor-pointer border transition-colors duration-150
         ${active ? "bg-[var(--panel2)] text-[var(--txt)] border-[var(--line)]"
                  : "text-[var(--dim)] border-transparent hover:bg-[var(--panel2)] hover:text-[var(--txt)]"}`}>
       <span className="w-[9px] h-[9px] rounded-full flex-none" style={{ background: dot }} />
       <span className="flex-1 whitespace-nowrap overflow-hidden text-ellipsis font-medium">{name}</span>
-      <span className="text-[var(--dim2)] text-xs tabular-nums">{count}</span>
+      {/* Nunca "0" antes da resposta chegar: esqueleto no lugar do número. */}
+      {pronto ? <span className="text-[var(--dim2)] text-xs tabular-nums">{num(count)}</span>
+              : <span className="lm-esqueleto w-[38px] h-[10px]" aria-hidden />}
     </div>
   );
 }

@@ -100,6 +100,98 @@ code, pre, .mono, [class*="mono"] { font-family: 'IBM Plex Mono', Menlo, monospa
 button:not(:disabled) { transition: transform .12s ease; }
 button:not(:disabled):active { transform: scale(.97); }
 
+/* ═══ Micro-interações — cada uma responde UMA pergunta do dono do sistema ═══
+   Regra da casa: nada acima de 250ms (este painel é operado às pressas) e tudo
+   desligado sob prefers-reduced-motion. Movimento que não informa é ruído. */
+
+/* PERGUNTA: "a lista terminou de chegar — e isso são itens separados ou um bloco?"
+   Cascata de entrada: 22ms entre cartões, com TETO no 10º (10×22 = 220ms, o
+   último ainda entra dentro do limite da casa). Sem teto, uma página de 20
+   cartões faria o último aparecer meio segundo depois — isso vira espera.
+   `backwards` é obrigatório: sem ele o cartão apareceria opaco durante o atraso
+   e só então animaria, o que lê como piscada. */
+.lm-cascata > .fadein { animation-fill-mode: backwards; }
+.lm-cascata > .fadein:nth-child(2)  { animation-delay:  22ms; }
+.lm-cascata > .fadein:nth-child(3)  { animation-delay:  44ms; }
+.lm-cascata > .fadein:nth-child(4)  { animation-delay:  66ms; }
+.lm-cascata > .fadein:nth-child(5)  { animation-delay:  88ms; }
+.lm-cascata > .fadein:nth-child(6)  { animation-delay: 110ms; }
+.lm-cascata > .fadein:nth-child(7)  { animation-delay: 132ms; }
+.lm-cascata > .fadein:nth-child(8)  { animation-delay: 154ms; }
+.lm-cascata > .fadein:nth-child(9)  { animation-delay: 176ms; }
+.lm-cascata > .fadein:nth-child(n+10) { animation-delay: 198ms; }  /* teto */
+@media (prefers-reduced-motion: reduce) { .lm-cascata > .fadein { animation: none; } }
+
+/* PERGUNTA: "esse número mudou agora, ou eu que li errado?"
+   O painel busca sozinho a cada 8s. Sem sinal, o dono não sabe se a tela está
+   viva ou congelada. Só o valor que MUDOU pisca — 240ms, uma vez. Se tudo
+   piscasse a cada busca viraria ruído e ninguém mais olharia.
+   Anima opacidade + 2px, não cor: assim funciona igual no claro e no escuro e
+   não inventa hex fora do Brand Kit. */
+@keyframes lm-tick { from { opacity: .35; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+.lm-tick { display: inline-block; animation: lm-tick 240ms cubic-bezier(.2,.8,.2,1); }
+@media (prefers-reduced-motion: reduce) { .lm-tick { animation: none; } }
+
+/* PERGUNTA: "meu clique no nó pegou — e de onde veio esse painel?"
+   O painel da entidade mora na borda ESQUERDA do grafo, então ele nasce de lá:
+   o olho segue o movimento até o lugar certo em vez de encontrar um retângulo
+   que apareceu do nada por cima do grafo. 180ms — dá pra seguir, não dá pra
+   esperar. */
+@keyframes lm-entra-esq { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+.lm-entra-esq { animation: lm-entra-esq 180ms cubic-bezier(.2,.8,.2,1); }
+@media (prefers-reduced-motion: reduce) { .lm-entra-esq { animation: none; } }
+
+/* PERGUNTA: "a tela piscou — quebrou?"
+   Não: a resposta chegou rápido. O carregador só aparece DEPOIS de 180ms; se a
+   lista voltar antes disso (o caso comum em rede local), o halo nunca chega a
+   ser visto. Um halo que pisca por 80ms parece defeito, não carregamento. */
+.lm-espera { animation: fadein 160ms ease 180ms backwards; }
+@media (prefers-reduced-motion: reduce) { .lm-espera { animation: none; } }
+
+/* PERGUNTA: "meu appliance está VAZIO?"
+   Não: a contagem ainda não chegou. Enquanto o número não existe, o lugar dele
+   é uma barra que respira — o painel diz "estou buscando" em vez de afirmar
+   "zero", que num sistema de memória é a pior mentira possível.
+   1.4s de ciclo (mais lento que qualquer micro-interação de propósito: isto não
+   é resposta a um clique, é estado ambiente — se pulsasse rápido leria como
+   alarme). Opacidade só, sem cor nova: funciona igual no claro e no escuro.
+   Sob reduced-motion a barra fica parada mas CONTINUA lá — é informação de
+   estado, não enfeite; quem desligou movimento também precisa saber que o dado
+   não chegou. */
+@keyframes lm-pulso { 0%, 100% { opacity: .30; } 50% { opacity: .62; } }
+.lm-esqueleto {
+  display: inline-block; border-radius: 5px;
+  background: var(--dim2);
+  animation: lm-pulso 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .lm-esqueleto { animation: none; opacity: .4; } }
+
+/* PERGUNTA: "cadê o cursor do teclado?"
+   O painel é operado às pressas e às vezes só com o teclado (Tab / ⌘K). Sem
+   anel de foco, quem navega assim fica cego. Usa :focus-visible pra o anel
+   NÃO aparecer no clique de mouse (aí seria ruído) e o azul da marca, que já é
+   a cor de "isto está ativo" no resto da tela. offset 2px pra o anel não colar
+   na borda do próprio controle. */
+:where(button, a, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* PERGUNTA: "tem mais coisa embaixo, ou o menu acaba aqui?"
+   A lista de agentes/clones some no corte do painel lateral sem nenhum aviso — em
+   appliance com muitos namespaces o dono conclui que só existe o que ele vê.
+   Uma faixa curta (28px) que apaga o conteúdo no rodapé do scroller diz "continua".
+   Ela só aparece quando REALMENTE há o que rolar (a Sidebar mede) — uma sombra
+   permanente mentiria quando a lista já está no fim.
+   Não é animação: é sinal de estado. Por isso fica de fora do reduced-motion. */
+.lm-fade-scroll {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 28px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--bg), transparent);
+  transition: opacity 150ms ease;
+}
+
 /* A animação OFICIAL do kit (motion/halo-loader.css): sprite 10×6 quadros em
    steps() — cada quadro é arte final, nada interpolado. É o "halo vivo". */
 .logicaos-halo {
