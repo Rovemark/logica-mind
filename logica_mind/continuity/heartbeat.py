@@ -61,6 +61,14 @@ class Heartbeat:
         check_after_seconds: int = 6 * 3600,
         max_hypotheses: int = 3,
         max_corrections: int = 5,
+        # Quantas vezes uma hipótese pode receber veredito 'open' antes de ser aposentada.
+        # Sem teto, hipótese irrespondível é rejulgada pra sempre: a mais antiga do sistema
+        # tinha CINCO SEMANAS e centenas de julgamentos pagos, todos devolvendo 'open'.
+        max_judge_attempts: int = 3,
+        # Prazo depois do qual uma hipótese vencida e nunca resolvida é aposentada SEM gastar
+        # chamada de LLM. Serve pra drenar backlog acumulado: julgar 13 mil hipóteses velhas
+        # três vezes cada, só pra descobrir que continuam irrespondíveis, custaria semanas.
+        stale_after_seconds: int = 7 * 24 * 3600,
         guard: Optional[Callable[..., bool]] = None,
         publish_min_confidence: float = 0.8,
         max_published: int = 3,
@@ -74,6 +82,8 @@ class Heartbeat:
         self.check_after_seconds = check_after_seconds
         self.max_hypotheses = max_hypotheses
         self.max_corrections = max_corrections
+        self.max_judge_attempts = max_judge_attempts
+        self.stale_after_seconds = stale_after_seconds
         self.publish_min_confidence = publish_min_confidence
         self.max_published = max_published
         self.self_model = SelfModel(
@@ -141,6 +151,16 @@ class Heartbeat:
 
         beliefs_patch: List[Dict[str, Any]] = []
         surfaced: List[str] = []
+
+        # 3.5 DRENAR — antes de julgar qualquer coisa, aposenta o que apodreceu na fila.
+        # Fica FORA do `if self._llm_ok()` de propósito: é comparação de data, não custa
+        # chamada, e precisa rodar mesmo em instância sem modelo configurado. Sem isto o
+        # backlog herdado (13.894 abertas quando isto foi escrito) só sairia da frente
+        # depois de semanas de julgamento pago, uma vaga de cada vez.
+        try:
+            report["steps"]["retired"] = self._retire_stale()
+        except Exception:
+            report["steps"]["retired"] = "skip"
 
         if self._llm_ok():
             # 4. HYPOTHESIZE
@@ -269,20 +289,41 @@ class Heartbeat:
             f"NOVIDADES DESDE A ÚLTIMA BATIDA:\n{perceived_txt}\n\n"
             "Gere 1 a 3 HIPÓTESES FALSIFICÁVEIS sobre o MUNDO/USUÁRIO/TRABALHO da empresa — coisas "
             "que dá pra confirmar ou refutar depois. Cada uma com confiança 0..1.\n"
+            # O campo `verificacao` é o freio contra a especulação psicológica que dominava a
+            # saída ("fulano está em modo de validação crítica porque…"). Um palpite sobre
+            # estado mental não tem observação que o feche, então o juiz respondia 'open'
+            # para sempre — foi assim que 85% do acervo travou. Exigir POR QUAL OBSERVAÇÃO a
+            # hipótese morre obriga o gerador a produzir algo verificável ou nada.
+            "OBRIGATÓRIO: cada hipótese traz `verificacao` — o fato OBSERVÁVEL que a confirma "
+            "ou refuta (um número, um evento, um artefato que passa a existir). Se você não "
+            "consegue dizer o que se observaria, a hipótese NÃO SERVE: descarte-a.\n"
+            "PROIBIDO: palpite sobre estado mental, motivação, personalidade ou 'padrão de "
+            "comportamento' de alguém — nada disso tem observação que feche o caso.\n"
             "REGRA: fale do agente em 3ª pessoa; NÃO escreva sobre você, IA/Claude/modelo, o prompt, "
             "'roleplay' ou 'identidade/memória' (será descartado). Se não houver o que hipotetizar, devolva [].\n"
-            'Responda SÓ um array JSON: [{"text":"...","confidence":0.0}]'
+            'Responda SÓ um array JSON: [{"text":"...","verificacao":"...","confidence":0.0}]'
         )
         data = self._ask_json(prompt, _HYP_SYSTEM)
         out: List[Dict[str, Any]] = []
         if isinstance(data, list):
             for h in data:
-                if isinstance(h, dict) and h.get("text"):
-                    try:
-                        conf = float(h.get("confidence", 0.5))
-                    except (TypeError, ValueError):
-                        conf = 0.5
-                    out.append({"text": str(h["text"])[:280], "confidence": round(conf, 3)})
+                if not (isinstance(h, dict) and h.get("text")):
+                    continue
+                # Pedir o critério no prompt não basta: sem RECUSAR quem não manda, o
+                # modelo volta a entregar palpite solto na primeira resposta preguiçosa e o
+                # acervo trava de novo. Sem `verificacao`, a hipótese não entra.
+                verif = str(h.get("verificacao") or "").strip()
+                if len(verif) < 8:
+                    continue
+                try:
+                    conf = float(h.get("confidence", 0.5))
+                except (TypeError, ValueError):
+                    conf = 0.5
+                out.append({
+                    "text": str(h["text"])[:280],
+                    "verificacao": verif[:280],
+                    "confidence": round(conf, 3),
+                })
         return out
 
     def _store_hypothesis(self, h: Dict[str, Any]) -> None:
@@ -294,30 +335,73 @@ class Heartbeat:
             metadata={
                 "continuity": "heartbeat", "kind": "hypothesis", "status": "open",
                 "confidence": h.get("confidence", 0.5), "created_at": now,
+                # guardado pra que o juiz saiba, meses depois, o que exatamente fecharia
+                # o caso — sem isso ele julga de memória e devolve 'open' por precaução
+                "verificacao": h.get("verificacao", ""),
                 "check_after": self._plus_seconds(now, self.check_after_seconds),
             },
         )
         self.store.add([m])
 
     # ── step 5 ────────────────────────────────────────────────────────────────
+    def _hypotheses(self) -> List[Memory]:
+        for m in self.store.all(self.ns, layers=[MemoryLayer.SEMANTIC]):
+            meta = m.metadata or {}
+            if meta.get("continuity") == "heartbeat" and meta.get("kind") == "hypothesis":
+                yield m
+
     def _open_due_hypotheses(self) -> List[Memory]:
         now = self._now()
         out: List[Memory] = []
-        for m in self.store.all(self.ns, layers=[MemoryLayer.SEMANTIC]):
+        for m in self._hypotheses():
             meta = m.metadata or {}
-            if (meta.get("continuity") == "heartbeat" and meta.get("kind") == "hypothesis"
-                    and meta.get("status") == "open" and (meta.get("check_after") or "") <= now):
+            if meta.get("status") == "open" and (meta.get("check_after") or "") <= now:
                 out.append(m)
+        # ORDENA POR VENCIMENTO. `store.all()` devolve em ordem de INSERÇÃO, sem nenhum
+        # order-by; com o `[: max_corrections]` lá embaixo isso significava julgar sempre
+        # as MESMAS primeiras da lista. Quando essas não resolviam — e não resolviam —
+        # voltavam ao topo na batida seguinte e bloqueavam a fila inteira atrás delas.
+        # Medido antes do conserto: 13.894 abertas, 97% já vencidas, a mais antiga parada
+        # havia cinco semanas. Ordenar é o que faz a fila andar.
+        out.sort(key=lambda mm: (mm.metadata or {}).get("check_after") or "")
         return out
+
+    def _retire_stale(self) -> int:
+        """Aposenta hipótese vencida há tempo demais — SEM gastar LLM.
+
+        Uma hipótese que passou uma semana do prazo sem veredito não é falsificável na
+        prática. Resolver isso pelo juiz custaria 3 chamadas pagas por hipótese; aqui é
+        comparação de data, custo zero. É o que drena backlog herdado.
+        """
+        limite = self._plus_seconds(self._now(), -self.stale_after_seconds)
+        n = 0
+        for m in self._hypotheses():
+            meta = m.metadata or {}
+            if meta.get("status") != "open":
+                continue
+            if (meta.get("check_after") or "") > limite:
+                continue
+            meta = dict(meta)
+            meta["status"] = "unfalsifiable"
+            meta["resolved_at"] = self._now()
+            meta["why"] = "vencida há mais de %dd sem veredito" % (self.stale_after_seconds // 86400)
+            m.metadata = meta
+            self.store.add([m])  # upsert (mesmo id)
+            n += 1
+        return n
 
     def _self_correct(self, context: str, perceived_txt: str) -> Tuple[int, List[Dict[str, Any]], List[str]]:
         corrected = 0
         beliefs_patch: List[Dict[str, Any]] = []
         surfaced: List[str] = []
         for m in self._open_due_hypotheses()[: self.max_corrections]:
+            _verif = (m.metadata or {}).get("verificacao") or ""
             prompt = (
                 f"HIPÓTESE (de {(m.metadata or {}).get('created_at')}): \"{m.content}\"\n\n"
-                f"REALIDADE OBSERVADA AGORA:\n{perceived_txt}\n{(context or '')[:800]}\n\n"
+                # entregar o critério ao juiz é o que transforma "acho que sim" em veredito:
+                # ele passa a checar UM fato nomeado em vez de opinar sobre a frase inteira
+                + (f"COMO VERIFICAR (definido quando a hipótese nasceu): {_verif}\n\n" if _verif else "")
+                + f"REALIDADE OBSERVADA AGORA:\n{perceived_txt}\n{(context or '')[:800]}\n\n"
                 "A hipótese se confirmou, foi refutada, ou ainda não dá pra dizer? "
                 'Responda SÓ JSON: {"verdict":"confirmed|refuted|open","why":"...","confidence":0.0}'
             )
@@ -325,6 +409,29 @@ class Heartbeat:
             if not isinstance(j, dict):
                 continue
             verdict = j.get("verdict")
+            if verdict not in ("confirmed", "refuted"):
+                # VEREDITO 'open' — a hipótese não resolveu agora. Antes disto o código
+                # apenas seguia em frente, deixando a hipótese exatamente como estava: com
+                # o mesmo `check_after` já vencido, ela reaparecia no topo da fila na batida
+                # seguinte e era rejulgada indefinidamente, queimando uma chamada paga por
+                # vez. Duas defesas, nesta ordem:
+                meta = dict(m.metadata or {})
+                tentativas = int(meta.get("judge_attempts", 0) or 0) + 1
+                meta["judge_attempts"] = tentativas
+                if tentativas >= self.max_judge_attempts:
+                    # 3 julgamentos sem veredito: não é falsificável. Sai do ciclo pra
+                    # sempre em vez de consumir uma vaga de correção por batida.
+                    meta["status"] = "unfalsifiable"
+                    meta["resolved_at"] = self._now()
+                    meta["why"] = f"sem veredito em {tentativas} julgamentos"
+                else:
+                    # backoff crescente: libera a frente da fila JÁ, antes de aposentar,
+                    # pra que as hipóteses atrás sejam olhadas nas próximas batidas.
+                    meta["check_after"] = self._plus_seconds(
+                        self._now(), self.check_after_seconds * tentativas)
+                m.metadata = meta
+                self.store.add([m])  # upsert (mesmo id)
+                continue
             if verdict in ("confirmed", "refuted"):
                 meta = dict(m.metadata or {})
                 meta["status"] = verdict

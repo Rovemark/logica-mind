@@ -21,9 +21,13 @@ class FakeLLM:
     name = "fake"
 
     def __init__(self, hyps=None, verdict="confirmed", raise_on_json=False):
+        # `verificacao` é OBRIGATÓRIO desde o conserto do acervo travado: hipótese sem
+        # critério observável é descartada na entrada (ver test_hipotese_sem_criterio_*).
         self.hyps = hyps if hyps is not None else [
-            {"text": "usuário quer foto real", "confidence": 0.9},
-            {"text": "funil precisa de antes/depois", "confidence": 0.6},
+            {"text": "usuário quer foto real", "verificacao": "próximo criativo aprovado usa foto",
+             "confidence": 0.9},
+            {"text": "funil precisa de antes/depois", "verificacao": "CTR do passo 2 sobe 10%",
+             "confidence": 0.6},
         ]
         self.verdict = verdict
         self.raise_on_json = raise_on_json
@@ -110,3 +114,87 @@ def test_beat_publishes_confirmed_to_shared_cortex():
     Heartbeat(mind, check_after_seconds=0).beat()                   # dev confirms its hypotheses
     top = WorldInsights(store).top_for("luna")                      # luna wakes up knowing
     assert len(top) >= 1 and all(m.metadata["agent"] == "dev" for m in top)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# O ACERVO QUE TRAVOU — 16.304 hipóteses, 85% abertas, 97% já vencidas, a mais
+# antiga parada havia 5 semanas. Três defeitos somados; um teste para cada.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _hyp(store, ns, texto, check_after, status="open", tentativas=0):
+    """Injeta uma hipótese com vencimento controlado, como se viesse de batidas passadas."""
+    from logica_mind.types import Memory, MemoryLayer
+    import uuid as _u
+    m = Memory(
+        content=texto, namespace=ns, layer=MemoryLayer.SEMANTIC,
+        id=f"hyp::{ns}::{_u.uuid4().hex[:8]}", importance=0.5,
+        metadata={"continuity": "heartbeat", "kind": "hypothesis", "status": status,
+                  "confidence": 0.5, "created_at": "2026-06-23T15:00:00Z",
+                  "judge_attempts": tentativas, "check_after": check_after},
+    )
+    store.add([m])
+    return m
+
+
+def test_fila_ordena_por_vencimento_nao_por_insercao():
+    """DEFEITO 1: store.all() devolve em ordem de INSERÇÃO e o [:max_corrections]
+    pegava sempre as mesmas primeiras — as de trás nunca eram olhadas."""
+    mind = mk(NoLLM())
+    # inserida PRIMEIRO, mas vence por ÚLTIMO
+    _hyp(mind.store, "astro", "recente", "2026-07-01T00:00:00Z")
+    _hyp(mind.store, "astro", "antiga", "2026-06-01T00:00:00Z")
+    fila = Heartbeat(mind)._open_due_hypotheses()
+    assert [m.content for m in fila] == ["antiga", "recente"], \
+        "a fila tem de sair por vencimento; em ordem de inserção a antiga nunca chega a ser julgada"
+
+
+def test_open_repetido_faz_backoff_e_depois_aposenta():
+    """DEFEITO 2: veredito 'open' deixava a hipótese intacta — mesmo check_after já
+    vencido → voltava ao topo na batida seguinte e era rejulgada para sempre."""
+    mind = mk(FakeLLM(verdict="open"))
+    hb = Heartbeat(mind, check_after_seconds=3600, max_judge_attempts=3)
+    m = _hyp(mind.store, "astro", "irrespondível", "2020-01-01T00:00:00Z")
+
+    hb._self_correct("ctx", "obs")                       # 1ª: backoff, sai da frente
+    meta = mind.store.all("astro")[0].metadata
+    assert meta["judge_attempts"] == 1 and meta["status"] == "open"
+    assert meta["check_after"] > "2026", "sem empurrar o vencimento ela reaparece no topo já já"
+    assert hb._open_due_hypotheses() == [], "com backoff ela NÃO pode estar vencida agora"
+
+    for _ in range(2):                                   # força as tentativas restantes
+        mm = mind.store.all("astro")[0]
+        mm.metadata = {**mm.metadata, "check_after": "2020-01-01T00:00:00Z"}
+        mind.store.add([mm])
+        hb._self_correct("ctx", "obs")
+
+    meta = mind.store.all("astro")[0].metadata
+    assert meta["status"] == "unfalsifiable", "3 vereditos 'open' = não é falsificável, aposenta"
+    assert hb._open_due_hypotheses() == [], "aposentada não pode mais consumir vaga de correção"
+
+
+def test_retire_stale_drena_backlog_sem_gastar_llm():
+    """DEFEITO 3: backlog herdado só sairia da frente após semanas de julgamento PAGO.
+    Vencida há tempo demais é aposentada por comparação de data, custo zero."""
+    mind = mk(NoLLM())                                   # sem LLM: prova que não há chamada
+    _hyp(mind.store, "astro", "podre", "2020-01-01T00:00:00Z")
+    _hyp(mind.store, "astro", "fresca", "2099-01-01T00:00:00Z")
+    hb = Heartbeat(mind, stale_after_seconds=7 * 24 * 3600)
+    assert hb._retire_stale() == 1
+    por_texto = {m.content: (m.metadata or {}).get("status") for m in mind.store.all("astro")}
+    assert por_texto["podre"] == "unfalsifiable"
+    assert por_texto["fresca"] == "open", "só a vencida há muito tempo é aposentada"
+
+
+def test_hipotese_sem_criterio_de_verificacao_e_descartada():
+    """A raiz de 85% travado: especulação psicológica não tem observação que a feche,
+    então o juiz responde 'open' para sempre. Sem `verificacao`, não entra."""
+    mind = mk(FakeLLM(hyps=[
+        {"text": "André está em modo de validação crítica", "confidence": 0.9},   # sem critério
+        {"text": "o CAC do canal X cai abaixo de R$300",
+         "verificacao": "relatório de CAC do mês seguinte", "confidence": 0.8},
+    ]))
+    rep = Heartbeat(mind, check_after_seconds=3600).beat()
+    assert rep["hypotheses"] == 1, "a psicológica tem de ser recusada na entrada"
+    guardadas = [m.content for m in mind.store.all("astro")
+                 if (m.metadata or {}).get("kind") == "hypothesis"]
+    assert guardadas == ["o CAC do canal X cai abaixo de R$300"]
