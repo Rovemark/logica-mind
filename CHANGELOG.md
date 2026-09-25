@@ -3,6 +3,18 @@
 All notable changes to Logica Mind. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are date-stamped.
 
+## [0.5.2] — 2026-08-29
+
+### Logica Life como memória viva
+- Páginas, bases, tarefas, projetos, propriedades, documentos, relações e
+  comentários abertos do Life passam a compor a memória semântica do owner.
+- Autosaves do mesmo recurso são coalescidos; uma edição substitui os fragmentos
+  anteriores e lixeira/exclusão remove a memória derivada.
+- O servidor inicia a ponte assíncrona e faz backfill idempotente do conteúdo já
+  existente, sem colocar embeddings no caminho das requisições do editor.
+- Todo registro derivado carrega `ownerId`; o recall dos agentes consulta o
+  namespace `vida` sem atravessar identidades.
+
 ## [Unreleased] — the continuity substrate
 
 ### Added

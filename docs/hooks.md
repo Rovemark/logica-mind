@@ -22,7 +22,7 @@ Logica Mind installs one hook per event. Each maps to a handler in `logica_mind/
 | --- | --- | --- |
 | `SessionStart` | Injects a brief of what's known about you plus highlights from past sessions. | Yes |
 | `UserPromptSubmit` | Recalls memory relevant to your prompt, then saves the prompt. | Yes |
-| `Stop` | Saves what the assistant did on the last turn. | No |
+| `Stop` | Reconciles the whole turn (yours + the assistant's) against the store, recovering anything an earlier hook missed. | No |
 | `PreCompact` | Consolidates memory before the context window is compacted. | No |
 
 ### SessionStart
@@ -41,11 +41,17 @@ This hook recalls *before* it captures. If it saved your prompt first, that same
 2. Log the prompt as an `episodic` `user` turn — unless it is byte-identical to the last user turn in this session (the "continue" / "fix it" repeat pattern is skipped via `_is_duplicate_of_last`).
 3. Return the recalled context for the host to inject.
 
-### Stop
+### Stop — the self-healing reconcile
 
-When a turn ends, the hook reads the host's transcript (`transcript_path`), pulls the last assistant message text via `_last_assistant_text` (capped at 4000 characters), and logs it as an `episodic` `assistant` turn. It injects nothing.
+When a turn ends, the hook reads the host's transcript (`transcript_path`) and **reconciles it against the store**: it walks the recent turns (both yours and the assistant's) and logs every one that is not already captured, deduplicated by normalized content so nothing is stored twice. It injects nothing.
+
+This is what makes capture robust. `UserPromptSubmit` captures your prompt live, but it is fire-and-forget — if the store is briefly unreachable, or you enabled the hooks halfway through a session, that turn would otherwise be lost forever. Because `Stop` re-reads the transcript and captures whatever is missing, a turn that slipped through is picked up at the end of the turn instead of disappearing. If a capture fails, the rest is left for the next `Stop` to retry.
 
 Both `UserPromptSubmit` and `Stop` tag what they capture with a `source` of `claude-code` by default, so the dashboard can attribute each turn to the client that produced it. Override the label with `LOGICA_MIND_SOURCE` when running under a different host.
+
+#### Failures are logged, not swallowed
+
+Capture is fail-soft by design (a memory hiccup must never break your session), which used to mean a broken capture path lost memory *silently*. Now every capture failure is appended to `~/.logica-mind/capture.log` with a timestamp, so a misconfigured store or embedder is visible instead of mysterious. The session still proceeds uninterrupted.
 
 ### PreCompact — surviving compaction
 
@@ -124,6 +130,20 @@ echo '{"prompt": "what timezone does Maya work in?", "session_id": "s1", "cwd": 
 ```
 
 If there is anything relevant in memory, the command prints the host's hook-output JSON; otherwise it prints nothing.
+
+## Importing past sessions (backfill)
+
+The `Stop` reconcile heals an *active* session, but a session that finished before you installed the hooks never ran them at all, so its memory was never captured. `backfill` imports those past transcripts:
+
+```bash
+# one transcript
+logica-mind backfill ~/.claude/projects/<project>/<session>.jsonl
+
+# or a whole folder, scanned recursively
+logica-mind backfill ~/.claude/projects
+```
+
+It reads each transcript, lands every user and assistant turn in the namespace the live hook *would* have used (it reads the working directory recorded in the transcript), and skips tool-result turns, slash commands and host-injected blocks. It is **idempotent and dedup-aware**: re-running only adds turns that are not already stored, so it is safe to point at your whole history and run it again later. Pass `--namespace` to force a destination, or `--db` to target a specific store.
 
 ## The per-project shared store
 

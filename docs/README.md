@@ -17,6 +17,7 @@ New here? Start with **[Installation](installation.md)** → **[Quickstart](quic
 ### Building blocks
 - [Stores](stores.md) — the 7 storage backends and when to use each
 - [Embeddings & reranking](embeddings-and-reranking.md) — embedders and rerankers
+- [Retrieval profiles, injection safety & lifecycle](retrieval-and-injection.md) — profiles, hooks-first hardening, pin/snooze, type-aware forgetting, neighbor evolution
 - [Knowledge graph](knowledge-graph.md) — the temporal graph, entities, point-in-time
 - [Graph intelligence](graph-intelligence.md) — path-finding, bridges, suggested links, layers, centrality
 - [Fact categorization](categorization.md) — categories + the 34-dimension life/work taxonomy
@@ -30,12 +31,17 @@ New here? Start with **[Installation](installation.md)** → **[Quickstart](quic
 - [Auto-capture hooks](hooks.md) — capture memory automatically across a session
 - [Integrations & SDKs](integrations.md) — LangChain, LlamaIndex, the provider adapter, the TypeScript SDK
 - [Dashboard](dashboard.md) — the self-hosted web UI
-- [Internationalization](internationalization.md) — the 12 UI languages (incl. RTL Arabic)
+- [Internationalization](internationalization.md) — the 15 UI languages (incl. RTL Arabic)
 - [CLI](cli.md) — the `logica-mind` command line
 
 ### Operations
 - [Portability & privacy](portability-and-privacy.md) — signed bundles, GDPR erase, PII redaction
 - [API reference](api-reference.md) — every public method of the `LogicaMind` class
+
+### Benchmarks
+- [Benchmarks for agent memory](../BENCHMARKS.md) — LoCoMo results, why we win,
+  and a sourced comparison with Mem0, Zep, Letta and LangMem
+- [Reproduce the runs](../bench/README.md) — the two harnesses (recall@k and J score)
 
 ---
 
