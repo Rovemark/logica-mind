@@ -1,7 +1,7 @@
-import { LayoutGrid, BarChart3, Layers, Network, List, CalendarDays, MessagesSquare, Sparkles, Telescope, Users, History, FolderGit2, Moon, Boxes } from "lucide-react";
+import { LayoutGrid, BarChart3, Layers, Network, List, CalendarDays, MessagesSquare, Sparkles, Telescope, Users, History, FolderGit2, Moon, Boxes, Database } from "lucide-react";
 import type { ComponentType } from "react";
 
-export type ViewKey = "overview" | "analytics" | "context" | "graph" | "memories" | "calendar" | "sessions" | "user" | "profile" | "peers" | "observations" | "changes" | "insights" | "workspace" | "dreams" | "settings";
+export type ViewKey = "overview" | "analytics" | "context" | "graph" | "memories" | "calendar" | "sessions" | "user" | "profile" | "peers" | "observations" | "changes" | "insights" | "workspace" | "banco" | "dreams" | "settings";
 export type CatKey = "explore" | "memory" | "intelligence" | "system";
 
 export interface ViewDef { key: ViewKey; label: string; Icon: ComponentType<{ size?: number; strokeWidth?: number }>; cat: CatKey; }
@@ -23,6 +23,10 @@ export const VIEWS: ViewDef[] = [
   { key: "insights", label: "Insights", Icon: Sparkles, cat: "intelligence" },
   { key: "peers", label: "Peers", Icon: Users, cat: "intelligence" },
   // system
+  // O Banco de dados é a SEGUNDA camada do Mind, não um acessório: a Memória guarda
+  // o que significa, ele guarda o que é. Fica em "system" junto do Workspace porque
+  // é infraestrutura do organismo, não conteúdo de memória.
+  { key: "banco", label: "Database", Icon: Database, cat: "system" },
   { key: "workspace", label: "Workspace", Icon: FolderGit2, cat: "system" },
   { key: "dreams", label: "Dreams", Icon: Moon, cat: "system" },
 ];

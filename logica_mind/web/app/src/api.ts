@@ -78,6 +78,54 @@ const j = async (u: string) => {
 };
 const nsq = (ns: string) => `namespace=${encodeURIComponent(ns)}`;
 
+/* ── camada BANCO DE DADOS (/api/banco/*) ─────────────────────────────────────
+   A segunda camada do Mind: a Memória guarda o que SIGNIFICA, o Banco de dados
+   guarda o que É. O envelope é {ok, dados} e não o objeto cru, então tem um
+   desembrulhador próprio. */
+export interface BancoColuna { nome: string; tipo: string; nulo: boolean }
+export interface BancoTabela {
+  nome: string; total: number; minhas: number | null; escopada: boolean;
+  tamanho: string; colunas: BancoColuna[]; esquema?: string;
+}
+export type Esquema = "banco" | "sistema";
+export interface BancoLinhas {
+  nome: string; colunas: string[]; linhas: unknown[][];
+  total: number; limite: number; desloc: number; escopada: boolean;
+  esquema?: string; dono?: boolean; somente_leitura?: boolean;
+}
+export interface BancoIndice {
+  nome: string; tabela: string; leituras: number; tamanho: string;
+  valido: boolean; definicao: string;
+}
+export interface BancoSaude {
+  ligado: boolean;
+  pool: { em_uso: number; disponivel: number; max: number; esperando: number };
+  slots_livres: number; slots_max: number; latencia_ms: number;
+}
+export interface BancoPendente {
+  id: number; tipo: string; payload: Record<string, unknown>;
+  criado_em: string | null; processado_em: string | null;
+  tentativas: number; erro: string | null;
+}
+
+const jb = async (u: string) => {
+  const r = await fetch(u);
+  const c = await r.json().catch(() => ({}));
+  // O envelope diz o erro em português; propagar o {status} cru esconderia o motivo.
+  if (!r.ok || c?.ok === false) throw new Error(c?.erro?.msg || `${r.status} ${u}`);
+  return c.dados;
+};
+
+export const banco = {
+  saude: (): Promise<BancoSaude> => jb(`/api/banco/saude`),
+  tabelas: (esquema: Esquema = "banco"): Promise<BancoTabela[]> =>
+    jb(`/api/banco/tabelas?esquema=${esquema}`),
+  tabela: (nome: string, limite = 50, desloc = 0, esquema: Esquema = "banco"): Promise<BancoLinhas> =>
+    jb(`/api/banco/tabela?nome=${encodeURIComponent(nome)}&limite=${limite}&desloc=${desloc}&esquema=${esquema}`),
+  indices: (): Promise<BancoIndice[]> => jb(`/api/banco/indices`),
+  pendentes: (): Promise<BancoPendente[]> => jb(`/api/banco/pendentes`),
+};
+
 export const api = {
   namespaces: (): Promise<{ namespaces: NsItem[] }> => j(`/api/namespaces`),
   stats: (ns: string): Promise<{ namespace: string; stats: Stats }> => j(`/api/stats?${nsq(ns)}`),

@@ -19,6 +19,7 @@ import hmac
 import json
 import os
 import re
+import sys
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor
@@ -323,6 +324,26 @@ _HERE = os.path.dirname(__file__)
 _DIST = os.path.join(_HERE, "dist")          # built React/Vite app (preferred)
 _ALL = ("", "__all__", "*", "all")
 _NS_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")   # a well-formed namespace id
+
+# ── camada BANCO DE DADOS ───────────────────────────────────────────────────────────
+# O Mind ganhou uma segunda camada, com contrato próprio: a Memória guarda o que
+# SIGNIFICA (semelhança, dedup a 0.92, curva de esquecimento) e o Banco de dados guarda o
+# que É (tabela, filtro exato, transação, nunca deduplica, nunca esquece).
+#
+# O despacho entra no COMEÇO do do_GET/do_POST, antes da cadeia de ifs deste arquivo,
+# e o módulo devolve None quando o caminho não é dele. É um ramo, não 800 linhas.
+#
+# Import preguiçoso e tolerante: appliance sem psycopg tem que subir com a memória
+# funcionando e o Banco de dados devolvendo 503, nunca em laço de reinício.
+_banco = None
+_banco_erro = None
+_ponte = None
+_ponte_thread = None
+try:
+    from ..banco import servico as _banco   # noqa: E402
+    from ..banco import ponte as _ponte     # noqa: E402
+except Exception as _e:                            # pragma: no cover
+    _banco_erro = repr(_e)
 _MIME = {
     ".html": "text/html; charset=utf-8", ".js": "application/javascript",
     ".mjs": "application/javascript", ".css": "text/css", ".json": "application/json",
@@ -405,6 +426,47 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             raise _Http400(f"invalid layer '{layer}' (expected one of {sorted(_LAYER_VALUES)})")
         return [MemoryLayer(layer)]
 
+    def _multiuser():
+        return os.environ.get("LOGICAOS_MULTIUSER", "").lower() in ("1", "true", "yes")
+
+    def _scope_values(owner=None, project=None, *, required=False):
+        owner = str(owner or "").strip()
+        project = str(project or "").strip()
+        if len(owner) > 160 or len(project) > 300 or any(ord(ch) < 32 for ch in owner + project):
+            raise _Http400("invalid owner/project scope")
+        if required and not owner:
+            raise _Http400("owner scope required in multiuser mode (use owner or ownerId)")
+        return {k: v for k, v in (("ownerId", owner), ("project", project)) if v}
+
+    def _write_scope(body):
+        md = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+        owner = body.get("ownerId") or body.get("owner") or md.get("ownerId") or md.get("owner_id")
+        project = body.get("project") or md.get("project") or md.get("project_id")
+        return _scope_values(owner, project, required=_multiuser())
+
+    def _write_metadata(body):
+        md = dict(body.get("metadata")) if isinstance(body.get("metadata"), dict) else {}
+        md.pop("owner_id", None)
+        md.pop("project_id", None)
+        md.update(_write_scope(body))
+        return md
+
+    def _read_scope(qs):
+        return _scope_values(
+            first(qs, "owner") or first(qs, "ownerId"),
+            first(qs, "project") or first(qs, "projectId"),
+            required=_multiuser(),
+        )
+
+    _MULTIUSER_SAFE_POST = {
+        "/api/remember", "/api/add", "/api/log", "/api/forget",
+        "/api/ingest", "/api/record", "/api/heartbeat/beat", "/api/mcp/dispatch",
+    }
+    _MULTIUSER_SAFE_GET = {
+        "/api/health", "/api/namespaces", "/api/recall", "/api/context",
+        "/api/memories", "/api/predict", "/api/graph",
+    }
+
     def _names(ns, is_all):
         """The namespaces a read should span: all of them in __all__ mode, else one."""
         return mind.store.namespaces() if is_all else [ns]
@@ -470,6 +532,18 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 return self._bearer_ok()
             return self._authed()
 
+        def _company_gateway(self) -> bool:
+            """Deck autenticado falando pelo tenant único deste appliance.
+
+            A capability não desliga o multiusuário global: exige loopback, o Bearer privado do
+            próprio Mind e uma marca que só o gateway do Deck envia. Assim as páginas analíticas
+            antigas continuam disponíveis para a memória institucional, enquanto toda chamada
+            externa permanece owner-scoped e fail-closed.
+            """
+            return bool(self.client_address and self.client_address[0] in _LOOPBACK
+                        and self._bearer_ok()
+                        and self.headers.get("X-LogicaOS-Company-Mind", "") == "1")
+
         def _cors(self):
             # the server binds loopback only, so a permissive ACAO is safe and lets
             # a same-host dashboard (e.g. http://localhost:3001) fetch /api/* and
@@ -519,6 +593,26 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     _OPS["errors"] += 1
                 self._t0 = None
 
+        def _banco(self, metodo, path, qs, body):
+            """Ponte para a camada Banco de dados. Toda a contenção (chave de desligamento,
+            semáforo de admissão, pool próprio, prazo no banco) mora lá; aqui só passa
+            a identidade e traduz a resposta."""
+            if _banco is None:
+                return self._json({"ok": False, "erro": {"codigo": 503,
+                                   "msg": f"camada Banco de dados indisponível: {_banco_erro}"}}, 503)
+            try:
+                r = _banco.despacha(metodo, path, qs, body,
+                                    self.headers.get("Authorization", ""),
+                                    token or "", _PUBLIC_READ,
+                                    de_loopback=self.client_address[0] in _LOOPBACK)
+            except Exception as e:   # nunca deixar a camada nova derrubar o worker
+                import traceback, sys as _s
+                traceback.print_exc(file=_s.stderr)
+                return self._json({"ok": False, "erro": {"codigo": 500, "msg": repr(e)}}, 500)
+            if r is None:
+                return self._json({"error": "not found"}, 404)
+            return self._json(r.corpo, r.codigo)
+
         def _body(self) -> dict:
             try:
                 n = int(self.headers.get("Content-Length", 0))
@@ -535,7 +629,14 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             path = parsed.path
             if not allow_writes:
                 return self._json({"error": "writes disabled"}, 403)
-            if _PUBLIC_READ:
+            # O Banco possui um portão próprio que, além do token global legado,
+            # reconhece a credencial curta `life-v1.<owner>...` emitida pela Life.
+            # Passar essa rota pelo portão genérico `_can_write()` antes de `_banco`
+            # descartava o owner delegado: GET funcionava, POST voltava 401 e a UI
+            # parecia salvar até recarregar. Não abrimos escrita aqui; apenas deixamos
+            # o autenticador mais estrito e owner-scoped do Banco decidir.
+            is_banco = path.startswith("/api/banco/")
+            if _PUBLIC_READ and not is_banco:
                 # public demo: reads are open but writes must carry an explicit
                 # bearer token — loopback is NOT trusted here, because a reverse
                 # proxy (HF Spaces, nginx…) forwards traffic and can appear as a
@@ -544,12 +645,20 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 if not (token and auth.startswith("Bearer ")
                         and hmac.compare_digest(auth[7:], token)):
                     return self._json({"error": "read-only public deployment"}, 403)
-            elif not self._can_write():
+            elif not is_banco and not self._can_write():
                 # WRITE gate: when LOGICA_MIND_TOKEN is set, a valid bearer token is
                 # required even from loopback (a same-host process without the token
                 # can't mutate memory). Token-less deployments keep loopback trust.
                 return self._json({"error": "unauthorized"}, 401)
             body = self._body()
+            # REGISTRO antes da validação de namespace: o Banco de dados não tem namespace e
+            # seria recusado com "invalid namespace" logo abaixo. Depois do portão de
+            # escrita, porque escrita é escrita nas duas camadas.
+            if is_banco:
+                return self._banco(self.command, path, {}, body)
+            if (_multiuser() and not self._company_gateway()
+                    and path.startswith("/api/") and path not in _MULTIUSER_SAFE_POST):
+                return self._json({"error": "endpoint is not owner-scoped in multiuser mode"}, 403)
             ns = (body.get("namespace") or mind.namespace)
             # the caller is already authorized (loopback or bearer token); the known
             # set just catches cross-tenant typos. A well-formed NEW namespace is
@@ -560,7 +669,9 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             target = mind.for_namespace(ns)
             try:
                 if path == "/api/remember":
-                    created = target.remember(str(body.get("text", "")), session=body.get("session"))
+                    scope = _write_scope(body)
+                    created = target.remember(str(body.get("text", "")), session=body.get("session"),
+                                              metadata=_write_metadata(body) or None)
                     self._json({"stored": [c.content for c in created], "count": len(created)})
                 elif path == "/api/self-model":
                     # continuity substrate: merge a patch into the agent's self-model.
@@ -570,9 +681,11 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # admin override (identity correction), used only by the seed-identity tool.
                     from ..continuity import SelfModel, zone_guard
                     from ..continuity.guard import SelfRewriteBlocked
+                    scope = _write_scope(body)
                     _guard = None if body.get("seed") else zone_guard(block_zones=("red",))
                     try:
-                        saved = SelfModel(target.store, ns, guard=_guard).save(body.get("patch") or {})
+                        saved = SelfModel(target.store, ns, guard=_guard,
+                                          metadata_scope=scope).save(body.get("patch") or {})
                         self._json({"namespace": ns, "version": saved["version"], "self_model": saved})
                     except SelfRewriteBlocked as exc:
                         self._json({"namespace": ns, "blocked": True, "zone": "red", "reason": str(exc)}, code=403)
@@ -586,6 +699,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 elif path == "/api/heartbeat/beat":
                     # continuity substrate: run one cognitive beat for this agent
                     from ..continuity import Heartbeat, zone_guard
+                    scope = _write_scope(body)
                     beat_mind = target  # `target` is a fresh for_namespace() view
                     if not getattr(target.llm, "available", False):
                         # give the beat an LLM (auto-detected from env) so it can
@@ -600,7 +714,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                             pass
                     # protect identity: block re-identification (red zone) for every
                     # agent AND clone — a clone evolves beliefs/skills but stays its mentor.
-                    self._json(Heartbeat(beat_mind, guard=zone_guard(block_zones=("red",))).beat())
+                    self._json(Heartbeat(beat_mind, guard=zone_guard(block_zones=("red",)),
+                                         metadata_scope=scope).beat())
                 elif path == "/api/mcp/dispatch":
                     # CLUSTER MODE: a remote `logica-mind mcp` (LOGICA_MIND_URL set)
                     # forwards memory tools here — full 32-tool parity from one
@@ -612,7 +727,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         return self._json({"error": "name required"}, 400)
                     if tool in LOCAL_TOOLS:
                         return self._json({"error": f"{tool} runs on the client machine, not the brain"}, 400)
-                    srv = MCPServer(target, remote_url="")   # never re-forward (no recursion)
+                    scope = _write_scope(body)
+                    srv = MCPServer(target, remote_url="", metadata_scope=scope)   # never re-forward (no recursion)
                     srv.source = str(body.get("source") or "remote-mcp")
                     payload = srv._dispatch(tool, body.get("args") or {})
                     self._json({"result": payload})
@@ -625,18 +741,29 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     kind = str(body.get("kind") or "memory")
                     if not text:
                         return self._json({"error": "text required"}, 400)
+                    scope = _write_scope(body)
                     has_llm = bool(getattr(target.llm, "available", False))
                     if kind == "observation":
-                        mem = target.observe_user(text)
+                        # O dialectic user model é namespace-global. Em multiuser,
+                        # uma observação vira memória USER owner-scoped, não perfil compartilhado.
+                        if scope:
+                            created = target.remember(text, layer=MemoryLayer.USER, extract=False,
+                                                     metadata=_write_metadata(body))
+                            mem = created[0] if created else None
+                        else:
+                            mem = target.observe_user(text)
                         items = ([{"content": mem.content, "layer": "user", "op": "new",
                                    "superseded": None, "category": None}] if mem else [])
                         self._json({"ok": True, "namespace": ns, "kind": kind, "llm": has_llm,
                                     "created": items, "graph_edges": 0,
                                     "user_updated": bool(mem), "deduped": not bool(mem)})
                     else:
-                        before = len(target.graph.edges()) if has_llm else 0
-                        created = target.remember(text, build_graph=has_llm, session=body.get("session"))
-                        after = len(target.graph.edges()) if has_llm else 0
+                        # O grafo ainda é namespace-global; memória escopada não o muta.
+                        build_graph = has_llm and not bool(scope)
+                        before = len(target.graph.edges()) if build_graph else 0
+                        created = target.remember(text, build_graph=build_graph, session=body.get("session"),
+                                                 metadata=_write_metadata(body) or None)
+                        after = len(target.graph.edges()) if build_graph else 0
                         items = []
                         for mm in created:
                             layer = str(getattr(mm.layer, "value", mm.layer))
@@ -657,14 +784,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # carry the originating CHANNEL (telegram/whatsapp/voice/dashboard/
                     # claude-code/synapses…) as structured metadata so memories know
                     # where they came from, not just a text prefix.
-                    _md = dict(body["metadata"]) if isinstance(body.get("metadata"), dict) else {}
+                    _md = _write_metadata(body)
                     if body.get("channel"):
                         _md["channel"] = body.get("channel")
                     m = target.log(str(body.get("text", "")), role=body.get("role"),
                                    session=body.get("session"), metadata=_md or None)
                     self._json({"ok": bool(m), "id": m.id if m else None})
                 elif path == "/api/forget":
-                    self._json({"deleted": target.forget(memory_id=body.get("id"), query=body.get("query"))})
+                    scope = _write_scope(body)
+                    self._json({"deleted": target.forget(
+                        memory_id=body.get("id"), query=body.get("query"),
+                        contains=body.get("contains"),
+                        metadata_filter=scope or None,
+                    )})
                 elif path == "/api/entity/alias":
                     # rename/merge an entity (non-destructive): variant resolves to
                     # canonical from now on, and edges() canonicalizes at read time —
@@ -699,8 +831,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                               str(body.get("text", "")))
                     self._json({"ok": bool(mem), "id": mem.id if mem else None})
                 elif path == "/api/ingest":
+                    scope = _write_scope(body)
                     self._json(target.ingest_conversation(body.get("messages") or [], session=body.get("session"),
-                                                          source=body.get("source"), channel=body.get("channel")))
+                                                          source=body.get("source"), channel=body.get("channel"),
+                                                          metadata=_write_metadata(body) or None, derive=not bool(scope)))
                 elif path == "/api/dream":
                     # run a sleep-time consolidation cycle for this namespace (inductive
                     # graph inference + distillation). Returns the dream report. Meant to
@@ -777,6 +911,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     title = str(body.get("title", "")).strip()
                     if not title:
                         return self._json({"error": "title required"}, 400)
+                    scope = _write_scope(body)
                     rec = target.record_session(
                         title=title,
                         session_id=body.get("session_id") or body.get("session"),
@@ -787,6 +922,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         tags=body.get("tags") or [],
                         summary=body.get("summary"),
                         store_contributions=bool(body.get("store_contributions", True)),
+                        metadata=_write_metadata(body) or None,
                     )
                     md = rec.metadata or {}
                     self._json({"ok": True, "id": rec.id, "session": md.get("session")})
@@ -862,10 +998,20 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             # any /api read that can return memory content requires auth on a
             # non-loopback caller (loopback trusted); namespace list is the only
             # anonymous /api endpoint
-            if (path.startswith("/api/") and path not in _PUBLIC_GET
-                    and not _PUBLIC_READ and not self._authed()):
+            is_public_get = path in _PUBLIC_GET and not (_multiuser() and path == "/api/namespaces")
+            public_read_allowed = _PUBLIC_READ and not _multiuser()
+            if (path.startswith("/api/") and not is_public_get
+                    and not public_read_allowed and not self._authed()):
                 return self._json({"error": "unauthorized"}, 401)
+            # REGISTRO: exige Bearer PRÓPRIO, inclusive sob LOGICA_MIND_PUBLIC=1 e
+            # inclusive de loopback. O modo demo abre todo GET /api do Mind, e ali
+            # dentro moram finanças pessoais e diário — não entram nesse acordo.
+            if path.startswith("/api/banco/"):
+                return self._banco("GET", path, qs, {})
             try:
+                if (_multiuser() and not self._company_gateway()
+                        and path.startswith("/api/") and path not in _MULTIUSER_SAFE_GET):
+                    return self._json({"error": "endpoint is not owner-scoped in multiuser mode"}, 403)
                 if path in ("/", "/index.html"):
                     self._send(200, _dist_index().encode("utf-8"), "text/html; charset=utf-8")
 
@@ -883,7 +1029,30 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         self._send(200, _dist_index().encode("utf-8"), "text/html; charset=utf-8")
 
                 elif path == "/api/namespaces":
-                    self._json({"namespaces": mind.list_namespaces()})
+                    # O gateway corporativo do Deck ja autenticou a pessoa e
+                    # autorizou o modulo Mind. Ele representa a memoria
+                    # institucional inteira do appliance, portanto precisa da
+                    # mesma contagem integral usada por /api/stats. Sem esta
+                    # excecao caimos no ramo owner-scoped abaixo, que materializa
+                    # no maximo 10.000 linhas por namespace e transforma o total
+                    # da navegacao numa soma truncada.
+                    if not _multiuser() or self._company_gateway():
+                        self._json({"namespaces": mind.list_namespaces()})
+                    else:
+                        scope = _read_scope(qs)
+                        ff = getattr(mind.store, "filter_memories", None)
+                        out = []
+                        if callable(ff):
+                            for item in mind.list_namespaces():
+                                rows = ff(item["namespace"], None, None, None, None,
+                                          10000, 0, False, scope)
+                                if not rows:
+                                    continue
+                                stats = {layer.value: 0 for layer in MemoryLayer}
+                                for mem in rows:
+                                    stats[mem.layer.value] = stats.get(mem.layer.value, 0) + 1
+                                out.append({"namespace": item["namespace"], "total": len(rows), "stats": stats})
+                        self._json({"namespaces": out})
 
                 elif path == "/api/stats":
                     if is_all:
@@ -932,12 +1101,20 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     q = first(qs, "q")
                     limit = _int(qs, "limit", 12)
                     layers = layers_of(qs)
+                    scope = _read_scope(qs)
+                    session = first(qs, "session") or first(qs, "sessionId")
+                    if session:
+                        if len(session) > 300 or any(ord(ch) < 32 for ch in session):
+                            raise _Http400("invalid session scope")
+                        scope["session"] = session
                     if not q:
                         results = []
                     elif is_all:
-                        results = mind.recall_across(q, layers=layers, limit=limit)
+                        results = mind.recall_across(q, layers=layers, limit=limit,
+                                                     metadata_filter=scope or None)
                     else:
-                        results = mind.for_namespace(ns).recall(q, layers=layers, limit=limit)
+                        results = mind.for_namespace(ns).recall(q, layers=layers, limit=limit,
+                                                                metadata_filter=scope or None)
                     self._json({"query": q, "results": [
                         {"score": round(r.score, 4), "components": r.components,
                          "memory": _strip(r.memory.to_dict())}
@@ -1000,6 +1177,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     q = first(qs, "q") or ""
                     budget = _int(qs, "budget", 1200)
                     profile = first(qs, "profile") or "balanced"
+                    scope = _read_scope(qs)
                     if is_all:
                         # context() is per-namespace; show the busiest one so the
                         # block is populated, and let the UI switch namespaces.
@@ -1008,10 +1186,15 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     else:
                         tgt = ns
                     sub = mind.for_namespace(tgt)
-                    block = sub.context(q, token_budget=budget, profile=profile) if q.strip() else ""
+                    block = sub.context(
+                        q, token_budget=budget, profile=profile,
+                        metadata_filter=scope or None,
+                    ) if q.strip() else ""
                     # the candidate pool is only for the dashboard's ranked-list UI;
                     # skip that second recall on the speed path (hook injection)
-                    cands = sub.recall(q, limit=20) if (q.strip() and profile != "speed") else []
+                    cands = sub.recall(
+                        q, limit=20, metadata_filter=scope or None,
+                    ) if (q.strip() and profile != "speed") else []
                     tokens = mind._approx_tokens(block) if block else 0
                     items = []
                     for r in cands:
@@ -1109,12 +1292,13 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     session = first(qs, "session")     # optional: scope to one session
                     dim = first(qs, "dimension")       # optional: a life-dimension filter
                     category = first(qs, "category")   # optional: an exact-category filter
+                    scope = _read_scope(qs)
                     lim = int(first(qs, "limit", "200") or 200)
                     off = int(first(qs, "offset", "0") or 0)
                     pager = getattr(mind.store, "page", None)
                     # Fast path: no metadata filters → SQL LIMIT/OFFSET (newest first),
                     # materializing ~200 rows instead of every row in every namespace.
-                    if callable(pager) and not (session or dim or category):
+                    if callable(pager) and not (session or dim or category or scope):
                         mems = [m for m in pager(None if is_all else ns, layers, lim, off)
                                 if not _is_internal(m)]
                         self._json({"memories": [_strip(m.to_dict()) for m in mems]})
@@ -1125,7 +1309,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                         ff = getattr(mind.store, "filter_memories", None)
                         if callable(ff):
                             mems = [m for m in ff(None if is_all else ns, layers, dim, category,
-                                                  session, lim, off, False)
+                                                  session, lim, off, False, scope or None)
                                     if not _is_internal(m)]
                         else:
                             names = mind.store.namespaces() if is_all else [ns]
@@ -1140,6 +1324,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                     if dim and md.get("dimension") != dim:
                                         continue
                                     if category and md.get("category") != category:
+                                        continue
+                                    if any(md.get(key) != value for key, value in scope.items()):
                                         continue
                                     mems.append(m)
                             mems.sort(key=lambda m: m.created_at or "", reverse=True)
@@ -1203,6 +1389,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                                 "count": len(mems), "memories": [m.to_dict() for m in mems]})
 
                 elif path == "/api/graph":
+                    # O owner corporativo é obrigatório em multiusuário. O grafo é
+                    # compartilhado pela empresa; actor/session servem à auditoria,
+                    # não criam grafos paralelos para cada pessoa.
+                    _read_scope(qs)
                     hist = first(qs, "history", "1") == "1"
                     at = first(qs, "at") or None     # point-in-time view
                     lyr = first(qs, "layers")        # csv: relation,co_mention,semantic
@@ -1231,6 +1421,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     #   (sem entity)         → summary (quantas arestas causais existem)
                     # Read-only, aditivo, reusa o TemporalGraph (anti-redundância).
                     from ..causal import CausalModel
+                    _read_scope(qs)  # multiuser: owner explícito é obrigatório também neste read
                     cm = CausalModel(mind.for_namespace(ns).graph)
                     _ent = (first(qs, "entity") or first(qs, "cause") or "").strip()
                     _at = first(qs, "at") or None
@@ -1559,6 +1750,15 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # atrás do dream (all()/add()); aí o probe do client estoura → healthy()=false →
                     # o LogicaOS pula o LM e cai no vault. Contagem foi pra /api/namespaces. (fix Camada 0)
                     _h = {"ok": True, "store": getattr(mind.store, "name", "?")}
+                    # Também prova o backend efetivo sem consultar o banco. Em
+                    # appliance novo, uma dependência Postgres ausente fazia o
+                    # launcher cair para SQLite e ainda devolver health 200; o
+                    # instalador não tinha como distinguir memória oficial de
+                    # um fallback silencioso.
+                    if _h["store"] == "multi":
+                        _h["backends"] = [getattr(s, "name", "?") for s in getattr(mind.store, "stores", [])]
+                    else:
+                        _h["backends"] = [_h["store"]]
                     _lr = getattr(mind.store, "_last_read_at", None)
                     if _lr is not None:
                         import time as _t
@@ -1684,6 +1884,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
 
 def serve(mind, host: str = "127.0.0.1", port: int = 8420, open_browser: bool = True,
           allow_writes=None):
+    global _ponte_thread
     is_local = host in ("127.0.0.1", "::1", "localhost")
     token = os.environ.get("LOGICA_MIND_TOKEN")
     if allow_writes is None:
@@ -1700,6 +1901,14 @@ def serve(mind, host: str = "127.0.0.1", port: int = 8420, open_browser: bool = 
               "will return 401 (loopback callers keep working). Set LOGICA_MIND_TOKEN "
               "to use the dashboard remotely.")
     httpd = _BoundedHTTPServer((host, port), make_handler(mind, allow_writes=allow_writes, token=token))
+    # A ponte é assíncrona e fail-soft: indexa o conteúdo do Life sem colocar
+    # embedding/LLM no caminho de nenhuma requisição do editor. Antes ela existia,
+    # mas nunca era iniciada por servidor algum.
+    if _banco is not None and _ponte is not None and _ponte_thread is None:
+        try:
+            _ponte_thread = _ponte.iniciar_daemon(mind, _banco.pool())
+        except Exception as e:
+            print(f"[ponte] não iniciou; o Mind segue disponível: {e}", file=sys.stderr)
     url = f"http://{host}:{port}"
     n = len(mind.store.namespaces())
     print(f"🧠 Logica Mind dashboard → {url}  ({n} namespace{'s' if n != 1 else ''})")
