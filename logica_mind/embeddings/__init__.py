@@ -4,7 +4,7 @@ from .hashing import HashingEmbedder
 from .batched import BatchedEmbedder
 
 __all__ = ["Embedder", "HashingEmbedder", "BatchedEmbedder", "VoyageEmbedder",
-           "OpenAIEmbedder", "LocalEmbedder", "VoyageMultimodalEmbedder"]
+           "OpenAIEmbedder", "LocalEmbedder", "OnnxEmbedder", "VoyageMultimodalEmbedder"]
 
 
 def __getattr__(name):
@@ -12,6 +12,9 @@ def __getattr__(name):
     if name == "VoyageEmbedder":
         from .voyage import VoyageEmbedder
         return VoyageEmbedder
+    if name == "OnnxEmbedder":
+        from .onnx import OnnxEmbedder
+        return OnnxEmbedder
     if name == "OpenAIEmbedder":
         from .openai import OpenAIEmbedder
         return OpenAIEmbedder

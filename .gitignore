@@ -39,3 +39,8 @@ logica_mind/web/app/.vite/
 # never commit deps (incl. build symlinks)
 node_modules
 **/node_modules
+
+# Conjunto de dados do LoCoMo (o benchmark baixa sozinho) e caches/checkpoints gerados
+bench/data/
+# Artefato de build do TypeScript
+*.tsbuildinfo

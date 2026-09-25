@@ -16,6 +16,7 @@ from ..llm.base import LLM, NullLLM
 from .base import Extractor, Fact, ExtractOp
 from .noop import NoopExtractor
 from .taxonomy import prompt_guidance, DIM_IDS
+from .lang import detect_language
 
 _SYSTEM = (
     "You extract durable, atomic facts from a message for a long-term memory store. "
@@ -31,7 +32,10 @@ _SYSTEM = (
     'Use "noop" if the fact is already represented in existing memories. '
     "Extract only meaningful, lasting facts — skip greetings, filler and transient chatter. "
     "Be thorough: a single sentence often carries several facts across different dimensions. "
-    "If the message contains no durable fact, return [].\n\n"
+    "If the message contains no durable fact, return [].\n"
+    "LANGUAGE: write \"content\" and \"category\" in the SAME LANGUAGE as the message — "
+    "preserve the person's language, never translate it to English. (The \"dimension\" id "
+    "stays as-is from the list; it's a fixed key, not display text.)\n\n"
     + prompt_guidance()
 )
 _DIMS = set(DIM_IDS)
@@ -62,7 +66,14 @@ class LLMExtractor(Extractor):
         existing_block = "\n".join(
             f"- [{m.id}] {m.content}" for m in existing[: self.max_existing]
         ) or "(none)"
+        # deterministic language hint: name the language explicitly so a short or
+        # ambiguous sentence can't drift to English (the system prompt's generic
+        # "preserve the language" stays as the fallback when detection is unsure)
+        lang = detect_language(text)
+        lang_line = (f"The message is written in {lang}. Write every \"content\" and "
+                     f"\"category\" in {lang}.\n\n") if lang else ""
         prompt = (
+            f"{lang_line}"
             f"EXISTING MEMORIES:\n{existing_block}\n\n"
             f"NEW MESSAGE:\n{text}\n\n"
             "Extract the facts as JSON."
