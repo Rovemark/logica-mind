@@ -35,7 +35,7 @@ class InMemoryStore(Store):
     def delete(self, namespace: str, memory_id: str) -> bool:
         return self._data.get(namespace, {}).pop(memory_id, None) is not None
 
-    def all(self, namespace, layers=None) -> List[Memory]:
+    def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         return self._candidates(namespace, layers)
 
     def namespaces(self) -> List[str]:

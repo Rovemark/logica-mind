@@ -72,6 +72,7 @@ class Heartbeat:
         guard: Optional[Callable[..., bool]] = None,
         publish_min_confidence: float = 0.8,
         max_published: int = 3,
+        metadata_scope: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.mind = mind
         self.ns = mind.namespace
@@ -86,12 +87,15 @@ class Heartbeat:
         self.stale_after_seconds = stale_after_seconds
         self.publish_min_confidence = publish_min_confidence
         self.max_published = max_published
+        self.metadata_scope = dict(metadata_scope or {})
         self.self_model = SelfModel(
             mind.store, mind.namespace,
             llm=self.llm, embedder=getattr(mind, "embedder", None), clock=clock, guard=guard,
+            metadata_scope=self.metadata_scope,
         )
         # shared cortex: this agent both reads what the fleet learned and contributes
-        self.world = WorldInsights(mind.store, embedder=getattr(mind, "embedder", None), clock=clock)
+        self.world = WorldInsights(mind.store, embedder=getattr(mind, "embedder", None), clock=clock,
+                                   metadata_scope=self.metadata_scope)
 
     # ── helpers ───────────────────────────────────────────────────────────────
     def _llm_ok(self) -> bool:
@@ -123,22 +127,31 @@ class Heartbeat:
         # 1. PERCEIVE
         perceived: List[Any] = []
         try:
-            perceived = self.mind.recall("novidades, mudanças e sinais recentes", limit=10) or []
+            perceived = self.mind.recall("novidades, mudanças e sinais recentes", limit=10,
+                                         metadata_filter=self.metadata_scope or None) or []
         except Exception:
             pass
         report["steps"]["perceive"] = len(perceived)
 
         # 2. CONSOLIDATE (the engine's dreaming)
         try:
-            self.mind.dream()
-            report["steps"]["consolidate"] = "ok"
+            # O Dreamer legado ainda opera namespace-wide. Num request escopado
+            # ele não pode consolidar memórias fora do tenant nem gerar linhas sem
+            # owner; a consolidação dedicada roda fora deste beat até receber o
+            # mesmo metadata_filter.
+            if self.metadata_scope:
+                report["steps"]["consolidate"] = "skip(scoped)"
+            else:
+                self.mind.dream()
+                report["steps"]["consolidate"] = "ok"
         except Exception:
             report["steps"]["consolidate"] = "skip"
 
         # 3. CONNECT (memory + temporal graph)
         context = ""
         try:
-            context = self.mind.context(f"o que {self.ns} precisa saber pra agir bem agora") or ""
+            context = self.mind.context(f"o que {self.ns} precisa saber pra agir bem agora",
+                                        metadata_filter=self.metadata_scope or None) or ""
         except Exception:
             pass
         report["steps"]["connect"] = len(context)
@@ -332,7 +345,7 @@ class Heartbeat:
         m = Memory(
             content=h["text"], namespace=self.ns, layer=MemoryLayer.SEMANTIC,
             id=f"hyp::{self.ns}::{hid}", importance=h.get("confidence", 0.5),
-            metadata={
+            metadata={**self.metadata_scope,
                 "continuity": "heartbeat", "kind": "hypothesis", "status": "open",
                 "confidence": h.get("confidence", 0.5), "created_at": now,
                 # guardado pra que o juiz saiba, meses depois, o que exatamente fecharia
@@ -347,7 +360,8 @@ class Heartbeat:
     def _hypotheses(self) -> List[Memory]:
         for m in self.store.all(self.ns, layers=[MemoryLayer.SEMANTIC]):
             meta = m.metadata or {}
-            if meta.get("continuity") == "heartbeat" and meta.get("kind") == "hypothesis":
+            if (meta.get("continuity") == "heartbeat" and meta.get("kind") == "hypothesis"
+                    and all(meta.get(key) == value for key, value in self.metadata_scope.items())):
                 yield m
 
     def _open_due_hypotheses(self) -> List[Memory]:

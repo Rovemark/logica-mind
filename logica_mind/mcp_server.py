@@ -19,6 +19,11 @@ from . import devtools
 PROTOCOL_VERSION = "2024-11-05"
 SUPPORTED_VERSIONS = {PROTOCOL_VERSION}  # extend as new revisions are implemented
 
+# Tools that act on the MACHINE THE CLIENT RUNS ON (sandboxed execute, repo scan,
+# git context, token budget…). They are never forwarded to a remote brain — the
+# repo being scanned is the local one, not the server's.
+LOCAL_TOOLS = {"lm_execute", "lm_scan", "lm_git", "lm_mcp", "lm_budget"}
+
 TOOLS = [
     {
         "name": "lm_remember",
@@ -41,6 +46,7 @@ TOOLS = [
                 "query": {"type": "string"},
                 "limit": {"type": "integer", "default": 8},
                 "session": {"type": "string"},
+                "compact": {"type": "boolean", "description": "return bare content lines (token-cheap)"},
             },
             "required": ["query"],
         },
@@ -52,6 +58,8 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "query": {"type": "string"},
+                "profile": {"type": "string", "enum": ["speed", "balanced", "deep"],
+                            "description": "speed = sub-second (skip graph), deep = wider pool"},
                 "token_budget": {"type": "integer", "default": 1500},
             },
             "required": ["query"],
@@ -140,6 +148,19 @@ TOOLS = [
                 "query": {"type": "string"},
             },
         },
+    },
+    {
+        "name": "lm_pin",
+        "description": "Pin a memory by id so it always surfaces first in recall (or unpin it).",
+        "inputSchema": {"type": "object", "properties": {
+            "id": {"type": "string"}, "unpin": {"type": "boolean"}}, "required": ["id"]},
+    },
+    {
+        "name": "lm_snooze",
+        "description": "Hide a memory from recall until a date (ISO), or wake it now.",
+        "inputSchema": {"type": "object", "properties": {
+            "id": {"type": "string"}, "until": {"type": "string"}, "wake": {"type": "boolean"}},
+            "required": ["id"]},
     },
     {
         "name": "lm_stats",
@@ -324,13 +345,22 @@ TOOLS = [
 
 
 class MCPServer:
-    def __init__(self, mind, name: str = "logica-mind"):
+    def __init__(self, mind, name: str = "logica-mind", remote_url: Optional[str] = None,
+                 metadata_scope: Optional[Dict[str, Any]] = None):
         self.mind = mind
         self.name = name
         self._team = None  # memoized remote team mind (or None)
         # the connecting client (e.g. 'claude-code', 'cursor', 'chatgpt'), learned
         # from the MCP initialize handshake; tags captured memories with their origin
         self.source = os.environ.get("LOGICA_MIND_SOURCE")
+        self.metadata_scope = dict(metadata_scope or {})
+        # CLUSTER MODE: when the brain lives on another machine (one server, many
+        # clients), LOGICA_MIND_URL points the MCP at it — every memory tool is
+        # forwarded to the server's /api/mcp/dispatch (which runs the SAME dispatch
+        # against the real store + embedder), while LOCAL_TOOLS keep running here.
+        if remote_url is None:
+            remote_url = os.environ.get("LOGICA_MIND_URL", "")
+        self.remote_url = (remote_url or "").rstrip("/") or None
 
     # ---- JSON-RPC plumbing -------------------------------------------------
     @staticmethod
@@ -406,9 +436,40 @@ class MCPServer:
         except Exception as e:  # surface tool errors as isError content, not RPC error
             return self._result(rid, self._text(f"{type(e).__name__}: {e}", is_error=True))
 
+    def _remote_dispatch(self, name: str, args: Dict[str, Any]) -> Any:
+        """Forward one memory-tool call to the remote brain's /api/mcp/dispatch."""
+        import urllib.error
+        import urllib.request
+        owner = os.environ.get("LOGICAOS_USER_ID") or os.environ.get("LOGICAOS_EXECUTION_OWNER_ID")
+        project = os.environ.get("LOGICAOS_PROJECT_ID")
+        body = json.dumps({"name": name, "args": args, "source": self.source,
+                           "namespace": getattr(self.mind, "namespace", None),
+                           "ownerId": owner, "project": project}).encode()
+        headers = {"Content-Type": "application/json"}
+        token = os.environ.get("LOGICA_MIND_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(f"{self.remote_url}/api/mcp/dispatch",
+                                     data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return json.load(r).get("result")
+        except urllib.error.HTTPError as e:
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = json.loads(e.read()).get("error", "")
+            raise RuntimeError(f"remote brain rejected {name}: HTTP {e.code} {detail}".strip())
+        except Exception as e:
+            raise RuntimeError(f"remote brain unreachable at {self.remote_url}: {e}")
+
     def _dispatch(self, name: str, args: Dict[str, Any]) -> Any:
+        if self.remote_url and name not in LOCAL_TOOLS:
+            return self._remote_dispatch(name, args)
         m = self.mind
-        src_meta = {"source": self.source} if self.source else None
+        src_meta = dict(self.metadata_scope)
+        if self.source:
+            src_meta["source"] = self.source
+        src_meta = src_meta or None
         if name == "lm_remember":
             created = m.remember(args["text"], session=args.get("session"), metadata=src_meta)
             return {"stored": [c.content for c in created], "count": len(created),
@@ -416,13 +477,17 @@ class MCPServer:
                                "category": (c.metadata or {}).get("category"),
                                "dimension": (c.metadata or {}).get("dimension")} for c in created]}
         if name == "lm_recall":
-            hits = m.recall(args["query"], limit=int(args.get("limit", 8)), session=args.get("session"))
+            hits = m.recall(args["query"], limit=int(args.get("limit", 8)), session=args.get("session"),
+                            metadata_filter=self.metadata_scope or None)
+            # compact=true → bare content lines, ~3x cheaper tokens for the agent
+            if args.get("compact"):
+                return [h.memory.content for h in hits]
             return [{"score": round(h.score, 4), "layer": h.memory.layer.value,
                      "content": h.memory.content,
                      "category": (h.memory.metadata or {}).get("category"),
                      "dimension": (h.memory.metadata or {}).get("dimension")} for h in hits]
         if name == "lm_dimensions":
-            return m.dimensions()
+            return m.dimensions(metadata_filter=self.metadata_scope or None)
         if name == "lm_connected":
             return m.connections(args["id"])
         if name == "lm_how_related":
@@ -432,7 +497,9 @@ class MCPServer:
         if name == "lm_suggested_links":
             return {"suggested": m.suggested_links()}
         if name == "lm_context":
-            return m.context(args["query"], token_budget=int(args.get("token_budget", 1500)))
+            return m.context(args["query"], token_budget=int(args.get("token_budget", 1500)),
+                             profile=args.get("profile", "balanced"),
+                             metadata_filter=self.metadata_scope or None)
         if name == "lm_ask_about_user":
             return m.ask_about_user(args["question"])
         if name == "lm_observe_user":
@@ -458,8 +525,15 @@ class MCPServer:
             return m.diff(args["since"], until=args.get("until"))
         if name == "lm_forget":
             return {"deleted": m.forget(memory_id=args.get("id"), query=args.get("query"))}
+        if name == "lm_pin":
+            ok = m.unpin(args["id"]) if args.get("unpin") else m.pin(args["id"])
+            return {"ok": ok, "pinned": not args.get("unpin")}
+        if name == "lm_snooze":
+            if args.get("wake"):
+                return {"ok": m.unsnooze(args["id"]), "snoozed": False}
+            return {"ok": m.snooze(args["id"], args.get("until", "")), "snoozed": True}
         if name == "lm_stats":
-            return m.stats()
+            return m.stats(metadata_filter=self.metadata_scope or None)
 
         # ---- coding-context devtools ----
         if name == "lm_execute":

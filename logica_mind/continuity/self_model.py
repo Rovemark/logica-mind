@@ -76,6 +76,7 @@ class SelfModel:
         embedder: Optional[object] = None,
         clock: Optional[Callable[[], str]] = None,
         guard: Optional[Callable[..., bool]] = None,
+        metadata_scope: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.store = store
         self.namespace = namespace          # the agent this self belongs to
@@ -83,6 +84,7 @@ class SelfModel:
         self.embedder = embedder            # reserved (future: embed beliefs)
         self._now = clock or now_iso
         self._current_id = f"self-model::{namespace}::current"
+        self.metadata_scope = dict(metadata_scope or {})
         # optional constitutional brake: guard(prev, proposed, decision) -> bool
         # (True = allow). None = kernel default (permissive, only classifies).
         self.guard = guard
@@ -169,7 +171,7 @@ class SelfModel:
         state.pop("hash", None)
         state["hash"] = self._hash(state)
         body = json.dumps(state, ensure_ascii=False)
-        meta_common = {"continuity": "self-model", "version": state["version"],
+        meta_common = {**self.metadata_scope, "continuity": "self-model", "version": state["version"],
                        "hash": state["hash"], "zone": zone}
         version = Memory(
             content=body, namespace=self.namespace, layer=MemoryLayer.USER,

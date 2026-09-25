@@ -641,7 +641,8 @@ class SQLiteStore(Store):
         return [(c, d) for c, d in rows if c and d]
 
     def filter_memories(self, namespace=None, layers=None, dimension=None, category=None,
-                        session=None, limit=200, offset=0, with_embeddings=False):
+                        session=None, limit=200, offset=0, with_embeddings=False,
+                        metadata_filter=None):
         """Memories filtered by metadata (dimension / category / session) in SQL —
         newest first, NOT capped by the 5000 candidate window (so clicking a
         dimension on the Profile finds its older categorized memories, not [])."""
@@ -663,6 +664,13 @@ class SQLiteStore(Store):
         if session:
             sql += " AND json_extract(metadata,'$.session') = ?"
             params.append(session)
+        for key, value in (metadata_filter or {}).items():
+            # JSON paths cannot be parameterized. Only the two tenancy keys used
+            # by the HTTP boundary are accepted here; values remain parameters.
+            if key not in ("ownerId", "project"):
+                continue
+            sql += f" AND json_extract(metadata,'$.{key}') = ?"
+            params.append(value)
         sql += " ORDER BY created_at DESC, seq DESC, rowid DESC LIMIT ? OFFSET ?"
         params += [limit, offset]
         cur = self._conn.execute(sql, params)

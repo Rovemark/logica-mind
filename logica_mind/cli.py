@@ -47,6 +47,12 @@ def main(argv=None):
     sub.add_parser("stats", help="show per-layer counts")
     sub.add_parser("mcp", help="run as an MCP server over stdio")
 
+    s_remb = sub.add_parser("reembed", help="re-embed every memory with the CURRENT embedder "
+                                            "(the dimension migration after switching embedders)")
+    s_remb.add_argument("--all-namespaces", action="store_true",
+                        help="re-embed every namespace in the store (default: just the current one)")
+    s_remb.add_argument("--batch", type=int, default=64)
+
     s_demo = sub.add_parser("demo", help="load a fictional demo dataset (or clear it)")
     s_demo.add_argument("--clear", action="store_true", help="remove the demo data instead of loading it")
     s_demo.add_argument("--serve", action="store_true", help="open the dashboard after loading")
@@ -57,6 +63,9 @@ def main(argv=None):
     s_inst = sub.add_parser("install-hooks", help="install session hooks into a settings.json")
     s_inst.add_argument("--settings", default="~/.claude/settings.json",
                         help="target settings.json (default: ~/.claude/settings.json)")
+
+    s_bf = sub.add_parser("backfill", help="import a past transcript (or a folder of them) into memory")
+    s_bf.add_argument("path", help="a transcript .jsonl file, or a directory scanned recursively")
 
     args = p.parse_args(argv)
 
@@ -75,6 +84,29 @@ def main(argv=None):
         print(f"hooks installed in {path}")
         print("added: " + (", ".join(added) if added else "(already present)"))
         return
+    if args.cmd == "backfill":
+        import os as _os
+        import glob as _glob
+        from .hooks import backfill
+        target = _os.path.expanduser(args.path)
+        if _os.path.isfile(target):
+            files = [target]
+        else:
+            files = sorted(_glob.glob(_os.path.join(target, "**", "*.jsonl"), recursive=True))
+        if not files:
+            print(f"no .jsonl transcripts found at {target}")
+            return
+        total = 0
+        for fp in files:
+            try:
+                res = backfill(fp, db_override=args.db, namespace_override=args.namespace)
+                if res["captured"]:
+                    print(f"  +{res['captured']:>4} → {res['namespace']}  ({_os.path.basename(fp)})")
+                total += res["captured"]
+            except Exception as e:                       # noqa: BLE001
+                print(f"  !     {_os.path.basename(fp)}: {e}")
+        print(f"backfilled {total} turn(s) from {len(files)} transcript(s)")
+        return
 
     mind = _mind(args)
 
@@ -91,6 +123,12 @@ def main(argv=None):
     elif args.cmd == "dream":
         print("💤 dreaming…")
         print(mind.dream().to_dict())
+    elif args.cmd == "reembed":
+        nss = None if args.all_namespaces else [mind.namespace]
+        done = mind.reembed(namespaces=nss, batch=args.batch)
+        total = sum(done.values())
+        print(f"🔁 re-embedded {total} memor{'y' if total == 1 else 'ies'} "
+              f"across {len(done)} namespace(s) at {mind.embedder.dim}d")
     elif args.cmd == "stats":
         for k, v in mind.stats().items():
             print(f"{k:>10}: {v}")

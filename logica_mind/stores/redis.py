@@ -83,7 +83,7 @@ class RedisStore(Store):
         self._r.srem(self._ns_set(namespace), memory_id)
         return n > 0
 
-    def all(self, namespace, layers=None) -> List[Memory]:
+    def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         return self._candidates(namespace, layers)
 
     def namespaces(self) -> List[str]:

@@ -254,7 +254,7 @@ class SupabaseStore(Store):
         except Exception as e:
             print(f"[logica-mind] supabase touch failed, skipping ({e})", file=sys.stderr)
 
-    def all(self, namespace, layers=None) -> List[Memory]:
+    def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         return self._candidates(namespace, layers)
 
     def namespaces(self) -> List[str]:

@@ -83,6 +83,11 @@ class ObsidianStore(Store):
         # (ratchet multi-GB) sem cobrir nada novo. Obsidian segue como MIRROR de escrita
         # (add/get/delete/namespaces intactos → o vault humano continua completo). Religar: LM_OBSIDIAN_READ=1.
         self._read = os.environ.get("LM_OBSIDIAN_READ", "").strip().lower() in ("1", "true", "yes", "on")
+        # MultiStore uses this store as a write mirror by default.  Keep that
+        # optimisation explicit so a *standalone* ObsidianStore can still honour
+        # the Store contract (all()/session_record/etc.) without forcing the
+        # large mirror to be parsed when SQLite is already the primary.
+        self.mirror_only = not self._read
         # teto de segurança do cache (se a leitura for religada): não cacheia listas gigantes,
         # que eram exatamente a entrada tamanho-corpus que ratcheava a RAM.
         try:
@@ -250,10 +255,9 @@ class ObsidianStore(Store):
         return False
 
     def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
-        # write-mirror: por padrão não devolve o corpus (o SQLite primário cobre dream/reinforce/__all__
-        # e é superset completo). Evita o parse+cache dos ~30k .md que ratcheava a RAM. Religar: LM_OBSIDIAN_READ=1.
-        if not self._read:
-            return []
+        # Standalone ObsidianStore must satisfy the Store contract. MultiStore
+        # skips this method for mirror-only secondary stores (see multi.py), so
+        # the large production vault still is not parsed redundantly.
         return self._candidates(namespace, layers)
 
     def touch(self, namespace: str, ids: List[str]) -> None:

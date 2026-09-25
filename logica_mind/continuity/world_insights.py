@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..guard import sanitize
 from ..types import Memory, MemoryLayer, now_iso
@@ -39,6 +39,7 @@ class WorldInsights:
         clock=None,
         max_per_agent: int = 50,
         ttl_days: int = 30,
+        metadata_scope: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.store = store
         self.namespace = namespace
@@ -46,6 +47,7 @@ class WorldInsights:
         self._now = clock or now_iso
         self.max_per_agent = max_per_agent
         self.ttl_days = ttl_days
+        self.metadata_scope = dict(metadata_scope or {})
 
     # ── write ─────────────────────────────────────────────────────────────────
     def publish(self, agent: str, text: str, *, confidence: float = 0.7,
@@ -60,7 +62,7 @@ class WorldInsights:
         m = Memory(
             content=text, namespace=self.namespace, layer=MemoryLayer.SEMANTIC,
             id=f"insight::{agent}::{hid}", importance=float(confidence),
-            metadata={
+            metadata={**self.metadata_scope,
                 "continuity": "world-insights", "agent": agent,
                 "confidence": round(float(confidence), 3), "visibility": visibility,
                 "refuted": bool(refuted), "dept": dept, "created_at": self._now(),
@@ -75,6 +77,8 @@ class WorldInsights:
         m = self.store.get(self.namespace, f"insight::{agent}::{hid}")
         if not m:
             return False
+        if any((m.metadata or {}).get(key) != value for key, value in self.metadata_scope.items()):
+            return False
         meta = dict(m.metadata or {})
         meta["refuted"] = True
         meta["refuted_at"] = self._now()
@@ -85,7 +89,8 @@ class WorldInsights:
     # ── read ──────────────────────────────────────────────────────────────────
     def _all(self) -> List[Memory]:
         return [m for m in self.store.all(self.namespace, layers=[MemoryLayer.SEMANTIC])
-                if (m.metadata or {}).get("continuity") == "world-insights"]
+                if (m.metadata or {}).get("continuity") == "world-insights"
+                and all((m.metadata or {}).get(key) == value for key, value in self.metadata_scope.items())]
 
     def top_for(self, agent: Optional[str] = None, dept: Optional[str] = None, *,
                 limit: int = 8, min_confidence: float = 0.7,

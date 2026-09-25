@@ -116,6 +116,17 @@ def test_beat_publishes_confirmed_to_shared_cortex():
     assert len(top) >= 1 and all(m.metadata["agent"] == "dev" for m in top)
 
 
+def test_scoped_beat_keeps_every_written_memory_in_company_owner():
+    store = InMemoryStore()
+    mind = FakeMind(store, "dev", FakeLLM(verdict="confirmed"))
+    scope = {"ownerId": "empresa-acme", "project": "projects/site"}
+    rep = Heartbeat(mind, check_after_seconds=0, metadata_scope=scope).beat()
+    assert rep["steps"]["consolidate"] == "skip(scoped)"
+    written = store.all("dev") + store.all("__world__")
+    assert written
+    assert all(all((m.metadata or {}).get(k) == v for k, v in scope.items()) for m in written)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # O ACERVO QUE TRAVOU — 16.304 hipóteses, 85% abertas, 97% já vencidas, a mais
 # antiga parada havia 5 semanas. Três defeitos somados; um teste para cada.

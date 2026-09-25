@@ -22,7 +22,7 @@ from .types import Memory, MemoryLayer, SearchResult
 from ._vector import recency_score
 from .embeddings.base import Embedder
 from .embeddings.hashing import HashingEmbedder
-from .stores.base import Store, _tokset, entity_tokset
+from .stores.base import Store, _tokset, entity_tokset, matches_filter, apply_filter
 from .stores.sqlite import SQLiteStore
 from .extract.base import Extractor, ExtractOp
 from .extract.noop import NoopExtractor
@@ -289,9 +289,13 @@ class LogicaMind:
         if category:
             base_meta["category"] = category
 
-        # dedup is scoped to the same session (so an identical fact in another
-        # session is still stored); session-less memories dedup globally
-        dedup_scope = {"session": session} if session else None
+        # Dedup precisa respeitar o mesmo limite de leitura. Sem isto, um fato de
+        # Alice podia fazer o write de Beatriz parecer duplicado antes mesmo do
+        # filtro owner/project ser aplicado.
+        dedup_scope = {k: base_meta[k] for k in ("ownerId", "project") if base_meta.get(k)}
+        if session:
+            dedup_scope["session"] = session
+        dedup_scope = dedup_scope or None
 
         if extract:
             existing = [r.memory for r in self.store.search(
@@ -418,6 +422,7 @@ class LogicaMind:
         summary: Optional[str] = None,
         store_contributions: bool = True,
         importance: float = 0.7,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Memory:
         """Record a rich, structured **session/run** as a first-class memory.
 
@@ -450,6 +455,7 @@ class LogicaMind:
 
         body = self._render_session_body(title, parts, status, metrics, links, summary)
         meta = {
+            **dict(metadata or {}),
             "session": sid,
             "record": True,
             "title": title,
@@ -484,7 +490,7 @@ class LogicaMind:
                     layer=MemoryLayer.EPISODIC,
                     importance=0.4,
                     tags=["contribution"],
-                    metadata={"session": sid, "participant": p.get("name"),
+                    metadata={**dict(metadata or {}), "session": sid, "participant": p.get("name"),
                               "role": p.get("role"), "of_record": record.id},
                     embedding=self._embed(c),
                 ))
@@ -870,6 +876,7 @@ class LogicaMind:
         namespaces: Optional[List[str]] = None,
         layers: Optional[List[MemoryLayer]] = None,
         limit: int = 8,
+        metadata_filter: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         """Recall across many namespaces (or all) and merge the rankings."""
         limit = max(1, limit)   # guard: a negative limit would slice from the end
@@ -882,7 +889,8 @@ class LogicaMind:
         merged: List[SearchResult] = []
         for ns in namespaces:
             merged.extend(self.for_namespace(ns).recall(
-                query, layers=layers, limit=limit, query_embedding=q_emb))
+                query, layers=layers, limit=limit, query_embedding=q_emb,
+                metadata_filter=metadata_filter))
         merged.sort(key=lambda r: r.score, reverse=True)
         return merged[:limit]
 
@@ -1381,18 +1389,41 @@ class LogicaMind:
         self,
         memory_id: Optional[str] = None,
         query: Optional[str] = None,
+        contains: Optional[str] = None,
         threshold: float = 0.9,
         layers: Optional[List[MemoryLayer]] = None,
+        metadata_filter: Optional[Dict[str, Any]] = None,
     ) -> int:
         if memory_id:
+            memory = self.store.get(self.namespace, memory_id)
+            if not memory or not matches_filter(memory, metadata_filter):
+                return 0
             return 1 if self.store.delete(self.namespace, memory_id) else 0
         if query:
             q_emb = self._embed_query(query)
-            hits = self.store.search(self.namespace, q_emb, query, layers, 50)
+            hits = self.store.search(
+                self.namespace, q_emb, query, layers, 50,
+                metadata_filter=metadata_filter,
+            )
             n = 0
             for h in hits:
                 if h.score >= threshold:
                     n += int(self.store.delete(self.namespace, h.memory.id))
+            return n
+        if contains is not None or metadata_filter:
+            # Exclusão determinística/LGPD: similaridade é adequada para recall,
+            # não para decidir o que apagar. `contains` exige correspondência
+            # literal (case-insensitive) e o filtro mantém dono/projeto isolados.
+            needle = str(contains or "").casefold()
+            candidates = apply_filter(
+                self.store.all(self.namespace, layers, with_embeddings=False),
+                metadata_filter,
+            )
+            n = 0
+            for memory in candidates:
+                if needle and needle not in str(memory.content or "").casefold():
+                    continue
+                n += int(self.store.delete(self.namespace, memory.id))
             return n
         return 0
 
@@ -1442,7 +1473,8 @@ class LogicaMind:
 
     def ingest_conversation(self, messages: List[Dict[str, Any]], session: Optional[str] = None,
                             extract: bool = True, derive: bool = True,
-                            source: Optional[str] = None, channel: Optional[str] = None) -> Dict[str, int]:
+                            source: Optional[str] = None, channel: Optional[str] = None,
+                            metadata: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
         """conversation ingestion. `messages` is a list of
         {"role"/"speaker", "content"} dicts. Each turn is logged (episodic); with
         an LLM, durable facts are extracted seeing the WHOLE exchange (so a reply
@@ -1450,7 +1482,7 @@ class LogicaMind:
         derived for the dialectic model. `source` tags every captured memory with
         its origin (e.g. the MCP client name: 'claude-code', 'cursor', 'chatgpt')
         so the dashboard can show what captured it. Returns {logged, facts, observations}."""
-        meta: Dict[str, Any] = {}
+        meta: Dict[str, Any] = dict(metadata or {})
         if source:
             meta["source"] = source
         if channel:
@@ -1722,14 +1754,18 @@ class LogicaMind:
         return (hubs + cooc)[:limit]
 
     # ---- dimension profile -------------------------------------------------
-    def dimensions(self) -> Dict[str, Any]:
+    def dimensions(self, metadata_filter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """The categorization profile for this namespace: every fact grouped by
         its life/work `dimension` and Maslow tier, with the open categories under
         each. Powers the dashboard Profile view and the lm_dimensions MCP tool."""
         from .extract.taxonomy import DIMENSIONS, MASLOW
         agg: Dict[str, Dict[str, Any]] = {}
         uncategorized = 0
-        for m in self.store.all(self.namespace):
+        memories = self.store.all(self.namespace)
+        if metadata_filter:
+            from .stores.base import matches_filter
+            memories = [m for m in memories if matches_filter(m, metadata_filter)]
+        for m in memories:
             md = m.metadata or {}
             dim = md.get("dimension")
             if not dim:
@@ -1764,6 +1800,7 @@ class LogicaMind:
         include_user: bool = True,
         safe: bool = True,
         profile: str = "balanced",
+        metadata_filter: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Assemble a ready-to-inject context block for `query`, fitted to a
         token budget (Context endpoint): user model first, then the
@@ -1779,7 +1816,12 @@ class LogicaMind:
           balanced — graph facts + up to 20 memories (default).
           deep     — balanced + a wider memory pool (reranker if configured)."""
         budget = max(0, token_budget)
-        use_graph = profile != "speed"
+        # User-profile and graph nodes are namespace-global legacy structures.
+        # Under an explicit owner/project scope they cannot be proven to belong
+        # to that scope, so only scoped memories enter the assembled block.
+        if metadata_filter:
+            include_user = False
+        use_graph = profile != "speed" and not metadata_filter
         recall_limit = {"speed": 8, "balanced": 20, "deep": 30}.get(profile, 20)
         blocks: List[str] = []
 
@@ -1816,7 +1858,10 @@ class LogicaMind:
         # top hit rather than against an absolute floor. Fixes the hashing-vs-voyage
         # score-scale mismatch and trims the irrelevant tail from the INJECTED block
         # (recall() itself is untouched, so the published benchmark is unaffected).
-        hits = self.recall(query, layers=layers, limit=recall_limit, session=session)
+        hits = self.recall(
+            query, layers=layers, limit=recall_limit, session=session,
+            metadata_filter=metadata_filter,
+        )
         if hits:
             cutoff = hits[0].score * 0.35
             kept = [h for h in hits if h.score >= cutoff] or hits[:3]
@@ -2067,8 +2112,16 @@ class LogicaMind:
         return assembled
 
     # ---- introspection -----------------------------------------------------
-    def stats(self) -> Dict[str, int]:
+    def stats(self, metadata_filter: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
         out = {"total": 0}
+        if metadata_filter:
+            from .stores.base import matches_filter
+            memories = [m for m in self.store.all(self.namespace) if matches_filter(m, metadata_filter)]
+            for layer in MemoryLayer:
+                n = sum(1 for memory in memories if memory.layer == layer)
+                out[layer.value] = n
+                out["total"] += n
+            return out
         for layer in MemoryLayer:
             n = self.store.count(self.namespace, [layer])
             out[layer.value] = n

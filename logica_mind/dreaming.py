@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional, TYPE_CHECKING
 
@@ -33,6 +34,8 @@ _HALF_LIVES = {
     "project": 120.0, "feature": 120.0, "bugfix": 90.0, "discovery": 90.0,
     "note": 60.0, "problem": 45.0, "handoff": 30.0, "status": 14.0, "transient": 7.0,
 }
+
+_DREAM_JOURNAL_LOCK = threading.Lock()
 
 
 def _half_life_for(mem, default_days):
@@ -92,38 +95,39 @@ def save_dream(report: DreamReport, store) -> None:
     if not path:
         return
     try:
-        existing = []
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    existing = json.load(f)
-                if not isinstance(existing, list):
-                    existing = []
-            except Exception as read_err:
-                # 🔴 DIÁRIO CORROMPIDO NÃO PODE PARALISAR O SONHO PRA SEMPRE.
-                # Como estava, um json.load quebrado estourava a função inteira: o ciclo falhava,
-                # tentava de novo no próximo, e o erro se repetia INDEFINIDAMENTE — queimando CPU
-                # (medido: 65-93% no processo) e derrubando a latência do recall junto (6,8 s).
-                # Medido em produção: 3 bytes de lixo colados no fim inutilizaram 200 ciclos.
-                # Agora: guarda o arquivo ruim pra perícia e recomeça, em vez de travar.
+        with _DREAM_JOURNAL_LOCK:
+            existing = []
+            if os.path.exists(path):
                 try:
-                    os.replace(path, path + ".corrupt")
-                except Exception:
-                    pass
-                print(f"[logica-mind] dream journal corrompido ({read_err}) — "
-                      f"movido para {os.path.basename(path)}.corrupt e recomeçado",
-                      file=sys.stderr)
-                existing = []
-        existing.append(report.to_dict())
-        # keep only the last 200 dream cycles
-        existing = existing[-200:]
-        # ESCRITA ATÔMICA (tmp + replace): a corrupção veio de um `open(w)` interrompido/concorrente,
-        # que deixa o arquivo pela metade. Com tmp+replace, ou o conteúdo novo aparece inteiro, ou
-        # o antigo continua intacto — nunca um meio-termo inválido.
-        tmp = f"{path}.{os.getpid()}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(existing, f, ensure_ascii=False)
-        os.replace(tmp, path)
+                    with open(path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    if not isinstance(existing, list):
+                        existing = []
+                except Exception as read_err:
+                    # 🔴 DIÁRIO CORROMPIDO NÃO PODE PARALISAR O SONHO PRA SEMPRE.
+                    # Como estava, um json.load quebrado estourava a função inteira: o ciclo falhava,
+                    # tentava de novo no próximo, e o erro se repetia INDEFINIDAMENTE — queimando CPU
+                    # (medido: 65-93% no processo) e derrubando a latência do recall junto (6,8 s).
+                    # Medido em produção: 3 bytes de lixo colados no fim inutilizaram 200 ciclos.
+                    # Agora: guarda o arquivo ruim pra perícia e recomeça, em vez de travar.
+                    try:
+                        os.replace(path, path + ".corrupt")
+                    except Exception:
+                        pass
+                    print(f"[logica-mind] dream journal corrompido ({read_err}) — "
+                          f"movido para {os.path.basename(path)}.corrupt e recomeçado",
+                          file=sys.stderr)
+                    existing = []
+            existing.append(report.to_dict())
+            # keep only the last 200 dream cycles
+            existing = existing[-200:]
+            # ESCRITA ATÔMICA (tmp + replace): a corrupção veio de um `open(w)` interrompido/concorrente,
+            # que deixa o arquivo pela metade. Com tmp+replace, ou o conteúdo novo aparece inteiro, ou
+            # o antigo continua intacto — nunca um meio-termo inválido.
+            tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(existing, f, ensure_ascii=False)
+            os.replace(tmp, path)
     except Exception as e:
         print(f"[logica-mind] could not save dream journal ({e})", file=sys.stderr)
 

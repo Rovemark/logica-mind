@@ -18,17 +18,31 @@ from .base import Store
 class MultiStore(Store):
     name = "multi"
 
-    def __init__(self, stores: List[Store]):
+    def __init__(self, stores: List[Store], *, require_primary: bool = False):
         if not stores:
             raise ValueError("MultiStore needs at least one store.")
         self.stores = stores
+        self.require_primary = require_primary
 
     def add(self, memories: List[Memory]) -> None:
-        for s in self.stores:
+        if not memories:
+            return
+        successes = 0
+        primary_error = None
+        for index, s in enumerate(self.stores):
             try:
                 s.add(memories)
+                successes += 1
             except Exception as e:  # one backend down shouldn't lose the write
+                if index == 0:
+                    primary_error = e
                 print(f"[logica-mind] MultiStore.add: {s.name} failed: {e}", file=sys.stderr)
+        # Mirrors are still attempted, but cannot acknowledge a canonical write
+        # while the explicitly required primary is unavailable.
+        if self.require_primary and primary_error is not None:
+            raise RuntimeError("Canonical memory store did not confirm the write") from primary_error
+        if successes == 0:
+            raise RuntimeError("No memory store confirmed the write") from primary_error
 
     def search(self, namespace, query_embedding, query_text, layers=None, limit=20, metadata_filter=None) -> List[SearchResult]:
         merged: Dict[str, SearchResult] = {}
@@ -84,7 +98,13 @@ class MultiStore(Store):
 
     def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         seen: Dict[str, Memory] = {}
-        for s in self.stores:
+        for index, s in enumerate(self.stores):
+            # Obsidian can be configured as a human-readable write mirror. The
+            # primary already contains the same logical rows, so enumerating a
+            # mirror with tens of thousands of Markdown files is pure duplicate
+            # work. A standalone ObsidianStore still implements all() normally.
+            if index > 0 and getattr(s, "mirror_only", False):
+                continue
             try:
                 rows = s.all(namespace, layers, with_embeddings=with_embeddings)
             except TypeError:
@@ -191,11 +211,13 @@ class MultiStore(Store):
         return {}, 0
 
     def filter_memories(self, namespace=None, layers=None, dimension=None, category=None,
-                        session=None, limit=200, offset=0, with_embeddings=False):
+                        session=None, limit=200, offset=0, with_embeddings=False,
+                        metadata_filter=None):
         for s in self.stores:
             if hasattr(s, "filter_memories"):
                 return s.filter_memories(namespace, layers, dimension, category,
-                                         session, limit, offset, with_embeddings)
+                                         session, limit, offset, with_embeddings,
+                                         metadata_filter)
         return []
 
     def mentions(self, namespace, name, limit=0, with_embeddings=False):
