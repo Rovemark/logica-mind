@@ -33,10 +33,14 @@ _OPS = {
     "igual":        ("{lado} = {v}", True),
     "diferente":    ("({lado} IS DISTINCT FROM {v})", True),
     "contem":       ("{lado} ILIKE {v_like}", True),
-    "nao_contem":   ("({lado} IS NULL OR {lado} NOT ILIKE {v_like})", True),
+    # {lado} uma vez só por molde: `_lado` põe o parâmetro da chave na lista UMA vez, e o
+    # marcador repetido no texto pedia o parâmetro de novo ("the query has 11 placeholders but
+    # 9 parameters", medido em 27/09/2026 com `vazio` numa data). As formas abaixo dizem o
+    # mesmo que "lado IS NULL OR ..." citando o lado uma vez.
+    "nao_contem":   ("COALESCE({lado} NOT ILIKE {v_like}, TRUE)", True),
     "comeca_com":   ("{lado} ILIKE {v_prefixo}", True),
-    "vazio":        ("({lado} IS NULL OR {lado} = '')", False),
-    "nao_vazio":    ("({lado} IS NOT NULL AND {lado} <> '')", False),
+    "vazio":        ("NULLIF({lado}, '') IS NULL", False),
+    "nao_vazio":    ("NULLIF({lado}, '') IS NOT NULL", False),
     "maior":        ("{lado_num} > {v_num}", True),
     "maior_igual":  ("{lado_num} >= {v_num}", True),
     "menor":        ("{lado_num} < {v_num}", True),
@@ -133,7 +137,13 @@ class _Montador:
             self.params.append(chave)
             return molde.replace("%(K)s", "%s")
 
-        bruto, num, data = self._lado(chave)
+        # A chave só entra na lista de parâmetros quando o molde cita o lado: `tem` compara o
+        # jsonb inteiro e não cita, e o parâmetro a mais fazia o filtro falhar sempre.
+        if any(f"{{{nome}}}" in molde for nome in ("lado", "lado_num", "lado_data")):
+            bruto, num, data = self._lado(chave)
+        else:
+            _valida_chave(chave)
+            bruto = num = data = ""
         v = no.get("valor")
         sub = {"lado": bruto, "lado_num": num, "lado_data": data}
         if precisa_valor:
