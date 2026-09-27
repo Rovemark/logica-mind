@@ -272,6 +272,8 @@ class SQLiteStore(Store):
         # otherwise an older session's rows could fall outside the newest N
         if metadata_filter:
             for k, v in metadata_filter.items():
+                if k.startswith("$"):   # operators ($not): apply_filter in search() applies them
+                    continue
                 if isinstance(v, (list, tuple, set)):
                     if not v:
                         where += " AND 0"

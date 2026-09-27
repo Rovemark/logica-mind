@@ -16,6 +16,7 @@ from ..types import Memory, MemoryLayer
 from ..stores.base import Store
 from ..embeddings.base import Embedder
 from ..llm.base import LLM, NullLLM
+from ..continuity.self_model import hide_self_model
 
 _SYSTEM = (
     "You maintain a concise, evolving model of a user for an AI assistant. "
@@ -233,9 +234,11 @@ class DialecticUserModel:
             except Exception:
                 q_emb = None
         # exclude the synthesized profile (already supplied as USER MODEL) so it
-        # isn't fed twice and doesn't crowd out atomic observations
+        # isn't fed twice and doesn't crowd out atomic observations; the agent's
+        # self-model shares this layer when it shares the namespace, so it stays out
         hits = [
-            h for h in self.store.search(self.namespace, q_emb, question, [MemoryLayer.USER], k + 1)
+            h for h in self.store.search(self.namespace, q_emb, question, [MemoryLayer.USER], k + 1,
+                                         hide_self_model())
             if h.memory.id != self._profile_id and "observation" in (h.memory.tags or [])
         ][:k]
         facts = "\n".join(f"- {h.memory.content}" for h in hits)

@@ -16,7 +16,7 @@ import urllib.request
 from typing import List, Optional
 
 from ..types import Memory, MemoryLayer, SearchResult
-from .base import Store, rank, apply_filter
+from .base import Store, rank, apply_filter, matches_filter
 
 TABLE = "logica_mind_memory"
 
@@ -130,6 +130,8 @@ class SupabaseStore(Store):
         # LIMIT window — older sessions outside the newest N would be missed otherwise
         if metadata_filter:
             for k, v in metadata_filter.items():
+                if k.startswith("$"):   # operators ($not): apply_filter in search() applies them
+                    continue
                 key = f"metadata->>{k}"   # ->> extracts jsonb as text
                 if isinstance(v, (list, tuple, set)):
                     params[key] = "in.(" + ",".join(self._pgrst_quote(x) for x in v) + ")"
@@ -141,7 +143,7 @@ class SupabaseStore(Store):
     @staticmethod
     def _has_list_filter(metadata_filter) -> bool:
         return bool(metadata_filter) and any(
-            isinstance(v, (list, tuple, set)) for v in metadata_filter.values())
+            isinstance(v, (list, tuple, set)) for k, v in metadata_filter.items() if not k.startswith("$"))
 
     @staticmethod
     def _pg_text(x) -> str:
@@ -173,18 +175,23 @@ class SupabaseStore(Store):
         return rank(apply_filter(cands, metadata_filter), query_embedding, query_text, limit)
 
     def _rpc_search(self, namespace, query_embedding, layers, limit, metadata_filter=None) -> List[SearchResult]:
+        # the RPC only knows scalar containment: operators ($not) are applied to its rows here
+        scalar = {k: v for k, v in (metadata_filter or {}).items() if not k.startswith("$")}
         body = {
             "p_namespace": namespace,
             "p_query_embedding": list(query_embedding),
             "p_limit": limit,
             "p_layers": [l.value for l in layers] if layers else None,
-            "p_metadata_filter": metadata_filter or None,
+            "p_metadata_filter": scalar or None,
         }
         rows = self._request("POST", f"rpc/{self.rpc}", body=body) or []
         out: List[SearchResult] = []
         for r in rows:
+            memory = self._to_memory(r)
+            if not matches_filter(memory, metadata_filter):
+                continue
             sim = float(r.get("similarity", 0.0) or 0.0)
-            out.append(SearchResult(memory=self._to_memory(r), score=max(0.0, sim),
+            out.append(SearchResult(memory=memory, score=max(0.0, sim),
                                     components={"similarity": round(max(0.0, sim), 4)}))
         return out
 

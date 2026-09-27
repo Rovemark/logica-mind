@@ -40,7 +40,7 @@ import os
 from typing import List, Optional
 
 from ..types import Memory, MemoryLayer, SearchResult
-from .base import Store, rank, apply_filter, matches_filter, _tokset
+from .base import NOT, Store, rank, apply_filter, matches_filter, not_filters, _tokset
 # codec único, compartilhado com o SQLiteStore. Duplicar o empacotamento seria
 # criar duas verdades sobre o formato do vetor.
 from .sqlite import _pack_embedding, _unpack_embedding
@@ -318,6 +318,11 @@ class PostgresStore(Store):
         if not metadata_filter:
             return sql
         for k, v in metadata_filter.items():
+            if k == NOT:
+                # COALESCE: metadata nula deixa a contenção nula, e NOT nulo derrubaria a linha
+                for f in not_filters(v):
+                    sql += " AND NOT COALESCE((TRUE" + PostgresStore._where_meta(f, params) + "), FALSE)"
+                continue
             if isinstance(v, (list, tuple, set)):
                 vals = list(v)
                 if not vals:

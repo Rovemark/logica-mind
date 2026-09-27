@@ -106,15 +106,30 @@ def similarity(memory: Memory, query_embedding: Optional[Sequence[float]], query
     return lexical_score(query_text, memory.content)
 
 
+NOT = "$not"   # filter key: a filter (or list of filters) the memory must NOT match
+
+
+def not_filters(value) -> List[dict]:
+    """The filters under a ``$not`` key. An empty one is dropped: it would exclude everything."""
+    filters = value if isinstance(value, (list, tuple)) else [value]
+    return [f for f in filters if isinstance(f, dict) and f]
+
+
 def matches_filter(memory: Memory, metadata_filter: Optional[dict]) -> bool:
     """True if the memory's metadata matches every key/value in the filter.
 
     A list value means "metadata[key] is one of these". Used for scoping recall
-    by session/run or any custom attribute."""
+    by session/run or any custom attribute. ``$not`` excludes what matches the
+    filters under it. Stores that build their own query from the filter skip keys
+    starting with "$" there and let this function apply them."""
     if not metadata_filter:
         return True
     md = memory.metadata or {}
     for k, v in metadata_filter.items():
+        if k == NOT:
+            if any(matches_filter(memory, f) for f in not_filters(v)):
+                return False
+            continue
         actual = md.get(k)
         if isinstance(v, (list, tuple, set)):
             if actual not in v:

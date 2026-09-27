@@ -31,6 +31,7 @@ from .llm.base import LLM, NullLLM
 from .graph.temporal import TemporalGraph
 from .graph.extractor import GraphExtractor
 from .user.dialectic import DialecticUserModel
+from .continuity.self_model import hide_self_model
 from .rerank.base import Reranker
 
 
@@ -594,7 +595,8 @@ class LogicaMind:
         q_emb = query_embedding if query_embedding is not None else self._embed_query(query)
         # overfetch enough to feed both dedup and the reranker pool
         pool_size = max(limit * 4, self.rerank_pool if self.reranker else 0)
-        raw = self.store.search(self.namespace, q_emb, query, layers, pool_size, flt or None)
+        # the agents' self-model stays out unless the caller asks for it (hide_self_model)
+        raw = self.store.search(self.namespace, q_emb, query, layers, pool_size, hide_self_model(flt))
         self._check_dim(q_emb, raw)
 
         # entity-boosted retrieval: graph entities mentioned in the query lift

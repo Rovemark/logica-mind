@@ -40,6 +40,7 @@ import json
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..types import Memory, MemoryLayer, now_iso
+from ..stores.base import NOT, not_filters
 from .guard import classify_self_change, SelfRewriteBlocked
 
 # Tunables — kept module-level so they are easy to audit and override in tests.
@@ -47,6 +48,24 @@ ALPHA = 0.3          # weight of new experience in the moving average (evolve, d
 HOT_RECENT = 12      # how many wins/errors stay "hot" in the current model
 MAX_BELIEFS = 30     # cap of hot beliefs (full history lives in the version line)
 _CAS_RETRIES = 4     # compare-and-set attempts before giving up
+SELF_MODEL_FILTER = {"continuity": "self-model"}   # carried by every version and the current pointer
+
+
+def hide_self_model(metadata_filter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The filter plus the exclusion of the self-model records, for a general search.
+
+    The versions live in the USER layer, are never deleted, carry importance 0.9 and
+    have no vector, so the store scores them by normalized BM25 (the best lexical hit
+    gets ~1.0) and they come out ahead of real memories. Measured on 2026-09-27:
+    recalling "copy de alta conversão" across namespaces returned 10 of 10 versions, and
+    in the "astro" namespace (shared by the main agent and the user model) 9 of the first
+    10 USER hits for "o que o Andre prefere" were versions. A caller that names the
+    ``continuity`` key asked for these records, and gets its filter untouched."""
+    flt = dict(metadata_filter or {})
+    if "continuity" in flt:
+        return flt
+    flt[NOT] = not_filters(flt.get(NOT)) + [SELF_MODEL_FILTER]
+    return flt
 
 
 def _drives_default() -> Dict[str, float]:
