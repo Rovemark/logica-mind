@@ -398,8 +398,32 @@ class _Http400(Exception):
     query param (e.g. limit=abc) returns a clean 400 instead of leaking a 500."""
 
 
-def make_handler(mind, allow_writes: bool = True, token: str = None):
+def make_handler(mind, allow_writes: bool = True, token: str = None, *, _personal=None):
     token = token if token is not None else os.environ.get("LOGICA_MIND_TOKEN")
+    # The same canonical database is exposed through a restricted namespace view.
+    # Shared aggregations, exports, MCP and discovery never see personal partitions.
+    import copy
+    from ..stores.privacy import PrivacyStore, PRIVATE_PREFIX, personal_prefix, personal_primary
+    raw_mind = mind
+    prefix = personal_prefix(_personal["ownerId"], _personal["actorId"]) if _personal else None
+    # Banco-only handler fixtures/hosts have no memory Store and keep their
+    # independent delegated-token path; personal memory is unavailable there.
+    if hasattr(raw_mind, "store") and callable(getattr(raw_mind, "for_namespace", None)):
+        view = copy.copy(raw_mind)
+        view.store = PrivacyStore(raw_mind.store, prefix)
+        default_ns = prefix + raw_mind.namespace if prefix else raw_mind.namespace
+        mind = view.for_namespace(default_ns)
+
+    def _namespace(value):
+        ns = str(value or raw_mind.namespace)
+        if ns.startswith(PRIVATE_PREFIX):
+            raise _Http400("reserved memory namespace")
+        if prefix and ns not in _ALL and not _NS_RE.fullmatch(ns):
+            raise _Http400("invalid namespace")
+        return prefix + ns if prefix and ns not in _ALL else ns
+
+    _PERSONAL_GET = {"/api/recall", "/api/context", "/api/memories"}
+    _PERSONAL_POST = {"/api/log", "/api/forget"}
 
     _LAYER_VALUES = {l.value for l in MemoryLayer}
 
@@ -442,7 +466,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
         md = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
         owner = body.get("ownerId") or body.get("owner") or md.get("ownerId") or md.get("owner_id")
         project = body.get("project") or md.get("project") or md.get("project_id")
-        return _scope_values(owner, project, required=_multiuser())
+        scope = _scope_values(owner, project, required=_multiuser())
+        if _personal:
+            if owner != _personal["ownerId"] or project:
+                raise _Http400("personal memory owner/project mismatch")
+            scope.update(_personal)
+        return scope
 
     def _write_metadata(body):
         md = dict(body.get("metadata")) if isinstance(body.get("metadata"), dict) else {}
@@ -452,11 +481,16 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
         return md
 
     def _read_scope(qs):
-        return _scope_values(
+        scope = _scope_values(
             first(qs, "owner") or first(qs, "ownerId"),
             first(qs, "project") or first(qs, "projectId"),
             required=_multiuser(),
         )
+        if _personal:
+            if scope.get("ownerId") != _personal["ownerId"] or scope.get("project"):
+                raise _Http400("personal memory owner/project mismatch")
+            scope.update(_personal)
+        return scope
 
     _MULTIUSER_SAFE_POST = {
         "/api/remember", "/api/add", "/api/log", "/api/forget",
@@ -622,6 +656,51 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             except Exception:
                 return {}
 
+        def _personal_handler(self, method, path, values, body=None):
+            wants_personal = path.startswith("/api/personal/")
+            requested = values.get("memoryScope") or "shared"
+            if _personal:
+                return False
+            if not wants_personal:
+                if requested != "shared":
+                    self._json({"error": "personal memory requires /api/personal/ endpoint"}, 400)
+                    return True
+                return False
+            target_path = path.replace("/api/personal/", "/api/", 1)
+            allowed = _PERSONAL_GET if method == "GET" else _PERSONAL_POST
+            if (target_path not in allowed or not token or not self._bearer_ok()
+                    or not hasattr(raw_mind, "store")):
+                self._json({"error": "personal memory requires scoped service access"}, 403)
+                return True
+            owner = str(values.get("ownerId") or values.get("owner") or "").strip()
+            actor = str(values.get("actorId") or "").strip()
+            if (requested != "personal" or not owner or not actor
+                    or len(owner) > 160 or len(actor) > 160
+                    or any(ord(ch) < 32 for ch in owner + actor)
+                    or values.get("project") or values.get("projectId")
+                    or actor.startswith(("system:", "sistema:"))):
+                self._json({"error": "invalid personal memory scope"}, 400)
+                return True
+            scope = {"ownerId": owner, "actorId": actor, "memoryScope": "personal"}
+            try:
+                # The appliance wraps exported make_handler with ApiOnlyHandler.
+                # Re-enter the base factory, not that outer HTTP subclass: its
+                # zero-argument super() cannot run on the original instance.
+                delegate = _scoped_handler_factory(raw_mind, allow_writes, token, _personal=scope)
+            except ValueError:
+                self._json({"error": "personal memory primary unavailable"}, 503)
+                return True
+            original_path, original_body, original_dispatch = self.path, self._body, self._personal_handler
+            try:
+                self.path = self.path.replace("/api/personal/", "/api/", 1)
+                if body is not None:
+                    self._body = lambda: body
+                self._personal_handler = lambda *args, **kwargs: False
+                getattr(delegate, "do_" + method)(self)
+            finally:
+                self.path, self._body, self._personal_handler = original_path, original_body, original_dispatch
+            return True
+
         def do_POST(self):
             import time as _t
             self._t0 = _t.time()
@@ -651,6 +730,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 # can't mutate memory). Token-less deployments keep loopback trust.
                 return self._json({"error": "unauthorized"}, 401)
             body = self._body()
+            if self._personal_handler("POST", path, body, body):
+                return
+            if path == "/api/journal/log":
+                if not body.get("idempotencyKey"):
+                    return self._json({"error": "journal requires idempotencyKey"}, 400)
+                path = "/api/log"
             # REGISTRO antes da validação de namespace: o Banco de dados não tem namespace e
             # seria recusado com "invalid namespace" logo abaixo. Depois do portão de
             # escrita, porque escrita é escrita nas duas camadas.
@@ -659,12 +744,15 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             if (_multiuser() and not self._company_gateway()
                     and path.startswith("/api/") and path not in _MULTIUSER_SAFE_POST):
                 return self._json({"error": "endpoint is not owner-scoped in multiuser mode"}, 403)
-            ns = (body.get("namespace") or mind.namespace)
+            try:
+                ns = _namespace(body.get("namespace"))
+            except _Http400 as exc:
+                return self._json({"error": str(exc)}, 400)
             # the caller is already authorized (loopback or bearer token); the known
             # set just catches cross-tenant typos. A well-formed NEW namespace is
             # allowed so a first write can bootstrap a fresh agent; junk is rejected.
             known = {n["namespace"] for n in mind.list_namespaces()} | {mind.namespace}
-            if ns not in known and not _NS_RE.match(ns):
+            if ns not in known and not _personal and not _NS_RE.match(ns):
                 return self._json({"error": "invalid namespace"}, 400)
             target = mind.for_namespace(ns)
             try:
@@ -788,7 +876,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     if body.get("channel"):
                         _md["channel"] = body.get("channel")
                     m = target.log(str(body.get("text", "")), role=body.get("role"),
-                                   session=body.get("session"), metadata=_md or None)
+                                   session=body.get("session"), metadata=_md or None,
+                                   idempotency_key=body.get("idempotencyKey"))
                     self._json({"ok": bool(m), "id": m.id if m else None})
                 elif path == "/api/forget":
                     scope = _write_scope(body)
@@ -993,7 +1082,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
             self._t0 = _t.time()
             parsed = urlparse(self.path)
             path, qs = parsed.path, parse_qs(parsed.query)
-            ns = first(qs, "namespace")
+            if self._personal_handler("GET", path, {k: first(qs, k) for k in qs}):
+                return
+            try:
+                ns = _namespace(first(qs, "namespace")) if first(qs, "namespace") else "__all__"
+            except _Http400 as exc:
+                return self._json({"error": str(exc)}, 400)
             is_all = ns in _ALL
             # any /api read that can return memory content requires auth on a
             # non-loopback caller (loopback trusted); namespace list is the only
@@ -1749,7 +1843,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                     # LIVENESS O(1): NÃO chamar namespaces() — é @_locked no _conn de ESCRITA e trava
                     # atrás do dream (all()/add()); aí o probe do client estoura → healthy()=false →
                     # o LogicaOS pula o LM e cai no vault. Contagem foi pra /api/namespaces. (fix Camada 0)
-                    _h = {"ok": True, "store": getattr(mind.store, "name", "?")}
+                    try:
+                        private_supported = bool(token) and bool(personal_primary(raw_mind.store))
+                    except ValueError:
+                        private_supported = False
+                    _h = {"ok": True, "store": getattr(mind.store, "name", "?"),
+                          "memoryScopes": ["shared"] + (["personal"] if private_supported else [])}
                     # Também prova o backend efetivo sem consultar o banco. Em
                     # appliance novo, uma dependência Postgres ausente fazia o
                     # launcher cair para SQLite e ainda devolver health 200; o
@@ -1880,6 +1979,9 @@ def make_handler(mind, allow_writes: bool = True, token: str = None):
                 self._json({"error": str(e)}, 500)
 
     return Handler
+
+
+_scoped_handler_factory = make_handler
 
 
 def serve(mind, host: str = "127.0.0.1", port: int = 8420, open_browser: bool = True,

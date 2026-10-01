@@ -667,9 +667,16 @@ class SQLiteStore(Store):
             sql += " AND json_extract(metadata,'$.session') = ?"
             params.append(session)
         for key, value in (metadata_filter or {}).items():
-            # JSON paths cannot be parameterized. Only the two tenancy keys used
-            # by the HTTP boundary are accepted here; values remain parameters.
-            if key not in ("ownerId", "project"):
+            # Values remain bound. Privacy filters must run BEFORE LIMIT/OFFSET
+            # or a neighboring actor's newest rows can starve this page.
+            if key == "$not":
+                conditions = value if isinstance(value, list) else [value]
+                for condition in conditions:
+                    if condition == {"memoryScope": "personal"}:
+                        sql += " AND COALESCE(json_extract(metadata,'$.memoryScope'),'shared') <> ?"
+                        params.append("personal")
+                continue
+            if key not in ("ownerId", "project", "actorId", "memoryScope"):
                 continue
             sql += f" AND json_extract(metadata,'$.{key}') = ?"
             params.append(value)

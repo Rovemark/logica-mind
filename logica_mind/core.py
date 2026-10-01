@@ -15,6 +15,7 @@ import os
 import re as _re
 import sys
 import time
+import threading
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
@@ -33,6 +34,9 @@ from .graph.extractor import GraphExtractor
 from .user.dialectic import DialecticUserModel
 from .continuity.self_model import hide_self_model
 from .rerank.base import Reranker
+
+
+_LOG_LOCKS = [threading.Lock() for _ in range(64)]
 
 
 def _new_session_suffix() -> str:
@@ -388,6 +392,7 @@ class LogicaMind:
         tags: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         session: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> Optional[Memory]:
         """Store a raw EPISODIC turn/event — no extraction, no dedup."""
         text = (text or "").strip()
@@ -398,17 +403,38 @@ class LogicaMind:
             meta["role"] = role
         if session:
             meta["session"] = session
-        mem = Memory(
-            content=text,
-            namespace=self.namespace,
-            layer=MemoryLayer.EPISODIC,
-            importance=importance,
-            tags=tags or [],
-            metadata=meta,
-            embedding=self._embed(text),
-        )
-        self.store.add([mem])
-        return mem
+        memory_id = None
+        if idempotency_key is not None:
+            import hashlib
+            import json
+            key = str(idempotency_key)
+            if not key or len(key) > 300 or any(ord(ch) < 32 for ch in key):
+                raise ValueError("invalid log idempotency key")
+            partition = {k: meta.get(k) for k in ("ownerId", "actorId", "project", "memoryScope", "session")}
+            memory_id = hashlib.sha256(json.dumps([self.namespace, partition, key], sort_keys=True).encode()).hexdigest()
+            lock = _LOG_LOCKS[int(memory_id[:8], 16) % len(_LOG_LOCKS)]
+        else:
+            from contextlib import nullcontext
+            lock = nullcontext()
+        with lock:
+            if memory_id:
+                previous = self.store.get(self.namespace, memory_id)
+                if previous:
+                    if previous.content != text:
+                        raise ValueError("log idempotency key reused with different content")
+                    return previous
+            mem = Memory(
+                content=text,
+                namespace=self.namespace,
+                layer=MemoryLayer.EPISODIC,
+                importance=importance,
+                tags=tags or [],
+                metadata=meta,
+                embedding=self._embed(text),
+                **({"id": memory_id} if memory_id else {}),
+            )
+            self.store.add([mem])
+            return mem
 
     # ---- structured session / run records ----------------------------------
     def record_session(
