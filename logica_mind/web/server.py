@@ -343,7 +343,7 @@ try:
     from ..banco import servico as _banco   # noqa: E402
     from ..banco import ponte as _ponte     # noqa: E402
 except Exception as _e:                            # pragma: no cover
-    _banco_erro = repr(_e)
+    _banco_erro = type(_e).__name__
 _MIME = {
     ".html": "text/html; charset=utf-8", ".js": "application/javascript",
     ".mjs": "application/javascript", ".css": "text/css", ".json": "application/json",
@@ -391,6 +391,14 @@ def _is_internal(m) -> bool:
 # in-process API metrics for the Analytics view — the dashboard's server
 # self-measures the requests it serves (count, latency, errors). Reset per process.
 _OPS = {"requests": 0, "errors": 0, "total_ms": 0.0}
+
+
+def _storage_unavailable(error) -> bool:
+    """Driver categories only: their messages may contain private DSNs and SQL."""
+    return isinstance(error, (ConnectionError, TimeoutError, OSError)) or (
+        type(error).__module__.startswith(("psycopg", "psycopg_pool")) and
+        (type(error).__name__ in ("OperationalError", "InterfaceError", "PoolTimeout", "PoolClosed")
+         or str(getattr(error, "sqlstate", "") or "").startswith("08")))
 
 
 class _Http400(Exception):
@@ -633,24 +641,39 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
             a identidade e traduz a resposta."""
             if _banco is None:
                 return self._json({"ok": False, "erro": {"codigo": 503,
-                                   "msg": f"camada Banco de dados indisponível: {_banco_erro}"}}, 503)
+                                   "tipo": "BANCO_UNAVAILABLE",
+                                   "msg": "Banco de dados temporariamente indisponível"}}, 503)
             try:
                 r = _banco.despacha(metodo, path, qs, body,
                                     self.headers.get("Authorization", ""),
                                     token or "", _PUBLIC_READ,
-                                    de_loopback=self.client_address[0] in _LOOPBACK)
+                                    de_loopback=self.client_address[0] in _LOOPBACK,
+                                    inspection_capability=self.headers.get("X-LogicaOS-System-Inspection", ""),
+                                    request_target=self.path)
             except Exception as e:   # nunca deixar a camada nova derrubar o worker
-                import traceback, sys as _s
-                traceback.print_exc(file=_s.stderr)
-                return self._json({"ok": False, "erro": {"codigo": 500, "msg": repr(e)}}, 500)
+                # Driver exceptions may contain DSNs, SQL and personal row values.
+                # Never send repr/traceback to the client or unbounded PM2 logs.
+                unavailable = _storage_unavailable(e)
+                status = 503 if unavailable else 500
+                return self._json({"ok": False, "erro": {"codigo": status,
+                    "tipo": "BANCO_UNAVAILABLE" if unavailable else "BANCO_INTERNAL_ERROR",
+                    "msg": "Banco de dados temporariamente indisponível" if unavailable else "Erro interno no Banco de dados"}}, status)
             if r is None:
                 return self._json({"error": "not found"}, 404)
             return self._json(r.corpo, r.codigo)
 
+        def _memory_failure(self, error):
+            unavailable = _storage_unavailable(error)
+            return self._json({"ok": False,
+                "error": "Memory storage temporarily unavailable" if unavailable else "Internal memory service error",
+                "code": "MEMORY_UNAVAILABLE" if unavailable else "MEMORY_INTERNAL_ERROR"},
+                503 if unavailable else 500)
+
         def _body(self) -> dict:
             try:
                 n = int(self.headers.get("Content-Length", 0))
-                raw = self.rfile.read(n).decode("utf-8") if n else ""
+                self._request_body_raw = self.rfile.read(n) if n else b""
+                raw = self._request_body_raw.decode("utf-8")
                 data = json.loads(raw) if raw.strip() else {}
                 return data if isinstance(data, dict) else {}
             except Exception:
@@ -751,11 +774,11 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
             # the caller is already authorized (loopback or bearer token); the known
             # set just catches cross-tenant typos. A well-formed NEW namespace is
             # allowed so a first write can bootstrap a fresh agent; junk is rejected.
-            known = {n["namespace"] for n in mind.list_namespaces()} | {mind.namespace}
-            if ns not in known and not _personal and not _NS_RE.match(ns):
-                return self._json({"error": "invalid namespace"}, 400)
-            target = mind.for_namespace(ns)
             try:
+                known = {n["namespace"] for n in mind.list_namespaces()} | {mind.namespace}
+                if ns not in known and not _personal and not _NS_RE.match(ns):
+                    return self._json({"error": "invalid namespace"}, 400)
+                target = mind.for_namespace(ns)
                 if path == "/api/remember":
                     scope = _write_scope(body)
                     created = target.remember(str(body.get("text", "")), session=body.get("session"),
@@ -765,12 +788,22 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     # continuity substrate: merge a patch into the agent's self-model.
                     # IDENTITY GUARD on the data plane: an identity drift (filled -> different)
                     # is the red zone and is BLOCKED here too, not only on the heartbeat path.
-                    # The initial seed (empty -> filled) is yellow and passes. `seed: true` is the
-                    # admin override (identity correction), used only by the seed-identity tool.
+                    # Initial empty -> filled still passes normally. Identity correction
+                    # is an explicit signed human-admin override, never a body role/flag.
                     from ..continuity import SelfModel, zone_guard
                     from ..continuity.guard import SelfRewriteBlocked
+                    from ..banco.system_inspection import seed_authorized
+                    if "seed" in body and not isinstance(body["seed"], bool):
+                        return self._json({"error": "seed must be a boolean"}, 400)
+                    seed = body.get("seed") is True
+                    if seed and not seed_authorized(
+                            self.headers.get("X-LogicaOS-Identity-Seed", ""), token or "",
+                            self.command, self.path, str(os.environ.get("LOGICAOS_OWNER_ID") or "dono").strip(),
+                            self.headers.get("Authorization", ""), self.client_address[0] in _LOOPBACK,
+                            getattr(self, "_request_body_raw", b"")):
+                        return self._json({"error": "identity correction requires authenticated human administrator"}, 403)
                     scope = _write_scope(body)
-                    _guard = None if body.get("seed") else zone_guard(block_zones=("red",))
+                    _guard = None if seed else zone_guard(block_zones=("red",))
                     try:
                         saved = SelfModel(target.store, ns, guard=_guard,
                                           metadata_scope=scope).save(body.get("patch") or {})
@@ -816,7 +849,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     if tool in LOCAL_TOOLS:
                         return self._json({"error": f"{tool} runs on the client machine, not the brain"}, 400)
                     scope = _write_scope(body)
-                    srv = MCPServer(target, remote_url="", metadata_scope=scope)   # never re-forward (no recursion)
+                    srv = MCPServer(target, remote_url="", metadata_scope=scope, protect_internal=True)   # never re-forward (no recursion)
                     srv.source = str(body.get("source") or "remote-mcp")
                     payload = srv._dispatch(tool, body.get("args") or {})
                     self._json({"result": payload})
@@ -885,6 +918,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                         memory_id=body.get("id"), query=body.get("query"),
                         contains=body.get("contains"),
                         metadata_filter=scope or None,
+                        protect_internal=True,
                     )})
                 elif path == "/api/entity/alias":
                     # rename/merge an entity (non-destructive): variant resolves to
@@ -902,15 +936,16 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     entity = str(body.get("entity", "")).strip()
                     if not entity:
                         return self._json({"error": "entity required"}, 400)
+                    scope = _write_scope(body)
                     # GDPR erase must cover EVERY agent when the dashboard is on the
                     # aggregate (__all__) view — otherwise the call resolves to the
                     # never-persisted '__all__' namespace and silently deletes nothing
                     # while the UI reports success. Loop across all real namespaces.
                     if ns in _ALL:
-                        deleted = sum(mind.for_namespace(nm).forget_about(entity)
+                        deleted = sum(mind.for_namespace(nm).forget_about(entity, metadata_filter=scope or None, protect_internal=True)
                                       for nm in mind.store.namespaces())
                     else:
-                        deleted = target.forget_about(entity)
+                        deleted = target.forget_about(entity, metadata_filter=scope or None, protect_internal=True)
                     self._json({"deleted": deleted, "entity": entity})
                 elif path == "/api/observe_user":
                     mem = target.observe_user(str(body.get("text", "")))
@@ -946,8 +981,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                         out = rep.asdict() if hasattr(rep, "asdict") else (
                             rep.__dict__ if hasattr(rep, "__dict__") else rep)
                         self._json({"ok": True, "report": out, "llm": getattr(dmind.llm, "name", "null")})
+                    except _Http400 as e:
+                        self._json({"error": str(e)}, 400)
                     except Exception as e:
-                        self._json({"ok": False, "error": str(e)}, 500)
+                        self._memory_failure(e)
                 elif path == "/api/reinforce":
                     # CAUSAL: calibra a confiança de uma aresta causal com a REALIDADE — o efeito
                     # previsto aconteceu (correct=true) → sobe; não aconteceu → desce. Auto-correção.
@@ -1016,8 +1053,14 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     md = rec.metadata or {}
                     self._json({"ok": True, "id": rec.id, "session": md.get("session")})
                 elif path == "/api/import-bundle":
-                    n = target.import_bundle(body.get("bundle") or {}, secret=body.get("secret"),
-                                             verify=bool(body.get("secret")))
+                    scope = _write_scope(body)
+                    if not scope.get("ownerId") and (_multiuser() or self._company_gateway()):
+                        return self._json({"error": "owner scope required for bundle import"}, 400)
+                    try:
+                        n = target.import_bundle(body.get("bundle") or {}, secret=body.get("secret"),
+                                                 verify=bool(body.get("secret")), metadata_scope=scope, protect_internal=True)
+                    except ValueError:
+                        return self._json({"error": "bundle rejected: signature, reserved records or scope mismatch"}, 403)
                     self._json({"imported": n})
                 elif path == "/api/sessions/rename":
                     sid = str(body.get("session_id", "")).strip()
@@ -1035,33 +1078,47 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     # danger-zone: clear memories by layer / age / full namespace reset
                     layer_str = body.get("layer")
                     older_than_days = body.get("older_than_days")
-                    purge_all = bool(body.get("purge_all"))
-                    tgt_ns = (body.get("namespace") or mind.namespace)
+                    if "purge_all" in body and not isinstance(body["purge_all"], bool):
+                        return self._json({"error": "purge_all must be a boolean"}, 400)
+                    purge_all = body.get("purge_all") is True
+                    scope = _write_scope(body)
+                    if not scope.get("ownerId") and (_multiuser() or self._company_gateway()):
+                        return self._json({"error": "owner scope required for clearing memories"}, 400)
+                    tgt_ns = ns
                     # validate the layer up front (clean 400, not a 500 from MemoryLayer())
                     if layer_str and layer_str not in {l.value for l in MemoryLayer}:
                         return self._json({"error": f"invalid layer '{layer_str}'"}, 400)
-                    tgt = mind.for_namespace(tgt_ns)
+                    from ..core import _mutable_in_scope
                     deleted = 0
-                    if purge_all:
-                        tgt.purge()
-                        deleted = -1  # unknown count after purge
-                    elif older_than_days is not None:
+                    cutoff_ts = None
+                    if older_than_days is not None and not purge_all:
                         import time as _time
+                        import math
                         try:
-                            cutoff_ts = _time.time() - float(older_than_days) * 86400
+                            days = float(older_than_days)
+                            if not math.isfinite(days) or days < 0:
+                                raise ValueError()
+                            cutoff_ts = _time.time() - days * 86400
                         except (ValueError, TypeError):
                             return self._json({"error": "older_than_days must be a number"}, 400)
-                        layers = [MemoryLayer(layer_str)] if layer_str else None
-                        to_del = [m for m in mind.store.all(tgt_ns, layers, with_embeddings=False)
-                                  if m.created_at and
-                                  _time.mktime(_time.strptime(m.created_at[:19], "%Y-%m-%dT%H:%M:%S")) < cutoff_ts]
-                        for m in to_del:
-                            if mind.store.delete(tgt_ns, m.id):
-                                deleted += 1
-                    elif layer_str:
-                        deleted = mind.store.delete_layers(tgt_ns, [MemoryLayer(layer_str)])
-                    else:
+                    if not purge_all and cutoff_ts is None and not layer_str:
                         return self._json({"error": "specify layer, older_than_days, or purge_all"}, 400)
+                    layers = [MemoryLayer(layer_str)] if layer_str and not purge_all else None
+                    for memory in mind.store.all(tgt_ns, layers, with_embeddings=False):
+                        if not _mutable_in_scope(memory, scope, protect_internal=True):
+                            continue
+                        if cutoff_ts is not None:
+                            try:
+                                from datetime import datetime, timezone
+                                created_at = datetime.fromisoformat(str(memory.created_at).replace("Z", "+00:00"))
+                                if created_at.tzinfo is None:
+                                    created_at = created_at.replace(tzinfo=timezone.utc)
+                                created = created_at.timestamp()
+                            except (ValueError, TypeError):
+                                continue
+                            if created >= cutoff_ts:
+                                continue
+                        deleted += int(mind.store.delete(tgt_ns, memory.id))
                     self._json({"ok": True, "deleted": deleted, "namespace": tgt_ns})
                 elif path == "/api/demo/seed":
                     from .. import demo as _demo
@@ -1069,13 +1126,21 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     self._json({"ok": True, "seeded": n})
                 elif path == "/api/demo/clear":
                     from .. import demo as _demo
-                    self._json({"ok": True, "deleted": _demo.clear(mind)})
+                    scope = _write_scope(body)
+                    from ..core import _mutable_in_scope
+                    deleted = 0
+                    for namespace in mind.store.namespaces():
+                        for memory in mind.store.all(namespace, with_embeddings=False):
+                            if (_mutable_in_scope(memory, scope, protect_internal=True) and
+                                    ((memory.metadata or {}).get(_demo.DEMO_FLAG) or _demo.DEMO_FLAG in (memory.tags or []))):
+                                deleted += int(mind.store.delete(namespace, memory.id))
+                    self._json({"ok": True, "deleted": deleted})
                 else:
                     self._json({"error": "not found"}, 404)
             except _Http400 as e:
                 self._json({"error": str(e)}, 400)
             except Exception as e:
-                self._json({"error": str(e)}, 500)
+                self._memory_failure(e)
 
         def do_GET(self):
             import time as _t
@@ -1976,7 +2041,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
             except _Http400 as e:
                 self._json({"error": str(e)}, 400)
             except Exception as e:
-                self._json({"error": str(e)}, 500)
+                self._memory_failure(e)
 
     return Handler
 

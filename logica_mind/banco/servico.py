@@ -53,6 +53,7 @@ from .calculados import ErroDeCalculo
 from .consulta import montar, montar_contagem_por_grupo, ErroDeConsulta
 from .nucleo import ErroDeBanco
 from .xp import ErroDeProgresso
+from .system_inspection import SYSTEM_TABLES, OWNER_TABLES, authorized as inspection_authorized, safe_columns
 
 PREFIXO = "/api/banco/"
 
@@ -252,7 +253,8 @@ def _ok(dados=None, **kw):
     return Resposta(200, c)
 
 
-def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str) -> Resposta:
+def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
+          *, inspection_allowed: bool = False) -> Resposta:
     """Roteia uma chamada já autenticada e já admitida pelo semáforo."""
     acao = caminho[len(PREFIXO):]
     escrita = metodo == "POST"
@@ -262,6 +264,17 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str) -> Res
     def um(nome, padrao=None):
         v = qs.get(nome)
         return (v[0] if isinstance(v, list) and v else v) or padrao
+
+    if acao in ("tabela", "tabelas"):
+        esq = um("esquema", "banco")
+        if metodo != "GET":
+            return _erro(405, "inspeção é somente leitura")
+        if esq not in ("banco", _SCHEMA_SISTEMA):
+            return _erro(400, "esquema não permitido")
+        if (esq == _SCHEMA_SISTEMA or _eh_dono(user_id)) and not inspection_allowed:
+            return _erro(403, "inspeção global exige administrador humano autenticado")
+        if esq == _SCHEMA_SISTEMA and acao == "tabela" and um("nome") not in SYSTEM_TABLES:
+            return _erro(403, "tabela não permitida para inspeção")
 
     with pool().connection() as con, con.cursor() as cur:
         cur.execute("SET search_path TO banco, public")
@@ -485,7 +498,7 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str) -> Res
                 cur.execute("""SELECT c.relname, pg_size_pretty(pg_total_relation_size(c.oid))
                                FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                                WHERE n.nspname=%s AND c.relkind='r' ORDER BY 1""", (_SCHEMA_SISTEMA,))
-                tam = dict(cur.fetchall())
+                tam = {name: size for name, size in cur.fetchall() if name in SYSTEM_TABLES}
                 cur.execute("""SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod), NOT a.attnotnull
                                FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
                                JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -493,16 +506,22 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str) -> Res
                                ORDER BY c.relname, a.attnum""", (_SCHEMA_SISTEMA,))
                 colsis: dict = {}
                 for rel, nome, tipo, nulo in cur.fetchall():
-                    colsis.setdefault(rel, []).append({"nome": nome, "tipo": tipo, "nulo": nulo})
+                    if rel in tam:
+                        colsis.setdefault(rel, []).append({"nome": nome, "tipo": tipo, "nulo": nulo})
+                tam = {tb: size for tb, size in tam.items()
+                       if safe_columns([c["nome"] for c in colsis.get(tb, [])])
+                       and (tb not in OWNER_TABLES or any(c["nome"] == "owner_id" for c in colsis.get(tb, [])))}
                 if tam:
                     partes = " UNION ALL ".join(
-                        f"SELECT '{tb}' t, count(*) n FROM {_SCHEMA_SISTEMA}.\"{tb}\"" for tb in tam)
-                    cur.execute(partes)
+                        f"SELECT '{tb}' t, count(*) n FROM {_SCHEMA_SISTEMA}.\"{tb}\""
+                        + (" WHERE owner_id=%s" if any(c["nome"] == "owner_id" for c in colsis[tb]) else "")
+                        for tb in tam)
+                    cur.execute(partes, [user_id for tb in tam if any(c["nome"] == "owner_id" for c in colsis[tb])])
                     cnt = dict(cur.fetchall())
                 else:
                     cnt = {}
                 return _ok([{"nome": tb, "total": cnt.get(tb, 0), "minhas": None,
-                             "escopada": False, "esquema": _SCHEMA_SISTEMA,
+                             "escopada": any(c["nome"] == "owner_id" for c in colsis[tb]), "esquema": _SCHEMA_SISTEMA,
                              "tamanho": tam[tb], "colunas": colsis.get(tb, [])}
                             for tb in sorted(tam)])
 
@@ -554,7 +573,7 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str) -> Res
             nome = um("nome")
             esq = um("esquema", "banco")
             if esq == _SCHEMA_SISTEMA:
-                # a lista fechada aqui é o próprio catálogo: só tabela real do schema
+                # Lista fechada antes do pool; catálogo serve somente para tipos/colunas.
                 cur.execute("""SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
                                WHERE n.nspname=%s AND c.relname=%s AND c.relkind='r'""",
                             (_SCHEMA_SISTEMA, nome))
@@ -567,16 +586,22 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str) -> Res
                                WHERE n.nspname=%s AND c.relname=%s AND a.attnum>0 AND NOT a.attisdropped
                                ORDER BY a.attnum""", (_SCHEMA_SISTEMA, nome))
                 colunas = [r[0] for r in cur.fetchall()]
-                cur.execute(f'SELECT count(*) FROM {_SCHEMA_SISTEMA}."{nome}"')
+                if not safe_columns(colunas):
+                    return _erro(403, "tabela contém colunas reservadas")
+                if nome in OWNER_TABLES and "owner_id" not in colunas:
+                    return _erro(403, "tabela sem isolamento de owner")
+                onde = " WHERE owner_id=%s" if "owner_id" in colunas else ""
+                par = [user_id] if onde else []
+                cur.execute(f'SELECT count(*) FROM {_SCHEMA_SISTEMA}."{nome}"{onde}', par)
                 total = cur.fetchone()[0]
                 ordem = ("created_at DESC" if "created_at" in colunas
                          else ("id DESC" if "id" in colunas else f'"{colunas[0]}"'))
-                cur.execute(f'SELECT * FROM {_SCHEMA_SISTEMA}."{nome}" ORDER BY {ordem} LIMIT %s OFFSET %s',
-                            (lim, des))
+                cur.execute(f'SELECT * FROM {_SCHEMA_SISTEMA}."{nome}"{onde} ORDER BY {ordem} LIMIT %s OFFSET %s',
+                            par + [lim, des])
                 return _ok({"nome": nome, "esquema": _SCHEMA_SISTEMA, "colunas": colunas,
                             "linhas": [[_jsonavel(v) for v in r] for r in cur.fetchall()],
                             "total": total, "limite": lim, "desloc": des,
-                            "escopada": False, "somente_leitura": True})
+                            "escopada": bool(onde), "somente_leitura": True})
             if nome not in _TABELAS:
                 return _erro(400, f"tabela desconhecida: {nome!r}")
             limite = max(1, min(int(um("limite", 50) or 50), 200))
@@ -1140,7 +1165,8 @@ def _indexar_da_vista(cur, user_id, no_id, config) -> None:
 
 def despacha(metodo: str, caminho: str, qs: dict, corpo: dict,
              cabecalho_auth: str, token_global: str, publico: bool,
-             de_loopback: bool = False) -> Optional[Resposta]:
+             de_loopback: bool = False, *, inspection_capability: str = "",
+             request_target: str = "") -> Optional[Resposta]:
     """Ponto de entrada do server.py. Devolve None quando o caminho não é do Banco de dados.
 
     A ordem das checagens é a ordem das defesas: desligado antes de autenticado, e
@@ -1178,10 +1204,20 @@ def despacha(metodo: str, caminho: str, qs: dict, corpo: dict,
             return _erro(401, "escrita no Banco de dados exige Bearer, inclusive de loopback")
         user_id = _owner_empresa()
 
+    inspection_allowed = False
+    if caminho[len(PREFIXO):] in ("tabela", "tabelas"):
+        inspection_allowed = inspection_authorized(inspection_capability, token_global,
+            metodo, request_target, user_id, cabecalho_auth, de_loopback)
+        # trata repeats this guard for non-HTTP callers before opening a connection.
+        esq = qs.get("esquema", "banco")
+        esq = esq[0] if isinstance(esq, list) and esq else esq
+        if (esq == _SCHEMA_SISTEMA or _eh_dono(user_id)) and not inspection_allowed:
+            return _erro(403, "inspeção global exige administrador humano autenticado")
+
     if not _SEM.acquire(blocking=False):
         # Falhar rápido é a defesa. Enfileirar aqui seria repetir o colapso de 2026.
         return _erro(503, f"Registro saturado ({_SLOTS} em voo); tente de novo")
     try:
-        return trata(metodo, caminho, qs, corpo or {}, user_id)
+        return trata(metodo, caminho, qs, corpo or {}, user_id, inspection_allowed=inspection_allowed)
     finally:
         _SEM.release()

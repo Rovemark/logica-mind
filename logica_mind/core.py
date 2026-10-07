@@ -36,6 +36,17 @@ from .continuity.self_model import hide_self_model
 from .rerank.base import Reranker
 
 
+def _reserved_continuity(memory) -> bool:
+    """Internal identity/history cannot be reset through generic scoped CRUD."""
+    return str(getattr(memory, "id", "")).startswith("self-model::") or bool(
+        (getattr(memory, "metadata", None) or {}).get("continuity"))
+
+
+def _mutable_in_scope(memory, metadata_filter, *, protect_internal=False) -> bool:
+    return bool(memory) and matches_filter(memory, metadata_filter) and not (
+        (metadata_filter or protect_internal) and _reserved_continuity(memory))
+
+
 _LOG_LOCKS = [threading.Lock() for _ in range(64)]
 
 
@@ -1421,10 +1432,11 @@ class LogicaMind:
         threshold: float = 0.9,
         layers: Optional[List[MemoryLayer]] = None,
         metadata_filter: Optional[Dict[str, Any]] = None,
+        protect_internal: bool = False,
     ) -> int:
         if memory_id:
             memory = self.store.get(self.namespace, memory_id)
-            if not memory or not matches_filter(memory, metadata_filter):
+            if not _mutable_in_scope(memory, metadata_filter, protect_internal=protect_internal):
                 return 0
             return 1 if self.store.delete(self.namespace, memory_id) else 0
         if query:
@@ -1435,7 +1447,7 @@ class LogicaMind:
             )
             n = 0
             for h in hits:
-                if h.score >= threshold:
+                if h.score >= threshold and _mutable_in_scope(h.memory, metadata_filter, protect_internal=protect_internal):
                     n += int(self.store.delete(self.namespace, h.memory.id))
             return n
         if contains is not None or metadata_filter:
@@ -1449,6 +1461,8 @@ class LogicaMind:
             )
             n = 0
             for memory in candidates:
+                if not _mutable_in_scope(memory, metadata_filter, protect_internal=protect_internal):
+                    continue
                 if needle and needle not in str(memory.content or "").casefold():
                     continue
                 n += int(self.store.delete(self.namespace, memory.id))
@@ -1456,10 +1470,10 @@ class LogicaMind:
         return 0
 
     # ---- lifecycle controls (pin / snooze) ---------------------------------
-    def _set_meta(self, memory_id: str, **kv) -> bool:
+    def _set_meta(self, memory_id: str, *, metadata_filter=None, protect_internal=False, **kv) -> bool:
         """Patch a memory's metadata in place (None value removes the key)."""
         mem = self.store.get(self.namespace, memory_id)
-        if not mem:
+        if not _mutable_in_scope(mem, metadata_filter, protect_internal=protect_internal):
             return False
         md = dict(mem.metadata or {})
         for k, v in kv.items():
@@ -1471,19 +1485,19 @@ class LogicaMind:
         self.store.add([mem])                    # add() is an upsert keyed by id
         return True
 
-    def pin(self, memory_id: str) -> bool:
+    def pin(self, memory_id: str, *, metadata_filter=None, protect_internal=False) -> bool:
         """Pin a memory so it always floats to the top of recall."""
-        return self._set_meta(memory_id, pinned=True)
+        return self._set_meta(memory_id, metadata_filter=metadata_filter, protect_internal=protect_internal, pinned=True)
 
-    def unpin(self, memory_id: str) -> bool:
-        return self._set_meta(memory_id, pinned=None)
+    def unpin(self, memory_id: str, *, metadata_filter=None, protect_internal=False) -> bool:
+        return self._set_meta(memory_id, metadata_filter=metadata_filter, protect_internal=protect_internal, pinned=None)
 
-    def snooze(self, memory_id: str, until: str) -> bool:
+    def snooze(self, memory_id: str, until: str, *, metadata_filter=None, protect_internal=False) -> bool:
         """Hide a memory from recall until `until` (ISO date/datetime)."""
-        return self._set_meta(memory_id, snooze_until=until)
+        return self._set_meta(memory_id, metadata_filter=metadata_filter, protect_internal=protect_internal, snooze_until=until)
 
-    def unsnooze(self, memory_id: str) -> bool:
-        return self._set_meta(memory_id, snooze_until=None)
+    def unsnooze(self, memory_id: str, *, metadata_filter=None, protect_internal=False) -> bool:
+        return self._set_meta(memory_id, metadata_filter=metadata_filter, protect_internal=protect_internal, snooze_until=None)
 
     # ---- user model --------------------------------------------------------
     @staticmethod
@@ -2297,7 +2311,7 @@ class LogicaMind:
         out.sort(key=lambda x: _parse_dt(x["created_at"]) or _epoch)
         return out
 
-    def forget_about(self, entity: str) -> int:
+    def forget_about(self, entity: str, *, metadata_filter=None, protect_internal=False) -> int:
         """GDPR-style erase: delete every memory mentioning `entity` (any layer)
         and every graph edge touching it. Returns the number removed."""
         ent = (entity or "").strip().lower()
@@ -2307,6 +2321,8 @@ class LogicaMind:
         ent_toks = _tokset(ent)
         n = 0
         for m in self.store.all(self.namespace):
+            if not _mutable_in_scope(m, metadata_filter, protect_internal=protect_internal):
+                continue
             md = m.metadata or {}
             mentions = bool(ent_toks) and ent_toks <= _tokset(m.content)
             if (mentions
@@ -2482,7 +2498,8 @@ class LogicaMind:
         return {"payload": payload, "signature": sig}
 
     def import_bundle(self, bundle: Dict[str, Any], secret: Optional[str] = None,
-                      verify: bool = True) -> int:
+                      verify: bool = True, *, metadata_scope: Optional[Dict[str, Any]] = None,
+                      protect_internal: bool = False) -> int:
         """Import a (signed) memory bundle into this namespace. Verifies the HMAC
         signature when a secret is given. Re-embeds missing vectors. Returns count."""
         payload = bundle.get("payload") or {}
@@ -2491,13 +2508,59 @@ class LogicaMind:
             expect = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
             if not hmac.compare_digest(expect, str(bundle.get("signature") or "")):
                 raise ValueError("bundle signature verification failed — refusing import")
-        n = 0
+        scope = dict(metadata_scope or {})
+        prepared = []
+        id_map = {}
         for d in payload.get("memories", []):
             try:
                 m = Memory.from_dict(d)
             except Exception:
                 continue
             m.namespace = self.namespace
+            if scope or protect_internal:
+                # Validate the entire batch BEFORE the first upsert. An imported ID
+                # must not overwrite another owner/project or bypass identity guards.
+                existing = self.store.get(self.namespace, m.id)
+                if _reserved_continuity(m) or (existing and _reserved_continuity(existing)):
+                    raise ValueError("bundle contains reserved continuity records")
+                if scope and existing and not matches_filter(existing, scope):
+                    raise ValueError("bundle ID is outside the authenticated scope")
+                md = dict(m.metadata or {})
+                if md.get("memoryScope") not in (None, "shared") or str(m.id).startswith("private-cli-"):
+                    raise ValueError("bundle contains private memory records")
+                md.pop("owner_id", None); md.pop("project_id", None)
+                md.update(scope)
+                if scope:
+                    original_id = m.id
+                    if original_id in id_map:
+                        raise ValueError("bundle contains duplicate IDs")
+                    if not existing:
+                        # SQL stores key IDs globally, not by namespace. Bind new
+                        # IDs to namespace + owner + project; repeat imports remain
+                        # idempotent and concurrent foreign owners cannot collide.
+                        identity = json.dumps([self.namespace, scope.get("ownerId"), scope.get("project"), original_id],
+                                              ensure_ascii=False, separators=(",", ":"))
+                        m.id = "import::" + hashlib.sha256(identity.encode()).hexdigest()
+                        mapped = self.store.get(self.namespace, m.id)
+                        if mapped and not _mutable_in_scope(mapped, scope):
+                            raise ValueError("mapped bundle ID is outside the authenticated scope")
+                        md["importedId"] = original_id
+                    id_map[original_id] = m.id
+                m.metadata = md
+            prepared.append(m)
+        if scope:
+            for memory in prepared:
+                sources = []
+                for source_id in memory.source_ids or []:
+                    if source_id in id_map:
+                        sources.append(id_map[source_id])
+                    else:
+                        source = self.store.get(self.namespace, source_id)
+                        if _mutable_in_scope(source, scope):
+                            sources.append(source_id)
+                memory.source_ids = sources
+        n = 0
+        for m in prepared:
             if not m.embedding:
                 m.embedding = self._embed(m.content)
             self.store.add([m])
@@ -2566,7 +2629,9 @@ class LogicaMind:
 
     # ---- Ebbinghaus forgetting curve ----------------------------------------
     def forget_curve(
-        self, days_halflife: float = 30.0, apply: bool = False, limit: int = 20
+        self, days_halflife: float = 30.0, apply: bool = False, limit: int = 20,
+        *, metadata_filter: Optional[Dict[str, Any]] = None,
+        protect_internal: bool = False,
     ) -> List[Dict[str, Any]]:
         """Return beliefs sorted by how much they'll decay in the next 7 days.
 
@@ -2582,6 +2647,8 @@ class LogicaMind:
         halflife_s = days_halflife * 86400.0
 
         for m in self.store.all(self.namespace, [MemoryLayer.SEMANTIC, MemoryLayer.EPISODIC]):
+            if not matches_filter(m, metadata_filter) or (apply and (metadata_filter or protect_internal) and _reserved_continuity(m)):
+                continue
             ref_at = m.last_recalled_at or m.created_at or ""
             age_s = max(0.0, now_ts - (
                 datetime.fromisoformat(ref_at.replace("Z", "+00:00")).timestamp()

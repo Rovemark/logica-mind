@@ -346,7 +346,7 @@ TOOLS = [
 
 class MCPServer:
     def __init__(self, mind, name: str = "logica-mind", remote_url: Optional[str] = None,
-                 metadata_scope: Optional[Dict[str, Any]] = None):
+                 metadata_scope: Optional[Dict[str, Any]] = None, *, protect_internal: bool = False):
         self.mind = mind
         self.name = name
         self._team = None  # memoized remote team mind (or None)
@@ -354,6 +354,7 @@ class MCPServer:
         # from the MCP initialize handshake; tags captured memories with their origin
         self.source = os.environ.get("LOGICA_MIND_SOURCE")
         self.metadata_scope = dict(metadata_scope or {})
+        self.protect_internal = protect_internal
         # CLUSTER MODE: when the brain lives on another machine (one server, many
         # clients), LOGICA_MIND_URL points the MCP at it — every memory tool is
         # forwarded to the server's /api/mcp/dispatch (which runs the SAME dispatch
@@ -470,6 +471,9 @@ class MCPServer:
         if self.source:
             src_meta["source"] = self.source
         src_meta = src_meta or None
+        mutation_scope = {"metadata_filter": self.metadata_scope} if self.metadata_scope else {}
+        if self.protect_internal:
+            mutation_scope["protect_internal"] = True
         if name == "lm_remember":
             created = m.remember(args["text"], session=args.get("session"), metadata=src_meta)
             return {"stored": [c.content for c in created], "count": len(created),
@@ -524,14 +528,17 @@ class MCPServer:
         if name == "lm_diff":
             return m.diff(args["since"], until=args.get("until"))
         if name == "lm_forget":
-            return {"deleted": m.forget(memory_id=args.get("id"), query=args.get("query"))}
+            return {"deleted": m.forget(memory_id=args.get("id"), query=args.get("query"),
+                                      **mutation_scope)}
         if name == "lm_pin":
-            ok = m.unpin(args["id"]) if args.get("unpin") else m.pin(args["id"])
+            scope_args = mutation_scope
+            ok = m.unpin(args["id"], **scope_args) if args.get("unpin") else m.pin(args["id"], **scope_args)
             return {"ok": ok, "pinned": not args.get("unpin")}
         if name == "lm_snooze":
+            scope_args = mutation_scope
             if args.get("wake"):
-                return {"ok": m.unsnooze(args["id"]), "snoozed": False}
-            return {"ok": m.snooze(args["id"], args.get("until", "")), "snoozed": True}
+                return {"ok": m.unsnooze(args["id"], **scope_args), "snoozed": False}
+            return {"ok": m.snooze(args["id"], args.get("until", ""), **scope_args), "snoozed": True}
         if name == "lm_stats":
             return m.stats(metadata_filter=self.metadata_scope or None)
 
@@ -557,12 +564,14 @@ class MCPServer:
                 for h in mind.recall(args["query"], limit=int(args.get("limit", 8)))
             ])
         if name == "lm_forget_about":
-            return {"deleted": m.forget_about(args["entity"])}
+            return {"deleted": m.forget_about(args["entity"],
+                                            **mutation_scope)}
         if name == "lm_forget_curve":
             return m.forget_curve(
                 days_halflife=float(args.get("days_halflife", 30)),
                 apply=bool(args.get("apply", False)),
                 limit=int(args.get("limit", 20)),
+                **mutation_scope,
             )
         if name == "lm_contested_beliefs":
             return m.contested_beliefs(confidence_threshold=float(args.get("threshold", 0.65)))
