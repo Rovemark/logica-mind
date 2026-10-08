@@ -50,8 +50,8 @@ from urllib.parse import parse_qs, urlparse
 
 from . import calculados as C, dependencias as D, esquema, modelos as M, notificacoes as NF, nucleo as N, ponte as P, recorrencia as R, xp as X
 from .calculados import ErroDeCalculo
-from .consulta import montar, montar_contagem_por_grupo, ErroDeConsulta
-from .nucleo import ErroDeBanco
+from .consulta import montar, montar_contagem_por_grupo, gerar_cursor, cursor_ancora, ErroDeConsulta, ErroDeCursorExpirado
+from .nucleo import ErroDeBanco, ErroDeConflito
 from .xp import ErroDeProgresso
 from .system_inspection import SYSTEM_TABLES, OWNER_TABLES, authorized as inspection_authorized, safe_columns
 
@@ -348,11 +348,20 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
             except (ValueError, TypeError):
                 return _erro(400, "limite precisa ser um número inteiro")
             try:
+                ancora = None
+                info = cursor_ancora(no_id, user_id, tipos, um("cursor"), filtro=filtro, ordenacao=ordenacao)
+                if info:
+                    cur.execute("SELECT id FROM banco.linha WHERE id=%s AND no_id=%s AND user_id=%s AND deletado_em IS NULL AND arquivado_em IS NULL FOR SHARE", (info[0], no_id, user_id))
+                    if not cur.fetchone():
+                        raise ErroDeCursorExpirado("a âncora da página não existe mais; atualize a vista")
+                    sql_a, params_a = montar(no_id, user_id, tipos, filtro=filtro, ordenacao=ordenacao, limite=1, ancora_id=info[0])
+                    cur.execute(sql_a, params_a)
+                    ancora = cur.fetchone()
                 sql, params = montar(no_id, user_id, tipos, filtro=filtro,
                                      ordenacao=ordenacao, limite=limite,
-                                     cursor=um("cursor"))
+                                     cursor=um("cursor"), ancora=ancora)
             except ErroDeConsulta as e:
-                return _erro(400, str(e))
+                return _erro(getattr(e, "codigo", 400), str(e))
             cur.execute(sql, params)
             linhas = cur.fetchall()
             tem_mais = len(linhas) > limite
@@ -389,7 +398,8 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                                                              "titulo": titulo_origem, "sentido": "entrando"})
                 for item in saida:
                     item["elos"] = por_id[item["id"]]
-            prox = f"{linhas[-1][4]}|{linhas[-1][0]}" if (tem_mais and linhas) else None
+            prox = gerar_cursor(no_id, user_id, tipos, linhas[-1], filtro=filtro,
+                                ordenacao=ordenacao) if (tem_mais and linhas) else None
             resp = {"linhas": saida, "cursor": prox, "tem_mais": tem_mais}
             agrupar = um("agrupar")
             if agrupar:
@@ -476,9 +486,16 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                                              incluir_resolvidos=um("resolvidos") == "1"))
 
         if acao == "notificacoes":
+            periodo = um("periodo") or None
+            if periodo is not None and periodo not in {"agora", "proximas", "arquivo"}:
+                return _erro(400, "período de notificações inválido")
+            try:
+                limite = int(um("limite", 100) or 100)
+            except (TypeError, ValueError):
+                return _erro(400, "limite precisa ser um número inteiro")
             return _ok(NF.listar(cur, user_id,
                 incluir_lidas=um("lidas") == "1", incluir_futuras=um("futuras") == "1",
-                limite=int(um("limite", 100) or 100)))
+                limite=limite, periodo=periodo))
 
         if acao == "progresso":
             return _ok(X.painel(cur, user_id))
@@ -818,40 +835,63 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 _enfileirar_no_e_linhas(cur, user_id, corpo["no_id"])
                 return _ok(p)
             if acao == "propriedade.renomear":
+                no_prop, tipo_prop, atual = N.bloquear_propriedade(cur, user_id, corpo["id"])
+                config = corpo.get("config")
+                if config is not None and tipo_prop in ("selecao", "multi_selecao"):
+                    config = N.preparar_config_opcoes(atual, config)
                 cur.execute("UPDATE banco.propriedade SET nome=%s, config=COALESCE(%s,config) "
                             "WHERE id=%s AND user_id=%s",
-                            (corpo.get("nome"), json.dumps(corpo["config"]) if corpo.get("config") else None,
+                            (corpo.get("nome"), json.dumps(config) if config is not None else None,
                              corpo["id"], user_id))
                 if not cur.rowcount:
                     return _erro(404, "propriedade não encontrada")
                 cur.execute("SELECT no_id FROM banco.propriedade WHERE id=%s AND user_id=%s",
                             (corpo["id"], user_id))
                 _enfileirar_no_e_linhas(cur, user_id, str(cur.fetchone()[0]))
-                return _ok({"id": corpo["id"]})
+                propriedade = next(p for p in N.propriedades(cur, user_id, str(no_prop)) if p["id"] == corpo["id"])
+                return _ok({"id": corpo["id"], "propriedade": propriedade})
+            if acao == "propriedade.opcao.alterar":
+                if set(corpo) - {"id", "nome", "novo_nome", "versao"} or not {"id", "nome", "novo_nome"}.issubset(corpo):
+                    return _erro(400, "a alteração da opção exige id, nome e novo_nome")
+                # The outer handler catches domain errors. A nested transaction
+                # is essential: returning 400 must not commit the earlier rows,
+                # choice metadata, calculations or reminder/bridge side effects.
+                with con.transaction():
+                    no_id, mudancas, propriedade, filtros, revisar = N.alterar_opcao(cur, user_id, corpo["id"], corpo["nome"], corpo["novo_nome"], corpo.get("versao", 0))
+                    for linha_id, valores in mudancas:
+                        D.validar_conclusao(cur, user_id, linha_id, valores)
+                        atualizada = N.atualizar_linha(cur, user_id, linha_id, valores)
+                        NF.sincronizar_lembretes(cur, user_id, atualizada)
+                        ajustados = D.reprogramar_dependentes(cur, user_id, linha_id)
+                        _registrar_reprogramacoes(cur, user_id, ajustados)
+                        C.recalcular_cascata(cur, user_id, linha_id)
+                        P.enfileirar_linha(cur, user_id, linha_id)
+                    P.enfileirar_no(cur, user_id, no_id)
+                return _ok({"propriedade": propriedade, "linhas_alteradas": len(mudancas),
+                            "filtros_atualizados": filtros, "referencias_revisar": revisar})
             if acao == "propriedade.salvar":
-                cur.execute("SELECT no_id,tipo,config FROM banco.propriedade WHERE id=%s AND user_id=%s",
-                            (corpo["id"], user_id))
-                propriedade_atual = cur.fetchone()
-                if not propriedade_atual:
-                    return _erro(404, "propriedade não encontrada")
-                no_propriedade, tipo_propriedade, config_atual = propriedade_atual
-                config_nova = corpo.get("config") if "config" in corpo else config_atual
-                if tipo_propriedade in ("formula", "rollup"):
-                    C.validar_config(cur, user_id, str(no_propriedade), tipo_propriedade, config_nova or {})
-                cur.execute("UPDATE banco.propriedade SET "
-                            "nome=COALESCE(%s,nome), "
-                            "config=CASE WHEN %s THEN %s::jsonb ELSE config END, "
-                            "ordem=COALESCE(%s,ordem), oculta=COALESCE(%s,oculta) "
-                            "WHERE id=%s AND user_id=%s",
-                            (corpo.get("nome"), "config" in corpo,
-                             json.dumps(corpo.get("config") or {}), corpo.get("ordem"),
-                             corpo.get("oculta"), corpo["id"], user_id))
-                if cur.rowcount and tipo_propriedade in ("formula", "rollup"):
-                    C.recalcular_banco(cur, user_id, str(no_propriedade))
-                if not cur.rowcount:
-                    return _erro(404, "propriedade não encontrada")
-                _enfileirar_no_e_linhas(cur, user_id, str(no_propriedade))
-                return _ok({"id": corpo["id"]})
+                with con.transaction():
+                    no_propriedade, tipo_propriedade, config_atual = N.bloquear_propriedade(cur, user_id, corpo["id"])
+                    config_nova = corpo.get("config") if "config" in corpo else config_atual
+                    if "config" in corpo and tipo_propriedade in ("selecao", "multi_selecao"):
+                        config_nova = N.preparar_config_opcoes(config_atual, config_nova)
+                    if tipo_propriedade in ("formula", "rollup"):
+                        C.validar_config(cur, user_id, str(no_propriedade), tipo_propriedade, config_nova or {})
+                    cur.execute("UPDATE banco.propriedade SET "
+                                "nome=COALESCE(%s,nome), "
+                                "config=CASE WHEN %s THEN %s::jsonb ELSE config END, "
+                                "ordem=COALESCE(%s,ordem), oculta=COALESCE(%s,oculta) "
+                                "WHERE id=%s AND user_id=%s",
+                                (corpo.get("nome"), "config" in corpo,
+                                 json.dumps(config_nova or {}), corpo.get("ordem"),
+                                 corpo.get("oculta"), corpo["id"], user_id))
+                    if not cur.rowcount:
+                        raise ErroDeBanco("propriedade não encontrada")
+                    if tipo_propriedade in ("formula", "rollup"):
+                        C.recalcular_banco(cur, user_id, str(no_propriedade))
+                    _enfileirar_no_e_linhas(cur, user_id, str(no_propriedade))
+                    propriedade = next(p for p in N.propriedades(cur, user_id, str(no_propriedade)) if p["id"] == corpo["id"])
+                return _ok({"id": corpo["id"], "propriedade": propriedade})
             if acao == "propriedade.apagar":
                 cur.execute("SELECT p.chave,n.chave_titulo,p.no_id FROM banco.propriedade p "
                             "JOIN banco.no n ON n.id=p.no_id AND n.user_id=p.user_id "
@@ -1101,6 +1141,8 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 return _ok(X.perfil(cur, user_id))
         except KeyError as e:
             return _erro(400, f"campo obrigatório ausente: {e}")
+        except ErroDeConflito as e:
+            return _erro(409, str(e))
         except (ErroDeBanco, ErroDeProgresso, ErroDeConsulta, ErroDeCalculo) as e:
             return _erro(400, str(e))
 

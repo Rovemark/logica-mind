@@ -35,6 +35,10 @@ class ErroDeBanco(ValueError):
     pass
 
 
+class ErroDeConflito(ErroDeBanco):
+    pass
+
+
 def _uid() -> str:
     return str(uuid.uuid4())
 
@@ -215,6 +219,12 @@ def criar_propriedade(cur, user_id: str, no_id: str, nome: str, tipo: str,
         raise ErroDeBanco(f"chave inválida: {chave!r}")
     if chave in usados:
         raise ErroDeBanco(f"chave já existe nesta base: {chave!r}")
+    if tipo in ("selecao", "multi_selecao"):
+        config = config or {}
+        if not isinstance(config, dict):
+            raise ErroDeBanco("configuração de opções inválida")
+        _nomes_opcoes(config)
+        config = {**config, "opcoes_version": 0, "opcoes_retiradas": []}
     ident = _uid()
     cur.execute("INSERT INTO banco.propriedade (id,no_id,user_id,chave,nome,tipo,config,ordem) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,"
@@ -233,10 +243,203 @@ def propriedades(cur, user_id: str, no_id: str) -> list:
              "ordem": float(o), "oculta": oc} for i, c, n, t, cf, o, oc in cur.fetchall()]
 
 
+def bloquear_propriedade(cur, user_id, propriedade_id):
+    cur.execute("SELECT no_id FROM banco.propriedade WHERE id=%s AND user_id=%s", (propriedade_id, user_id))
+    ref = cur.fetchone()
+    if not ref:
+        raise ErroDeBanco("propriedade não encontrada")
+    cur.execute("SELECT id FROM banco.no WHERE id=%s AND user_id=%s FOR UPDATE", (ref[0], user_id))
+    if not cur.fetchone():
+        raise ErroDeBanco("base não encontrada")
+    cur.execute("SELECT no_id,tipo,config FROM banco.propriedade WHERE id=%s AND user_id=%s FOR UPDATE", (propriedade_id, user_id))
+    ref = cur.fetchone()
+    if not ref:
+        raise ErroDeBanco("propriedade não encontrada")
+    return ref
+
+
+def _nomes_opcoes(config):
+    opcoes = config.get("opcoes", [])
+    if not isinstance(opcoes, list):
+        raise ErroDeBanco("configuração de opções inválida")
+    nomes = [op.get("nome") if isinstance(op, dict) else op if isinstance(op, str) else None for op in opcoes]
+    if any(not isinstance(n, str) or not n for n in nomes) or len(set(nomes)) != len(nomes):
+        raise ErroDeBanco("configuração de opções ambígua")
+    return nomes
+
+
+def _versao_opcoes(config):
+    versao = config.get("opcoes_version", 0)
+    if type(versao) is not int or versao < 0:
+        raise ErroDeBanco("versão de opções inválida")
+    return versao
+
+
+def preparar_config_opcoes(atual, nova):
+    """CAS protects choice metadata; clients cannot remove server tombstones."""
+    if not isinstance(atual, dict) or not isinstance(nova, dict):
+        raise ErroDeBanco("configuração de opções inválida")
+    versao = _versao_opcoes(atual)
+    if _versao_opcoes(nova) != versao:
+        raise ErroDeConflito("as opções mudaram em outra aba; atualize antes de salvar")
+    nova = {**nova, "opcoes": nova.get("opcoes", atual.get("opcoes", []))}
+    antigos, nomes = _nomes_opcoes(atual), _nomes_opcoes(nova)
+    retiradas = set(atual.get("opcoes_retiradas") or [])
+    retiradas.update(set(antigos) - set(nomes))
+    retiradas.difference_update(nomes)  # explicit add using a fresh snapshot
+    mudou = nova["opcoes"] != atual.get("opcoes", [])
+    return {**nova, "opcoes_version": versao + int(mudou), "opcoes_retiradas": sorted(retiradas)}
+
+
+def _validar_opcoes_retiradas(cur, user_id, no_id, mudancas, atuais=None):
+    atuais = atuais or {}
+    cur.execute("SELECT chave,tipo,config FROM banco.propriedade WHERE no_id=%s AND user_id=%s AND tipo IN ('selecao','multi_selecao')", (no_id, user_id))
+    for chave, tipo, config in cur.fetchall():
+        if chave not in mudancas or mudancas[chave] is None:
+            continue
+        retiradas = set((config or {}).get("opcoes_retiradas") or [])
+        novo = mudancas[chave]
+        velho = atuais.get(chave)
+        novos = novo if isinstance(novo, list) else [novo]
+        velhos = velho if isinstance(velho, list) else [velho]
+        if any(isinstance(v, str) and v in retiradas and v not in velhos for v in novos):
+            raise ErroDeConflito("uma opção foi retirada em outra aba; atualize antes de atribuir")
+
+
 def tipos_de(props: list) -> dict:
     d = {p["chave"]: p["tipo"] for p in props}
     d["titulo"] = "texto"
     return d
+
+
+def _opcao_em_filtro(filtro, chave, nome, novo_nome, profundidade=0):
+    """Known choice predicates only. Never rewrite expressions or free text."""
+    if not isinstance(filtro, dict) or profundidade > 25:
+        return filtro, False
+    novo, afetado = dict(filtro), False
+    for grupo in ("e", "ou"):
+        if isinstance(filtro.get(grupo), list):
+            partes = []
+            for parte in filtro[grupo]:
+                remapeado, mudou = _opcao_em_filtro(parte, chave, nome, novo_nome, profundidade + 1)
+                partes.append(remapeado)
+                afetado = afetado or mudou
+            novo[grupo] = partes
+    if isinstance(filtro.get("nao"), dict):
+        novo["nao"], mudou = _opcao_em_filtro(filtro["nao"], chave, nome, novo_nome, profundidade + 1)
+        afetado = afetado or mudou
+    if filtro.get("prop") == chave and filtro.get("op", "igual") in ("igual", "diferente", "tem", "algum_de"):
+        valor = filtro.get("valor")
+        if isinstance(valor, str) and valor == nome:
+            afetado = True
+            if novo_nome is not None:
+                novo["valor"] = novo_nome
+        elif isinstance(valor, list) and nome in valor:
+            afetado = True
+            if novo_nome is not None:
+                novo["valor"] = [novo_nome if v == nome else v for v in valor]
+    return novo, afetado
+
+
+def alterar_opcao(cur, user_id: str, propriedade_id: str, nome: str, novo_nome: Optional[str], versao=0):
+    """Rename/remove a choice and every live value, not the current view page.
+
+    Archived rows participate so restoring them cannot resurrect a retired
+    option. Soft-deleted rows are historical trash and are never rewritten.
+    The caller wraps this operation AND dependent hooks in one savepoint.
+    """
+    try:
+        uuid.UUID(propriedade_id)
+    except (ValueError, TypeError, AttributeError):
+        raise ErroDeBanco("id de propriedade inválido")
+    if not isinstance(nome, str) or not nome or len(nome) > 200:
+        raise ErroDeBanco("nome da opção inválido")
+    if novo_nome is not None:
+        if not isinstance(novo_nome, str) or not novo_nome.strip() or len(novo_nome) > 200:
+            raise ErroDeBanco("novo nome da opção inválido")
+        novo_nome = novo_nome.strip()
+    cur.execute("SELECT no_id FROM banco.propriedade WHERE id=%s AND user_id=%s", (propriedade_id, user_id))
+    referencia = cur.fetchone()
+    if not referencia:
+        raise ErroDeBanco("propriedade não encontrada para este owner")
+    no_id = _s(referencia[0])
+    # Lock parent before property/rows. Inserts share-lock this parent, so no
+    # matching row may slip between the scan and the metadata update.
+    cur.execute("SELECT id FROM banco.no WHERE id=%s AND user_id=%s AND arquivado_em IS NULL FOR UPDATE", (no_id, user_id))
+    if not cur.fetchone():
+        raise ErroDeBanco("base não encontrada para este owner")
+    cur.execute("SELECT chave,tipo,config FROM banco.propriedade WHERE id=%s AND no_id=%s AND user_id=%s FOR UPDATE",
+                (propriedade_id, no_id, user_id))
+    propriedade = cur.fetchone()
+    if not propriedade:
+        raise ErroDeBanco("propriedade não encontrada para este owner")
+    chave, tipo, config = propriedade
+    if tipo not in ("selecao", "multi_selecao") or chave in ("__proto__", "constructor", "prototype"):
+        raise ErroDeBanco("esta propriedade não possui opções editáveis")
+    if not isinstance(config, dict) or not isinstance(config.get("opcoes"), list):
+        raise ErroDeBanco("configuração de opções inválida")
+    if type(versao) is not int or versao < 0:
+        raise ErroDeBanco("versão de opções inválida")
+    if versao != _versao_opcoes(config):
+        raise ErroDeConflito("as opções mudaram em outra aba; atualize antes de alterar")
+    opcoes = config["opcoes"]
+    nomes = [op.get("nome") if isinstance(op, dict) else op if isinstance(op, str) else None for op in opcoes]
+    if any(not isinstance(n, str) for n in nomes) or len(set(nomes)) != len(nomes):
+        raise ErroDeBanco("configuração de opções ambígua")
+    if nome not in nomes:
+        raise ErroDeBanco("a opção mudou ou não existe; atualize a vista")
+    if novo_nome == nome:
+        return no_id, [], next(p for p in propriedades(cur, user_id, no_id) if p["id"] == propriedade_id), 0, 0
+    if novo_nome is not None and novo_nome in nomes:
+        raise ErroDeBanco("já existe uma opção com este nome")
+    novas = []
+    for op, rotulo in zip(opcoes, nomes):
+        if rotulo != nome:
+            novas.append(op)
+        elif novo_nome is not None:
+            novas.append({**op, "nome": novo_nome} if isinstance(op, dict) else novo_nome)
+    # Locks are acquired in a stable order for simultaneous option operations.
+    # Matching uses JSON containment for arrays but also accepts scalar legacy
+    # multi-select values; unrelated malformed/unknown legacy values survive.
+    cur.execute("SELECT id,props FROM banco.linha WHERE no_id=%s AND user_id=%s AND deletado_em IS NULL "
+                "AND ((props->%s)=%s::jsonb OR (jsonb_typeof(props->%s)='array' AND (props->%s) @> %s::jsonb)) "
+                "ORDER BY id FOR UPDATE",
+                (no_id, user_id, chave, json.dumps(nome), chave, chave, json.dumps([nome])))
+    alteradas = []
+    for linha_id, props in cur.fetchall():
+        valor = (props or {}).get(chave)
+        if tipo == "multi_selecao":
+            itens = valor if isinstance(valor, list) else [valor]
+            valor_novo = []
+            for item in itens:
+                item = novo_nome if item == nome else item
+                if item is not None and item not in valor_novo:
+                    valor_novo.append(item)
+        else:
+            if valor != nome:
+                continue  # malformed single-choice arrays are not inferred away
+            valor_novo = novo_nome
+        alteradas.append((_s(linha_id), {chave: valor_novo}))
+    novo_config = preparar_config_opcoes(config, {**config, "opcoes": novas})
+    cur.execute("UPDATE banco.propriedade SET config=%s::jsonb WHERE id=%s AND user_id=%s",
+                (json.dumps(novo_config), propriedade_id, user_id))
+    filtros_atualizados = referencias_revisar = 0
+    cur.execute("SELECT id,config FROM banco.vista WHERE no_id=%s AND user_id=%s ORDER BY id FOR UPDATE", (no_id, user_id))
+    for vista_id, vista_config in cur.fetchall():
+        if not isinstance(vista_config, dict):
+            continue
+        filtro_novo, afetado = _opcao_em_filtro(vista_config.get("filtro"), chave, nome, novo_nome)
+        if not afetado:
+            continue
+        if novo_nome is None:
+            # Removing a predicate could broaden a saved view unexpectedly. Its
+            # retired reference stays intact and the UI must expose a review.
+            referencias_revisar += 1
+        else:
+            cur.execute("UPDATE banco.vista SET config=%s::jsonb WHERE id=%s AND user_id=%s",
+                        (json.dumps({**vista_config, "filtro": filtro_novo}), vista_id, user_id))
+            filtros_atualizados += 1
+    return no_id, alteradas, next(p for p in propriedades(cur, user_id, no_id) if p["id"] == propriedade_id), filtros_atualizados, referencias_revisar
 
 
 def criar_vista(cur, user_id: str, no_id: str, nome: str, tipo: str,
@@ -275,7 +478,11 @@ def _titulo_de(cur, user_id: str, no_id: str, props: dict) -> str:
 
 def criar_linha(cur, user_id: str, no_id: str, props: dict = None,
                 antes_de: str = None, depois_de: str = None) -> dict:
+    cur.execute("SELECT id FROM banco.no WHERE id=%s AND user_id=%s AND arquivado_em IS NULL FOR KEY SHARE", (no_id, user_id))
+    if not cur.fetchone():
+        raise ErroDeBanco("base não encontrada para este owner")
     props = props or {}
+    _validar_opcoes_retiradas(cur, user_id, no_id, props)
     titulo = props.pop("titulo", None)
     if titulo is None:
         titulo = _titulo_de(cur, user_id, no_id, props)
@@ -292,12 +499,22 @@ def criar_linha(cur, user_id: str, no_id: str, props: dict = None,
 def atualizar_linha(cur, user_id: str, linha_id: str, mudancas: dict) -> dict:
     """Mescla parcial: só as chaves enviadas mudam. Enviar o objeto inteiro seria
     perder o que outra aba escreveu entre a leitura e a gravação."""
+    cur.execute("SELECT no_id FROM banco.linha WHERE id=%s AND user_id=%s AND deletado_em IS NULL", (linha_id, user_id))
+    ref = cur.fetchone()
+    if not ref:
+        raise ErroDeBanco("linha não encontrada")
+    # All choice writers acquire parent before row. An option operation holds
+    # UPDATE on this parent throughout its scan/metadata/hooks transaction.
+    cur.execute("SELECT id FROM banco.no WHERE id=%s AND user_id=%s FOR KEY SHARE", (ref[0], user_id))
+    if not cur.fetchone():
+        raise ErroDeBanco("base não encontrada")
     cur.execute("SELECT no_id, props, titulo FROM banco.linha "
-                "WHERE id=%s AND user_id=%s AND deletado_em IS NULL", (linha_id, user_id))
+                "WHERE id=%s AND user_id=%s AND deletado_em IS NULL FOR UPDATE", (linha_id, user_id))
     r = cur.fetchone()
     if not r:
         raise ErroDeBanco("linha não encontrada")
     no_id, atuais, titulo_atual = _s(r[0]), dict(r[1] or {}), r[2]
+    _validar_opcoes_retiradas(cur, user_id, no_id, mudancas, atuais)
     novo_titulo = mudancas.pop("titulo", None)
     for k, v in mudancas.items():
         if v is None:

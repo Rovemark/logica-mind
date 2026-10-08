@@ -55,17 +55,31 @@ def sincronizar_lembretes(cur, user_id: str, linha: dict):
     return criados
 
 
-def listar(cur, user_id: str, *, incluir_lidas=False, incluir_futuras=False, limite=100):
+def listar(cur, user_id: str, *, incluir_lidas=False, incluir_futuras=False, limite=100,
+           periodo=None):
+    """Named Inbox periods are exclusive; keep the old include flags compatible."""
+    if periodo not in (None, "agora", "proximas", "arquivo"):
+        raise ValueError("período de notificações inválido")
     onde = ["user_id=%s"]
     params = [user_id]
-    if not incluir_lidas:
+    ordem = "lida_em NULLS FIRST,disponivel_em DESC,id"
+    if periodo == "arquivo":
+        onde.append("lida_em IS NOT NULL")
+        ordem = "lida_em DESC,disponivel_em DESC,id"
+    elif periodo in ("agora", "proximas"):
         onde.append("lida_em IS NULL")
-    if not incluir_futuras:
-        onde.append("disponivel_em<=now()")
+        onde.append("disponivel_em<=now()" if periodo == "agora" else "disponivel_em>now()")
+        if periodo == "proximas":
+            ordem = "disponivel_em ASC,id"
+    else:
+        if not incluir_lidas:
+            onde.append("lida_em IS NULL")
+        if not incluir_futuras:
+            onde.append("disponivel_em<=now()")
     params.append(max(1, min(int(limite or 100), 200)))
     cur.execute("SELECT id,chave,tipo,titulo,corpo,no_id,linha_id,agente,disponivel_em,lida_em,criado_em "
                 "FROM banco.notificacao WHERE " + " AND ".join(onde) +
-                " ORDER BY lida_em NULLS FIRST,disponivel_em DESC LIMIT %s", params)
+                f" ORDER BY {ordem} LIMIT %s", params)
     return [{"id": str(r[0]), "chave": r[1], "tipo": r[2], "titulo": r[3],
              "corpo": r[4], "no_id": str(r[5]) if r[5] else None,
              "linha_id": str(r[6]) if r[6] else None, "agente": r[7],

@@ -24,6 +24,12 @@ from __future__ import annotations
 
 import json
 import re
+import base64
+import binascii
+import hashlib
+import uuid
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
 _CHAVE_OK = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -74,8 +80,12 @@ class ErroDeConsulta(ValueError):
     pass
 
 
+class ErroDeCursorExpirado(ErroDeConsulta):
+    codigo = 409
+
+
 def _valida_chave(chave: str) -> str:
-    if not isinstance(chave, str) or not _CHAVE_OK.match(chave):
+    if not isinstance(chave, str) or not _CHAVE_OK.fullmatch(chave):
         raise ErroDeConsulta(f"chave de propriedade inválida: {chave!r}")
     return chave
 
@@ -113,15 +123,21 @@ class _Montador:
         data = f"NULLIF({bruto},'')" if tipo in _DATAS else bruto
         return bruto, num, data
 
-    def condicao(self, no: dict) -> str:
+    def condicao(self, no: dict, profundidade: int = 0) -> str:
+        if not isinstance(no, dict) or profundidade > 25:
+            raise ErroDeConsulta("filtro inválido ou profundo demais")
         if "e" in no:
-            partes = [self.condicao(x) for x in no["e"]]
+            if not isinstance(no["e"], list):
+                raise ErroDeConsulta("grupo de filtro exige lista")
+            partes = [self.condicao(x, profundidade + 1) for x in no["e"]]
             return "(" + " AND ".join(partes) + ")" if partes else "TRUE"
         if "ou" in no:
-            partes = [self.condicao(x) for x in no["ou"]]
+            if not isinstance(no["ou"], list):
+                raise ErroDeConsulta("grupo de filtro exige lista")
+            partes = [self.condicao(x, profundidade + 1) for x in no["ou"]]
             return "(" + " OR ".join(partes) + ")" if partes else "FALSE"
         if "nao" in no:
-            return "NOT (" + self.condicao(no["nao"]) + ")"
+            return "NOT (" + self.condicao(no["nao"], profundidade + 1) + ")"
 
         chave = no.get("prop")
         op = no.get("op", "igual")
@@ -130,6 +146,10 @@ class _Montador:
         molde, precisa_valor = _OPS[op]
         if precisa_valor and "valor" not in no:
             raise ErroDeConsulta(f"operador {op} exige valor")
+        if op in ("vazio", "nao_vazio") and self.tipos.get(chave) == "multi_selecao":
+            _valida_chave(chave)
+            vazio = f"COALESCE((props->{self._p(chave)}) IN ('null'::jsonb, '[]'::jsonb, '\"\"'::jsonb), TRUE)"
+            return vazio if op == "vazio" else f"NOT ({vazio})"
 
         # os dois operadores de checkbox usam a chave como parâmetro nomeado
         if op in ("marcado", "desmarcado"):
@@ -153,6 +173,10 @@ class _Montador:
                     raise ErroDeConsulta("algum_de exige lista")
                 sub["v_lista"] = self._p([str(x) for x in v])
             elif op == "tem":
+                # JSONB containment distinguishes a scalar from an array: a
+                # multi-select stores ["item"], not "item".
+                if tipo == "multi_selecao" and not isinstance(v, list):
+                    v = [v]
                 sub["v_json"] = self._p(json.dumps({chave: v})) + "::jsonb"
             elif op == "entre":
                 if not isinstance(v, (list, tuple)) or len(v) != 2:
@@ -172,56 +196,200 @@ class _Montador:
         return molde.format(**sub)
 
 
-def _ordenacao_sql(ordenacao, tipos, m: _Montador) -> str:
-    """ORDER BY seguro. Sem ordenação explícita, a ordem é a manual (`posicao`),
-    que é o que o usuário arrastou. `id` entra sempre no fim como desempate estável:
-    sem ele, duas linhas com a mesma posição podem trocar de lugar entre páginas e a
-    paginação por cursor pula ou repete linha."""
-    pedacos = []
-    for o in (ordenacao or []):
-        chave = o.get("prop")
-        direcao = "DESC" if str(o.get("dir", "asc")).lower() == "desc" else "ASC"
-        nulos = "NULLS LAST" if direcao == "ASC" else "NULLS LAST"
-        if chave in ("posicao", "criado_em", "atualizado_em", "titulo"):
-            pedacos.append(f"{chave} {direcao} {nulos}")
+def _ordens(ordenacao, tipos) -> list:
+    """One effective total order shared by SQL, cursor binding and validation."""
+    if ordenacao is not None and not isinstance(ordenacao, list):
+        raise ErroDeConsulta("ordenação exige lista")
+    if len(ordenacao or []) > 20:
+        raise ErroDeConsulta("ordenação excede 20 propriedades")
+    saida, vistos = [], set()
+    for o in ordenacao or []:
+        if not isinstance(o, dict):
+            raise ErroDeConsulta("ordenação inválida")
+        chave = _valida_chave(o.get("prop"))
+        direcao = str(o.get("dir", "asc")).lower()
+        if direcao not in ("asc", "desc"):
+            raise ErroDeConsulta("direção de ordenação inválida")
+        if chave in vistos:
             continue
-        bruto, num, data = m._lado(chave)
-        tipo = tipos.get(chave, "texto")
-        alvo = num if tipo in _NUMERICOS else (data if tipo in _DATAS else bruto)
-        pedacos.append(f"{alvo} {direcao} {nulos}")
-    pedacos.append("posicao ASC")
-    pedacos.append("id ASC")
-    return ", ".join(pedacos)
+        vistos.add(chave)
+        tipo = ("numeric" if chave == "posicao" or tipos.get(chave) in _NUMERICOS
+                else "timestamp" if chave in ("criado_em", "atualizado_em") else "text")
+        saida.append((chave, direcao.upper(), tipo))
+    if "posicao" not in vistos:
+        saida.append(("posicao", "ASC", "numeric"))
+    saida.append(("id", "ASC", "uuid"))
+    return saida
+
+
+def _assinatura(no_id, user_id, tipos, filtro, ordens, incluir_arquivadas):
+    contexto = {"no": str(no_id), "owner": str(user_id), "filtro": filtro or None,
+                "ordens": ordens, "tipos": tipos, "arquivadas": bool(incluir_arquivadas)}
+    try:
+        bruto = json.dumps(contexto, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        raise ErroDeConsulta("consulta inválida")
+    return hashlib.sha256(bruto.encode()).hexdigest()
+
+
+def _valor_cursor(valor, tipo):
+    if valor is None:
+        return None
+    if not isinstance(valor, str) or len(valor) > 4000:
+        raise ErroDeConsulta("valor de cursor inválido")
+    try:
+        if tipo == "numeric":
+            numero = Decimal(valor)
+            if not numero.is_finite() or numero.adjusted() > 131071 or numero.as_tuple().exponent < -16383:
+                raise ValueError()
+            return numero
+        if tipo == "timestamp":
+            momento = datetime.fromisoformat(valor)
+            if momento.tzinfo is None:
+                raise ValueError()
+            return momento
+        if tipo == "uuid":
+            return uuid.UUID(valor)
+    except (ValueError, InvalidOperation):
+        raise ErroDeConsulta("valor de cursor inválido")
+    return valor
+
+
+def _ler_cursor(cursor, assinatura, ordens, *, manual_sem_filtro=False):
+    if not isinstance(cursor, str) or len(cursor) > 32768:
+        raise ErroDeConsulta("cursor malformado")
+    if not cursor.startswith("lc1."):
+        # Only old unfiltered manual ASC cursors had the same ordering contract.
+        # They are not accepted for filters or any explicit non-manual order.
+        if not manual_sem_filtro or cursor.count("|") != 1:
+            raise ErroDeConsulta("cursor antigo incompatível; atualize a vista")
+        partes = cursor.split("|")
+    else:
+        try:
+            payload = cursor[4:]
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", payload):
+                raise ValueError()
+            dados = json.loads(base64.b64decode(payload + "=" * (-len(payload) % 4), altchars=b"-_", validate=True))
+            if not isinstance(dados, dict) or set(dados) != {"v", "q", "k"} or type(dados["v"]) is not int or dados["v"] != 1:
+                raise ValueError()
+            if dados["q"] != assinatura:
+                raise ErroDeConsulta("cursor pertence a outra consulta; atualize a vista")
+            partes = dados["k"]
+        except (ValueError, TypeError, KeyError, binascii.Error, UnicodeDecodeError, RecursionError) as e:
+            if isinstance(e, ErroDeConsulta):
+                raise
+            raise ErroDeConsulta("cursor malformado")
+    if not isinstance(partes, list) or len(partes) != len(ordens):
+        raise ErroDeConsulta("cursor não corresponde à ordenação")
+    valores = [_valor_cursor(v, tipo) for v, (_, _, tipo) in zip(partes, ordens)]
+    if valores[-1] is None or any(v is None for v, (chave, _, _) in zip(valores, ordens) if chave == "posicao"):
+        raise ErroDeConsulta("cursor sem desempate")
+    return valores
+
+
+def _fingerprint_ordem(valores):
+    partes = [None if v is None else v.isoformat() if isinstance(v, datetime) else str(v) for v in valores]
+    return hashlib.sha256(json.dumps(partes, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+
+def cursor_ancora(no_id, user_id, tipos, cursor, *, filtro=None, ordenacao=None, incluir_arquivadas=False):
+    if not cursor or not isinstance(cursor, str) or not cursor.startswith("lc2."):
+        return None
+    try:
+        if len(cursor) > 1024:
+            raise ValueError()
+        payload = cursor[4:]
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", payload):
+            raise ValueError()
+        dados = json.loads(base64.b64decode(payload + "=" * (-len(payload) % 4), altchars=b"-_", validate=True))
+        if not isinstance(dados, dict) or set(dados) != {"v", "q", "a", "f"} or type(dados["v"]) is not int or dados["v"] != 2:
+            raise ValueError()
+        if dados["q"] != _assinatura(no_id, user_id, tipos, filtro, _ordens(ordenacao, tipos), incluir_arquivadas):
+            raise ErroDeConsulta("cursor pertence a outra consulta; atualize a vista")
+        ident = str(uuid.UUID(dados["a"]))
+        if not isinstance(dados["f"], str) or not re.fullmatch(r"[a-f0-9]{64}", dados["f"]):
+            raise ValueError()
+        return ident, dados["f"]
+    except (ValueError, TypeError, KeyError, AttributeError, binascii.Error, UnicodeDecodeError, RecursionError) as e:
+        if isinstance(e, ErroDeConsulta):
+            raise
+        raise ErroDeConsulta("cursor malformado")
+
+
+def gerar_cursor(no_id, user_id, tipos, linha, *, filtro=None, ordenacao=None, incluir_arquivadas=False):
+    """Opaque query-bound cursor from the exact DB ordering values, never floats."""
+    ordens = _ordens(ordenacao, tipos)
+    valores = linha[8:]
+    if len(valores) != len(ordens):
+        raise ErroDeConsulta("resultado sem valores de ordenação")
+    dados = {"v": 2, "q": _assinatura(no_id, user_id, tipos, filtro, ordens, incluir_arquivadas),
+             "a": str(linha[0]), "f": _fingerprint_ordem(valores)}
+    return "lc2." + base64.urlsafe_b64encode(json.dumps(dados, separators=(",", ":")).encode()).decode().rstrip("=")
 
 
 def montar(no_id: str, user_id: str, tipos: dict, *, filtro=None, ordenacao=None,
            limite: int = 50, cursor: Optional[str] = None,
-           incluir_arquivadas: bool = False) -> tuple:
+           incluir_arquivadas: bool = False, ancora_id: Optional[str] = None,
+           ancora: Optional[tuple] = None) -> tuple:
     """Devolve (sql, params). Limite tem teto: nada de resposta sem fim."""
     limite = max(1, min(int(limite or 50), 200))
     m = _Montador(tipos)
     onde = ["no_id = %s", "user_id = %s", "deletado_em IS NULL"]
     # os dois primeiros parâmetros vêm antes de qualquer coisa que o montador crie
     cabeca = [no_id, user_id]
+    if ancora_id is not None:
+        onde.append("id = %s::uuid")
+        cabeca.append(ancora_id)
     if not incluir_arquivadas:
         onde.append("arquivado_em IS NULL")
     corpo = m.condicao(filtro) if filtro else "TRUE"
     onde.append(corpo)
+    ordens = _ordens(ordenacao, tipos)
+    sort = _Montador(tipos)
+    expressoes, aliases, pedacos = [], [], []
+    for i, (chave, direcao, tipo) in enumerate(ordens):
+        alias = f"_ord{i}"
+        if chave in ("posicao", "id", "titulo", "criado_em", "atualizado_em"):
+            alvo = chave
+        else:
+            bruto, num, data = sort._lado(chave)
+            alvo = num if tipo == "numeric" else data if tipos.get(chave) in _DATAS else bruto
+        expressoes.append(f"{alvo} AS {alias}")
+        aliases.append(alias)
+        pedacos.append(f"{alias} {direcao} NULLS LAST")
+    continuacao, params_cursor = "TRUE", []
     if cursor:
-        # keyset em (posicao, id): OFFSET fica lento e pula linha quando alguém
-        # insere durante a paginação.
-        try:
-            pos, ident = cursor.split("|", 1)
-        except ValueError:
-            raise ErroDeConsulta("cursor malformado")
-        onde.append("(posicao, id) > (%s::numeric, %s::uuid)")
-        m.params += [pos, ident]
-    ordem = _ordenacao_sql(ordenacao, tipos, m)
-    sql = (f"SELECT id, no_id, titulo, props, posicao, criado_em, atualizado_em, arquivado_em "
-           f"FROM banco.linha WHERE " + " AND ".join(onde) +
-           f" ORDER BY {ordem} LIMIT %s")
+        assinatura = _assinatura(no_id, user_id, tipos, filtro, ordens, incluir_arquivadas)
+        info = cursor_ancora(no_id, user_id, tipos, cursor, filtro=filtro, ordenacao=ordenacao, incluir_arquivadas=incluir_arquivadas)
+        if info:
+            if not ancora or str(ancora[0]) != info[0] or len(ancora[8:]) != len(ordens) or _fingerprint_ordem(ancora[8:]) != info[1]:
+                raise ErroDeCursorExpirado("a âncora da página mudou; atualize a vista")
+            valores = list(ancora[8:])
+        else:
+            valores = _ler_cursor(cursor, assinatura, ordens,
+                                  manual_sem_filtro=not filtro and ordens == [("posicao", "ASC", "numeric"), ("id", "ASC", "uuid")])
+        partes = []
+        # Lexicographic keyset with mixed directions and NULLS LAST. Tuple >
+        # cannot express DESC or a boundary whose primary value is NULL.
+        for i, ((_, direcao, _), valor) in enumerate(zip(ordens, valores)):
+            if valor is None:
+                continue
+            anteriores = []
+            for j in range(i):
+                anteriores.append(f"{aliases[j]} IS NOT DISTINCT FROM %s")
+                params_cursor.append(valores[j])
+            op = ">" if direcao == "ASC" else "<"
+            anteriores.append(f"({aliases[i]} {op} %s OR {aliases[i]} IS NULL)")
+            params_cursor.append(valor)
+            partes.append("(" + " AND ".join(anteriores) + ")")
+        continuacao = "(" + " OR ".join(partes) + ")" if partes else "FALSE"
+    colunas = "id, no_id, titulo, props, posicao, criado_em, atualizado_em, arquivado_em"
+    sql = (f"WITH candidatas AS (SELECT {colunas}, " + ", ".join(expressoes) +
+           " FROM banco.linha WHERE " + " AND ".join(onde) +
+           f") SELECT {colunas}, " + ", ".join(aliases) + " FROM candidatas WHERE " + continuacao +
+           " ORDER BY " + ", ".join(pedacos) + " LIMIT %s")
     # +1 para saber se existe próxima página sem um COUNT separado
-    return sql, cabeca + m.params + [limite + 1]
+    return sql, sort.params + cabeca + m.params + params_cursor + [limite + 1]
 
 
 def montar_contagem_por_grupo(no_id: str, user_id: str, tipos: dict, agrupar_por: str,
