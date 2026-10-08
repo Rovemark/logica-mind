@@ -343,7 +343,10 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 ordenacao = json.loads(um("ordenacao", "null") or "null")
             except json.JSONDecodeError:
                 return _erro(400, "filtro/ordenacao não são JSON válido")
-            limite = int(um("limite", 50) or 50)
+            try:
+                limite = max(1, min(int(um("limite", 50) or 50), 200))
+            except (ValueError, TypeError):
+                return _erro(400, "limite precisa ser um número inteiro")
             try:
                 sql, params = montar(no_id, user_id, tipos, filtro=filtro,
                                      ordenacao=ordenacao, limite=limite,
@@ -809,7 +812,7 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 if tipo in ("formula", "rollup"):
                     C.validar_config(cur, user_id, corpo["no_id"], tipo, config)
                 p = N.criar_propriedade(cur, user_id, corpo["no_id"], corpo["nome"],
-                                        tipo, config)
+                                        tipo, config, chave=corpo.get("chave"))
                 if tipo in ("formula", "rollup"):
                     C.recalcular_banco(cur, user_id, corpo["no_id"])
                 _enfileirar_no_e_linhas(cur, user_id, corpo["no_id"])
@@ -1047,17 +1050,34 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 return _ok({"apagado": apagado})
 
             if acao == "elo.ligar":
-                ligou = N.ligar(cur, user_id, corpo["propriedade_id"], corpo["origem_id"], corpo["destino_id"])
-                ajuste = D.reprogramar_elo(cur, user_id, corpo["propriedade_id"], corpo["origem_id"], corpo["destino_id"])
-                _registrar_reprogramacoes(cur, user_id, [ajuste] if ajuste else [])
-                C.recalcular_cascata(cur, user_id, corpo["origem_id"])
-                P.enfileirar_linha(cur, user_id, corpo["origem_id"])
+                with con.transaction():
+                    ligou = N.ligar(cur, user_id, corpo["propriedade_id"], corpo["origem_id"], corpo["destino_id"])
+                    ajuste = D.reprogramar_elo(cur, user_id, corpo["propriedade_id"], corpo["origem_id"], corpo["destino_id"])
+                    _registrar_reprogramacoes(cur, user_id, [ajuste] if ajuste else [])
+                    C.recalcular_cascata(cur, user_id, corpo["origem_id"])
+                    P.enfileirar_linha(cur, user_id, corpo["origem_id"])
                 return _ok({"ligou": ligou, "data_ajustada": ajuste})
             if acao == "elo.desligar":
-                desligou = N.desligar(cur, user_id, corpo["propriedade_id"], corpo["origem_id"], corpo["destino_id"])
-                C.recalcular_cascata(cur, user_id, corpo["origem_id"])
-                P.enfileirar_linha(cur, user_id, corpo["origem_id"])
+                with con.transaction():
+                    desligou = N.desligar(cur, user_id, corpo["propriedade_id"], corpo["origem_id"], corpo["destino_id"])
+                    C.recalcular_cascata(cur, user_id, corpo["origem_id"])
+                    P.enfileirar_linha(cur, user_id, corpo["origem_id"])
                 return _ok({"desligou": desligou})
+            if acao == "elo.substituir":
+                if set(corpo) - {"propriedade_id", "origem_id", "destino_id"}:
+                    return _erro(400, "campos desconhecidos na substituição da relação")
+                # A savepoint rolls back the relation AND its derived hooks even
+                # when the outer API translates a domain exception into HTTP 400.
+                with con.transaction():
+                    mudou = N.substituir_elo(cur, user_id, corpo["propriedade_id"],
+                                             corpo["origem_id"], corpo["destino_id"])
+                    ajuste = D.reprogramar_elo(cur, user_id, corpo["propriedade_id"],
+                                              corpo["origem_id"], corpo["destino_id"]) if corpo["destino_id"] else None
+                    _registrar_reprogramacoes(cur, user_id, [ajuste] if ajuste else [])
+                    C.recalcular_cascata(cur, user_id, corpo["origem_id"])
+                    P.enfileirar_linha(cur, user_id, corpo["origem_id"])
+                    elos = N.ligados(cur, user_id, corpo["origem_id"])
+                return _ok({"substituiu": mudou, "elos": elos, "data_ajustada": ajuste})
 
             if acao == "xp.registrar":
                 return _ok(X.registrar(cur, user_id, corpo["tipo"],

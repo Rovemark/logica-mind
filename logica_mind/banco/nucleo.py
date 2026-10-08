@@ -205,10 +205,13 @@ def criar_propriedade(cur, user_id: str, no_id: str, nome: str, tipo: str,
                       config: dict = None, chave: str = None) -> dict:
     if tipo not in TIPOS:
         raise ErroDeBanco(f"tipo de propriedade desconhecido: {tipo}")
-    cur.execute("SELECT chave FROM banco.propriedade WHERE no_id=%s", (no_id,))
+    cur.execute("SELECT id FROM banco.no WHERE id=%s AND user_id=%s AND arquivado_em IS NULL FOR KEY SHARE", (no_id, user_id))
+    if not cur.fetchone():
+        raise ErroDeBanco("base não encontrada para este owner")
+    cur.execute("SELECT chave FROM banco.propriedade WHERE no_id=%s AND user_id=%s", (no_id, user_id))
     usados = {r[0] for r in cur.fetchall()}
-    chave = chave or _slug(nome, usados)
-    if not _CHAVE_OK.match(chave):
+    chave = _slug(nome, usados) if chave is None else chave
+    if not isinstance(chave, str) or not _CHAVE_OK.fullmatch(chave) or chave in ("__proto__", "constructor", "prototype"):
         raise ErroDeBanco(f"chave inválida: {chave!r}")
     if chave in usados:
         raise ErroDeBanco(f"chave já existe nesta base: {chave!r}")
@@ -542,7 +545,79 @@ def apagar_comentario(cur, user_id: str, comentario_id: str) -> bool:
 
 
 # ── relações ──────────────────────────────────────────────────────────────────
+def _validar_elo(cur, user_id: str, propriedade_id: str, origem_id: str,
+                 destino_id: Optional[str], *, unica: bool = False) -> dict:
+    """Lock the relation definition and validate both ends before any mutation.
+
+    The composite FKs enforce owner, but not the configured source/target base.
+    All writers take the same property lock, so a single relation cannot race a
+    replacement or a second legacy `elo.ligar` request.
+    """
+    if not isinstance(propriedade_id, str) or not propriedade_id or not isinstance(origem_id, str) or not origem_id \
+            or destino_id is not None and (not isinstance(destino_id, str) or not destino_id):
+        raise ErroDeBanco("identificadores da relação inválidos")
+    try:
+        for ident in (propriedade_id, origem_id, destino_id):
+            if ident is not None:
+                uuid.UUID(ident)
+    except (ValueError, TypeError, AttributeError) as error:
+        raise ErroDeBanco("identificadores da relação inválidos") from error
+    cur.execute("SELECT no_id,tipo,config FROM banco.propriedade WHERE id=%s AND user_id=%s FOR UPDATE",
+                (propriedade_id, user_id))
+    prop = cur.fetchone()
+    if not prop or prop[1] != "relacao" or not isinstance(prop[2], dict):
+        raise ErroDeBanco("a relação não pertence a este owner")
+    if unica and prop[2].get("multiplo") is True:
+        raise ErroDeBanco("a substituição exige uma relação única deste owner")
+    target = prop[2].get("alvo_no_id")
+    if not isinstance(target, str) or not target:
+        raise ErroDeBanco("configure a base relacionada antes de alterar a relação")
+    cur.execute("SELECT no_id FROM banco.linha WHERE id=%s AND user_id=%s AND deletado_em IS NULL FOR UPDATE",
+                (origem_id, user_id))
+    source = cur.fetchone()
+    if not source or str(source[0]) != str(prop[0]):
+        raise ErroDeBanco("a origem não pertence à base e ao owner da relação")
+    if destino_id is not None:
+        cur.execute("SELECT no_id FROM banco.linha WHERE id=%s AND user_id=%s AND deletado_em IS NULL FOR SHARE",
+                    (destino_id, user_id))
+        destination = cur.fetchone()
+        if not destination or str(destination[0]) != target:
+            raise ErroDeBanco("o destino não pertence à base relacionada e ao owner")
+    return prop[2]
+
+
+def substituir_elo(cur, user_id: str, propriedade_id: str, origem_id: str, destino_id: Optional[str]) -> bool:
+    """Replace one single relation under the caller's existing transaction."""
+    _validar_elo(cur, user_id, propriedade_id, origem_id, destino_id, unica=True)
+    cur.execute("SELECT destino_id FROM banco.elo WHERE user_id=%s AND propriedade_id=%s AND origem_id=%s FOR UPDATE",
+                (user_id, propriedade_id, origem_id))
+    old = {str(row[0]) for row in cur.fetchall()}
+    desired = {destino_id} if destino_id is not None else set()
+    if old == desired:
+        return False
+    if destino_id is not None:
+        # Insert before deleting. The savepoint in the service rolls back both
+        # the relation and derived hooks if anything fails after this statement.
+        cur.execute("INSERT INTO banco.elo (id,user_id,propriedade_id,origem_id,destino_id) "
+                    "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (propriedade_id,origem_id,destino_id) DO NOTHING",
+                    (_uid(), user_id, propriedade_id, origem_id, destino_id))
+        cur.execute("DELETE FROM banco.elo WHERE user_id=%s AND propriedade_id=%s AND origem_id=%s AND destino_id<>%s",
+                    (user_id, propriedade_id, origem_id, destino_id))
+    else:
+        cur.execute("DELETE FROM banco.elo WHERE user_id=%s AND propriedade_id=%s AND origem_id=%s",
+                    (user_id, propriedade_id, origem_id))
+    return True
+
+
 def ligar(cur, user_id: str, propriedade_id: str, origem_id: str, destino_id: str) -> bool:
+    if destino_id is None:
+        raise ErroDeBanco("destino obrigatório para ligar uma relação")
+    config = _validar_elo(cur, user_id, propriedade_id, origem_id, destino_id)
+    if config.get("multiplo") is not True:
+        cur.execute("SELECT destino_id FROM banco.elo WHERE user_id=%s AND propriedade_id=%s AND origem_id=%s FOR UPDATE",
+                    (user_id, propriedade_id, origem_id))
+        if any(str(row[0]) != destino_id for row in cur.fetchall()):
+            raise ErroDeBanco("uma relação única deve ser alterada por elo.substituir")
     cur.execute("INSERT INTO banco.elo (id,user_id,propriedade_id,origem_id,destino_id) "
                 "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (propriedade_id,origem_id,destino_id) DO NOTHING",
                 (_uid(), user_id, propriedade_id, origem_id, destino_id))
@@ -550,6 +625,9 @@ def ligar(cur, user_id: str, propriedade_id: str, origem_id: str, destino_id: st
 
 
 def desligar(cur, user_id: str, propriedade_id: str, origem_id: str, destino_id: str) -> bool:
+    if destino_id is None:
+        raise ErroDeBanco("destino obrigatório para desligar uma relação")
+    _validar_elo(cur, user_id, propriedade_id, origem_id, destino_id)
     cur.execute("DELETE FROM banco.elo WHERE user_id=%s AND propriedade_id=%s "
                 "AND origem_id=%s AND destino_id=%s",
                 (user_id, propriedade_id, origem_id, destino_id))
