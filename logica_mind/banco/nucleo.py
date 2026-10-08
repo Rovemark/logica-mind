@@ -120,6 +120,47 @@ def criar_espaco(cur, user_id: str, nome: str, icone: str = None) -> dict:
     return {"id": _s(r[0]), "nome": r[1], "icone": r[2], "ordem": float(r[3])}
 
 
+def atualizar_espaco(cur, user_id: str, espaco_id: str, mudancas: dict) -> Optional[dict]:
+    """Edita metadados, sem trocar a identidade, a ordem ou os filhos do espaço.
+
+    Um UPDATE com patch parcial preserva também alterações concorrentes em outro
+    campo. O owner autenticado entra no filtro: nome/ícone enviados pelo cliente
+    nunca podem dar acesso a um espaço alheio ou reabrir um espaço arquivado.
+    """
+    if not isinstance(espaco_id, str):
+        raise ErroDeBanco("id do espaço obrigatório e precisa ser UUID")
+    try:
+        ident = str(uuid.UUID(espaco_id))
+    except (ValueError, AttributeError):
+        raise ErroDeBanco("id do espaço precisa ser UUID válido") from None
+    if not isinstance(mudancas, dict) or not mudancas or set(mudancas) - {"nome", "icone"}:
+        raise ErroDeBanco("informe somente nome e/ou ícone do espaço")
+
+    def tem_controle(valor):
+        return any(ord(c) < 32 or 127 <= ord(c) < 160 for c in valor)
+
+    nome = mudancas.get("nome")
+    if "nome" in mudancas:
+        if not isinstance(nome, str) or tem_controle(nome):
+            raise ErroDeBanco("nome do espaço precisa ser texto sem caracteres de controle")
+        nome = nome.strip()
+        if not 1 <= len(nome) <= 120:
+            raise ErroDeBanco("nome do espaço precisa ter de 1 a 120 caracteres")
+    icone = mudancas.get("icone")
+    if "icone" in mudancas and icone is not None:
+        if not isinstance(icone, str) or len(icone) > 2048 or tem_controle(icone):
+            raise ErroDeBanco("ícone do espaço precisa ser texto de até 2048 caracteres ou nulo")
+        icone = icone.strip() or None
+
+    cur.execute("UPDATE banco.espaco SET nome=CASE WHEN %s THEN %s ELSE nome END, "
+                "icone=CASE WHEN %s THEN %s ELSE icone END "
+                "WHERE id=%s AND user_id=%s AND arquivado_em IS NULL "
+                "RETURNING id,nome,icone,ordem",
+                ("nome" in mudancas, nome, "icone" in mudancas, icone, ident, user_id))
+    r = cur.fetchone()
+    return {"id": _s(r[0]), "nome": r[1], "icone": r[2], "ordem": float(r[3])} if r else None
+
+
 def espaco_padrao(cur, user_id: str) -> str:
     """Todo usuário tem um espaço. Criar sob demanda evita a tela vazia do primeiro
     acesso, que é onde produto novo perde gente."""

@@ -692,6 +692,14 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
             if acao == "espaco.criar":
                 return _ok(N.criar_espaco(cur, user_id, corpo.get("nome") or "Espaço",
                                           corpo.get("icone")))
+            if acao == "espaco.atualizar":
+                if not isinstance(corpo, dict) or set(corpo) - {"id", "nome", "icone"}:
+                    return _erro(400, "informe somente id, nome e/ou ícone do espaço")
+                atualizado = N.atualizar_espaco(cur, user_id, corpo.get("id"),
+                    {chave: valor for chave, valor in corpo.items() if chave != "id"})
+                if atualizado is None:
+                    return _erro(404, "espaço não encontrado")
+                return _ok(atualizado)
             if acao == "espaco.arquivar":
                 espaco_id = corpo.get("id")
                 if not espaco_id:
@@ -723,10 +731,11 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 _enfileirar_ramo(cur, user_id, corpo["id"])
                 return _ok({"posicao": posicao})
             if acao == "no.renomear":
-                cur.execute("UPDATE banco.no SET nome=%s, icone=CASE WHEN %s THEN %s ELSE icone END, "
+                cur.execute("UPDATE banco.no SET nome=CASE WHEN %s THEN %s ELSE nome END, "
+                            "icone=CASE WHEN %s THEN %s ELSE icone END, "
                             "capa=CASE WHEN %s THEN %s ELSE capa END, "
                             "atualizado_em=now() WHERE id=%s AND user_id=%s",
-                            (corpo.get("nome"), "icone" in corpo, corpo.get("icone"),
+                            ("nome" in corpo, corpo.get("nome"), "icone" in corpo, corpo.get("icone"),
                              "capa" in corpo, corpo.get("capa"), corpo["id"], user_id))
                 if not cur.rowcount:
                     return _erro(404, "nó não encontrado")
@@ -780,18 +789,33 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 chave = corpo.get("chave") or "pessoal"
                 if chave not in M.ARRANJOS:
                     return _erro(400, f"arranjo desconhecido: {chave}")
-                cur.execute("SELECT modelo FROM banco.no WHERE user_id=%s AND modelo IS NOT NULL "
-                            "AND arquivado_em IS NULL", (user_id,))
+                cur.execute("SELECT n.modelo FROM banco.no n JOIN banco.espaco e "
+                            "ON e.id=n.espaco_id AND e.user_id=n.user_id "
+                            "WHERE n.user_id=%s AND e.user_id=%s AND n.modelo IS NOT NULL "
+                            "AND n.arquivado_em IS NULL AND e.arquivado_em IS NULL", (user_id, user_id))
                 ja = {r[0] for r in cur.fetchall()}
                 partes = M.ARRANJOS[chave].get("espacos") or (chave,)
                 saida = []
                 for parte in partes:
                     a = M.ARRANJOS[parte]
-                    # Reaproveita o espaço de mesmo nome: um segundo "Minha vida" ao lado
-                    # do primeiro seria a pior forma de "não duplicar".
-                    cur.execute("SELECT id FROM banco.espaco WHERE user_id=%s AND nome=%s "
-                                "AND arquivado_em IS NULL LIMIT 1", (user_id, a["espaco"]["nome"]))
+                    # Nome/ícone são personalizáveis. A identidade do espaço existente
+                    # vem primeiro dos modelos exclusivos do arranjo, nunca de um
+                    # rótulo compartilhado como `notas` (pessoal e empresa).
+                    outros = {m for k, outro in M.ARRANJOS.items() if k != parte
+                              for m in outro.get("modelos", ())}
+                    assinaturas = sorted(set(a["modelos"]) - outros)
+                    cur.execute("SELECT e.id FROM banco.espaco e JOIN banco.no n "
+                                "ON n.espaco_id=e.id AND n.user_id=e.user_id "
+                                "WHERE e.user_id=%s AND n.user_id=%s AND e.arquivado_em IS NULL "
+                                "AND n.arquivado_em IS NULL AND n.modelo=ANY(%s) "
+                                "GROUP BY e.id,e.ordem ORDER BY count(DISTINCT n.modelo) DESC,e.ordem,e.id LIMIT 1",
+                                (user_id, user_id, assinaturas))
                     r = cur.fetchone()
+                    if not r:
+                        cur.execute("SELECT id FROM banco.espaco WHERE user_id=%s AND nome=%s "
+                                    "AND arquivado_em IS NULL ORDER BY ordem,id LIMIT 1",
+                                    (user_id, a["espaco"]["nome"]))
+                        r = cur.fetchone()
                     if r:
                         espaco_id = str(r[0])
                     else:
