@@ -79,7 +79,8 @@ class CanonicalWriteAckTests(unittest.TestCase):
         status, payload = self._http_log(FailingStore(), InMemoryStore())
         self.assertEqual(status, 500)
         self.assertNotIn("id", payload)
-        self.assertIn("Canonical", payload["error"])
+        self.assertEqual("Internal memory service error", payload["error"])
+        self.assertNotIn("fixture storage outage", payload["error"])
 
     def test_http_receipt_can_be_read_from_primary(self):
         primary = InMemoryStore()
