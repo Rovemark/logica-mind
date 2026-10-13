@@ -6,6 +6,7 @@ import math
 import os
 import tempfile
 import time
+from contextlib import closing
 
 import pytest
 
@@ -46,6 +47,7 @@ class TestLastRecalledAt:
     def test_last_recalled_at_roundtrips_sqlite(self):
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             path = f.name
+        mind = mind2 = None
         try:
             mind = fresh_mind(path)
             mind.remember("Persistent fact", extract=False)
@@ -55,6 +57,10 @@ class TestLastRecalledAt:
             m = mind2.store.all("test")[0]
             assert m.last_recalled_at is not None
         finally:
+            if mind2 is not None:
+                mind2.close()
+            if mind is not None:
+                mind.close()
             os.unlink(path)
 
 
@@ -194,33 +200,33 @@ class TestDreamJournal:
     def test_save_and_load_dream(self):
         with tempfile.TemporaryDirectory() as d:
             db_path = os.path.join(d, "test.db")
-            store = SQLiteStore(db_path)
-            report = DreamReport(episodic_processed=5, distilled=3, reinforced=2,
-                                  forgotten=1, namespace="test")
-            save_dream(report, store)
-            loaded = load_dreams(store)
-            assert len(loaded) == 1
-            assert loaded[0]["distilled"] == 3
-            assert loaded[0]["namespace"] == "test"
+            with closing(SQLiteStore(db_path)) as store:
+                report = DreamReport(episodic_processed=5, distilled=3, reinforced=2,
+                                      forgotten=1, namespace="test")
+                save_dream(report, store)
+                loaded = load_dreams(store)
+                assert len(loaded) == 1
+                assert loaded[0]["distilled"] == 3
+                assert loaded[0]["namespace"] == "test"
 
     def test_namespace_filter(self):
         with tempfile.TemporaryDirectory() as d:
             db_path = os.path.join(d, "test.db")
-            store = SQLiteStore(db_path)
-            save_dream(DreamReport(namespace="research", distilled=5), store)
-            save_dream(DreamReport(namespace="marketing", distilled=2), store)
-            research_only = load_dreams(store, namespace="research")
-            assert all(r["namespace"] == "research" for r in research_only)
-            assert len(research_only) == 1
+            with closing(SQLiteStore(db_path)) as store:
+                save_dream(DreamReport(namespace="research", distilled=5), store)
+                save_dream(DreamReport(namespace="marketing", distilled=2), store)
+                research_only = load_dreams(store, namespace="research")
+                assert all(r["namespace"] == "research" for r in research_only)
+                assert len(research_only) == 1
 
     def test_capped_at_200(self):
         with tempfile.TemporaryDirectory() as d:
             db_path = os.path.join(d, "test.db")
-            store = SQLiteStore(db_path)
-            for _ in range(210):
-                save_dream(DreamReport(namespace="test"), store)
-            loaded = load_dreams(store, limit=300)
-            assert len(loaded) <= 200
+            with closing(SQLiteStore(db_path)) as store:
+                for _ in range(210):
+                    save_dream(DreamReport(namespace="test"), store)
+                loaded = load_dreams(store, limit=300)
+                assert len(loaded) <= 200
 
     def test_in_memory_store_no_file(self):
         store = SQLiteStore(":memory:")
@@ -363,21 +369,21 @@ class TestForgetCurveApply:
     def test_apply_strictly_decays_old_memory_and_persists(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "fc.db")
-            mind = LogicaMind(namespace="t", store=SQLiteStore(path))
-            [m] = mind.remember("An old belief.", extract=False, importance=0.9)
-            # backdate it ~100 days so retention is well below 1.0
-            import datetime as _dt
-            old_iso = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            m.created_at = old_iso
-            mind.store.add([m])
-            before = mind.store.get("t", m.id).importance
-            # apply decay with a short halflife → strict decrease
-            mind.forget_curve(days_halflife=30, apply=True)
-            after_mem = mind.store.get("t", m.id)
-            assert after_mem.importance < before          # STRICT, not <=
-            # reopen the DB and confirm the decay persisted
-            mind2 = LogicaMind(namespace="t", store=SQLiteStore(path))
-            assert mind2.store.get("t", m.id).importance < before
+            with closing(LogicaMind(namespace="t", store=SQLiteStore(path))) as mind:
+                [m] = mind.remember("An old belief.", extract=False, importance=0.9)
+                # backdate it ~100 days so retention is well below 1.0
+                import datetime as _dt
+                old_iso = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                m.created_at = old_iso
+                mind.store.add([m])
+                before = mind.store.get("t", m.id).importance
+                # apply decay with a short halflife → strict decrease
+                mind.forget_curve(days_halflife=30, apply=True)
+                after_mem = mind.store.get("t", m.id)
+                assert after_mem.importance < before          # STRICT, not <=
+                # reopen the DB and confirm the decay persisted
+                with closing(LogicaMind(namespace="t", store=SQLiteStore(path))) as mind2:
+                    assert mind2.store.get("t", m.id).importance < before
 
     def test_apply_false_does_not_mutate(self):
         mind = fresh_mind()

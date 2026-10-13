@@ -103,6 +103,7 @@ class SQLiteStore(Store):
         self.max_candidates = max_candidates
         # reentrant so a locked public method can call another helper that locks
         self._lock = threading.RLock()
+        self._closed = False
         if path not in (":memory:", "") and os.path.dirname(path):
             os.makedirs(os.path.dirname(path), exist_ok=True)
         # timeout + WAL + busy_timeout: each lifecycle hook is a separate process
@@ -751,5 +752,15 @@ class SQLiteStore(Store):
         return [self._row_to_memory(r) for r in self._conn.execute(sql, params).fetchall()]
 
     def close(self) -> None:
-        with self._lock:
-            self._conn.close()
+        # A file-backed store owns TWO handles. Leaving the read connection open
+        # keeps WAL/files locked on Windows even after the service closes Mind.
+        # Use the same writer -> reader lock order as the store lifecycle.
+        with self._lock, self._rlock:
+            if self._closed:
+                return
+            try:
+                if self._rconn is not self._conn:
+                    self._rconn.close()
+            finally:
+                self._conn.close()
+            self._closed = True
