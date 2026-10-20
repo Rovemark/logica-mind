@@ -193,6 +193,95 @@ class BancoLifeIntegrityTests(unittest.TestCase):
                 future.result(timeout=6)
         self.assertEqual(len(self.linked()), 1)
 
+    def test_row_concurrency_capability_is_read_only_and_explicit(self):
+        response = self.request("capacidades", method="GET")
+        self.assertEqual(response.codigo, 200)
+        self.assertEqual(response.corpo["dados"]["linha_valores_base"], 1)
+        self.assertEqual(self.request("capacidades").codigo, 405)
+
+    def test_stale_title_is_rejected_without_overwriting_or_running_hooks(self):
+        row = self.ids["source"]
+        first = self.request("linha.atualizar", id=row, mudancas={"nome": "Linux"}, valores_base={"nome": "source"})
+        self.assertEqual(first.codigo, 200)
+        self.assertTrue(first.corpo["dados"]["precondicoes_verificadas"])
+        with patch.object(S.NF, "sincronizar_lembretes") as notify:
+            stale = self.request("linha.atualizar", id=row, mudancas={"nome": "Mac"}, valores_base={"nome": "source"})
+        self.assertEqual(stale.codigo, 409)
+        notify.assert_not_called()
+        with self.connection() as con:
+            saved = con.execute("SELECT titulo, props FROM banco.linha WHERE id=%s", (row,)).fetchone()
+        self.assertEqual(saved[0], "Linux")
+        self.assertEqual(saved[1]["nome"], "Linux")
+
+    def test_non_overlapping_fields_can_merge_without_rebasing_the_changed_field(self):
+        row = self.ids["source"]
+        self.assertEqual(self.request("linha.atualizar", id=row, mudancas={"nome": "Linux"}, valores_base={"nome": "source"}).codigo, 200)
+        self.assertEqual(self.request("linha.atualizar", id=row, mudancas={"priority": "high"}, valores_base={"priority": None}).codigo, 200)
+        with self.connection() as con:
+            title, props = con.execute("SELECT titulo, props FROM banco.linha WHERE id=%s", (row,)).fetchone()
+        self.assertEqual(title, "Linux")
+        self.assertEqual(props["priority"], "high")
+
+    def test_preconditions_must_cover_exactly_the_changes_and_preserve_json_types(self):
+        row = self.ids["source"]
+        self.assertEqual(self.request("linha.atualizar", id=row, mudancas={"flag": True}, valores_base={"flag": None}).codigo, 200)
+        for base in ({}, {"flag": True, "extra": None}, [], "true"):
+            with self.subTest(base=base):
+                self.assertEqual(self.request("linha.atualizar", id=row, mudancas={"flag": False}, valores_base=base).codigo, 400)
+        self.assertEqual(self.request("linha.atualizar", id=row, mudancas={"flag": False}, valores_base={"flag": 1}).codigo, 409)
+        # Other owners never get the current value through the conflict response.
+        denied = self.request("linha.atualizar", id=self.ids["foreign_row"], mudancas={"titulo": "Intrusion"}, valores_base={"titulo": "Foreign"})
+        self.assertEqual(denied.codigo, 400)
+
+    def test_two_autocommit_writers_on_same_base_have_one_winner(self):
+        barrier = threading.Barrier(2)
+        row = self.ids["source"]
+        def write(title):
+            barrier.wait(timeout=4)
+            return self.request("linha.atualizar", id=row, mudancas={"nome": title}, valores_base={"nome": "source"}).codigo
+        with patch.object(self, "connection", side_effect=lambda: psycopg.connect(self.dsn, autocommit=True)):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(write, title) for title in ("Linux", "Mac")]
+                statuses = [future.result(timeout=10) for future in futures]
+        self.assertEqual(sorted(statuses), [200, 409])
+
+    def test_batch_conflict_rolls_back_previous_rows_in_autocommit_pool(self):
+        first, second = sorted([self.ids["source"], self.ids["old"]])
+        first_title = "source" if first == self.ids["source"] else "old"
+        changes = [
+            {"id": first, "mudancas": {"nome": "Must roll back"}, "valores_base": {"nome": first_title}},
+            {"id": second, "mudancas": {"nome": "Stale"}, "valores_base": {"nome": "not-current"}},
+        ]
+        with patch.object(self, "connection", side_effect=lambda: psycopg.connect(self.dsn, autocommit=True)):
+            response = self.request("linha.lote", mudancas=changes)
+        self.assertEqual(response.codigo, 409)
+        with self.connection() as con:
+            self.assertEqual(con.execute("SELECT titulo FROM banco.linha WHERE id=%s", (first,)).fetchone()[0], first_title)
+
+    def test_json_numbers_merge_but_nested_booleans_do_not_equal_numbers(self):
+        row = self.ids["source"]
+        self.assertEqual(self.request("linha.atualizar", id=row, mudancas={"value": {"n": 1.0, "flag": True}}, valores_base={"value": None}).codigo, 200)
+        self.assertEqual(self.request("linha.atualizar", id=row, mudancas={"value": {"n": 2}}, valores_base={"value": {"n": 1, "flag": 1}}).codigo, 409)
+        self.assertEqual(self.request("linha.atualizar", id=row, mudancas={"value": {"n": 2}}, valores_base={"value": {"flag": True, "n": 1}}).codigo, 200)
+
+    def test_batch_ack_preserves_request_order_and_legacy_writes_are_not_marked_guarded(self):
+        rows = sorted([self.ids["source"], self.ids["old"]], reverse=True)
+        response = self.request("linha.lote", mudancas=[{"id": row, "mudancas": {"extra": "value"}, "valores_base": {"extra": None}} for row in rows])
+        self.assertEqual(response.codigo, 200)
+        self.assertEqual([item["id"] for item in response.corpo["dados"]], rows)
+        self.assertTrue(all(item["precondicoes_verificadas"] for item in response.corpo["dados"]))
+        legacy = self.request("linha.atualizar", id=rows[0], mudancas={"extra": "Legacy"})
+        self.assertEqual(legacy.codigo, 200)
+        self.assertFalse(legacy.corpo["dados"]["precondicoes_verificadas"])
+
+    def test_hook_failure_rolls_back_guarded_row_in_autocommit_pool(self):
+        with patch.object(self, "connection", side_effect=lambda: psycopg.connect(self.dsn, autocommit=True)), \
+             patch.object(S.C, "recalcular_cascata", side_effect=ErroDeCalculo("synthetic derived failure")):
+            response = self.request("linha.atualizar", id=self.ids["source"], mudancas={"nome": "Must roll back"}, valores_base={"nome": "source"})
+        self.assertEqual(response.codigo, 400)
+        with self.connection() as con:
+            self.assertEqual(con.execute("SELECT titulo FROM banco.linha WHERE id=%s", (self.ids["source"],)).fetchone()[0], "source")
+
 
 if __name__ == "__main__":
     unittest.main()

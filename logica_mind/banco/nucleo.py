@@ -20,6 +20,7 @@ transação e pode deixar índice inválido (roda fora do request, e há varredu
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from typing import Any, Optional
@@ -537,17 +538,48 @@ def criar_linha(cur, user_id: str, no_id: str, props: dict = None,
             "posicao": pos, "criado_em": r[1].isoformat()}
 
 
-def atualizar_linha(cur, user_id: str, linha_id: str, mudancas: dict) -> dict:
-    """Mescla parcial: só as chaves enviadas mudam. Enviar o objeto inteiro seria
-    perder o que outra aba escreveu entre a leitura e a gravação."""
+def _mesmo_valor_json(a, b):
+    # JSON numbers share a type (1 and 1.0), booleans do not. Compare recursively
+    # rather than letting Python's True == 1 hide a stale nested property.
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return (not isinstance(a, float) or math.isfinite(a)) and (not isinstance(b, float) or math.isfinite(b)) and a == b
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_mesmo_valor_json(a[key], b[key]) for key in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_mesmo_valor_json(x, y) for x, y in zip(a, b))
+    return type(a) is type(b) and a == b
+
+
+def atualizar_linha(cur, user_id: str, linha_id: str, mudancas: dict,
+                    valores_base: dict = None) -> dict:
+    """Compare-and-merge under a real transaction, including autocommit pools.
+
+    Current clients send exactly the original values of the fields being edited.
+    Independent fields can merge; a stale edit to the same field returns 409.
+    Legacy/internal writers without a base retain their explicit partial-write
+    semantics. They do not acquire optimistic-concurrency protection by omission.
+    """
+    if not isinstance(mudancas, dict):
+        raise ErroDeBanco("mudanças da linha precisam ser um objeto")
+    if valores_base is not None and (not isinstance(valores_base, dict)
+                                     or set(valores_base) != set(mudancas)):
+        raise ErroDeBanco("valores de origem precisam corresponder exatamente aos campos alterados")
+    with cur.connection.transaction():
+        return _atualizar_linha_bloqueada(cur, user_id, linha_id, dict(mudancas), valores_base)
+
+
+def _atualizar_linha_bloqueada(cur, user_id, linha_id, mudancas, valores_base):
     cur.execute("SELECT no_id FROM banco.linha WHERE id=%s AND user_id=%s AND deletado_em IS NULL", (linha_id, user_id))
     ref = cur.fetchone()
     if not ref:
         raise ErroDeBanco("linha não encontrada")
     # All choice writers acquire parent before row. An option operation holds
     # UPDATE on this parent throughout its scan/metadata/hooks transaction.
-    cur.execute("SELECT id FROM banco.no WHERE id=%s AND user_id=%s FOR KEY SHARE", (ref[0], user_id))
-    if not cur.fetchone():
+    cur.execute("SELECT id, chave_titulo FROM banco.no WHERE id=%s AND user_id=%s FOR KEY SHARE", (ref[0], user_id))
+    base = cur.fetchone()
+    if not base:
         raise ErroDeBanco("base não encontrada")
     cur.execute("SELECT no_id, props, titulo FROM banco.linha "
                 "WHERE id=%s AND user_id=%s AND deletado_em IS NULL FOR UPDATE", (linha_id, user_id))
@@ -555,6 +587,12 @@ def atualizar_linha(cur, user_id: str, linha_id: str, mudancas: dict) -> dict:
     if not r:
         raise ErroDeBanco("linha não encontrada")
     no_id, atuais, titulo_atual = _s(r[0]), dict(r[1] or {}), r[2]
+    if valores_base is not None:
+        title_key = base[1] or "titulo"
+        for key, original in valores_base.items():
+            current = titulo_atual if key in ("titulo", title_key) else atuais.get(key)
+            if not _mesmo_valor_json(current, original):
+                raise ErroDeConflito("Este item mudou em outro cliente. Sua alteração não foi aplicada; preserve seu texto e confira a versão atual antes de tentar novamente.")
     _validar_opcoes_retiradas(cur, user_id, no_id, mudancas, atuais)
     novo_titulo = mudancas.pop("titulo", None)
     for k, v in mudancas.items():
@@ -569,7 +607,8 @@ def atualizar_linha(cur, user_id: str, linha_id: str, mudancas: dict) -> dict:
                 "WHERE id=%s AND user_id=%s RETURNING atualizado_em",
                 (json.dumps(atuais), str(titulo)[:400], linha_id, user_id))
     return {"id": _s(linha_id), "no_id": no_id, "props": atuais, "titulo": titulo,
-            "atualizado_em": cur.fetchone()[0].isoformat()}
+            "atualizado_em": cur.fetchone()[0].isoformat(),
+            "precondicoes_verificadas": valores_base is not None}
 
 
 def mover_linha(cur, user_id: str, linha_id: str, antes_de: str = None,
