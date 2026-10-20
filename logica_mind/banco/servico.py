@@ -265,6 +265,11 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
         v = qs.get(nome)
         return (v[0] if isinstance(v, list) and v else v) or padrao
 
+    if acao == "capacidades":
+        if metodo != "GET":
+            return _erro(405, "capacidades é somente leitura")
+        return _ok({"linha_valores_base": 1})
+
     if acao in ("tabela", "tabelas"):
         esq = um("esquema", "banco")
         if metodo != "GET":
@@ -982,21 +987,24 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 return _ok({**criada, **(calculada or {})})
             if acao == "linha.atualizar":
                 mudancas = corpo.get("mudancas") or {}
-                D.validar_conclusao(cur, user_id, corpo["id"], mudancas)
-                atualizada = N.atualizar_linha(cur, user_id, corpo["id"], mudancas)
-                NF.sincronizar_lembretes(cur, user_id, atualizada)
-                ajustados = D.reprogramar_dependentes(cur, user_id, corpo["id"])
-                _registrar_reprogramacoes(cur, user_id, ajustados)
-                recorrente = R.gerar_proxima(cur, user_id, atualizada, N)
-                calculada = C.recalcular_cascata(cur, user_id, corpo["id"])
-                if recorrente:
-                    C.recalcular_cascata(cur, user_id, recorrente["id"])
-                    NF.sincronizar_lembretes(cur, user_id, recorrente)
-                    NF.criar(cur, user_id, chave=f"recorrencia:{corpo['id']}", tipo="recorrencia",
-                             titulo="Próxima ocorrência criada", corpo=recorrente.get("titulo") or "",
-                             no_id=recorrente.get("no_id"), linha_id=recorrente["id"])
-                    P.enfileirar_linha(cur, user_id, recorrente["id"])
-                P.enfileirar_linha(cur, user_id, corpo["id"])
+                if "valores_base" in corpo and not isinstance(corpo["valores_base"], dict):
+                    raise ErroDeBanco("valores de origem precisam ser um objeto")
+                with con.transaction():
+                    D.validar_conclusao(cur, user_id, corpo["id"], mudancas)
+                    atualizada = N.atualizar_linha(cur, user_id, corpo["id"], mudancas, corpo.get("valores_base"))
+                    NF.sincronizar_lembretes(cur, user_id, atualizada)
+                    ajustados = D.reprogramar_dependentes(cur, user_id, corpo["id"])
+                    _registrar_reprogramacoes(cur, user_id, ajustados)
+                    recorrente = R.gerar_proxima(cur, user_id, atualizada, N)
+                    calculada = C.recalcular_cascata(cur, user_id, corpo["id"])
+                    if recorrente:
+                        C.recalcular_cascata(cur, user_id, recorrente["id"])
+                        NF.sincronizar_lembretes(cur, user_id, recorrente)
+                        NF.criar(cur, user_id, chave=f"recorrencia:{corpo['id']}", tipo="recorrencia",
+                                 titulo="Próxima ocorrência criada", corpo=recorrente.get("titulo") or "",
+                                 no_id=recorrente.get("no_id"), linha_id=recorrente["id"])
+                        P.enfileirar_linha(cur, user_id, recorrente["id"])
+                    P.enfileirar_linha(cur, user_id, corpo["id"])
                 return _ok({**atualizada, **(calculada or {}), "recorrencia": recorrente,
                             "dependentes_ajustados": ajustados})
             if acao == "notificacao.criar":
@@ -1042,25 +1050,28 @@ def trata(metodo: str, caminho: str, qs: dict, corpo: dict, user_id: str,
                 # N mutações numa transação: arrastar dez cartões de coluna é UM pedido,
                 # e ou tudo entra ou nada entra.
                 lote = (corpo.get("mudancas") or [])[:200]
-                # O pool usa autocommit: validar o lote inteiro ANTES da primeira
-                # escrita é o que preserva a promessa de não deixar metade concluída.
-                for m in lote:
-                    D.validar_conclusao(cur, user_id, m["id"], m.get("mudancas") or {})
-                feitos = []
-                for m in lote:
-                    atualizada = N.atualizar_linha(cur, user_id, m["id"], m.get("mudancas") or {})
-                    NF.sincronizar_lembretes(cur, user_id, atualizada)
-                    ajustados = D.reprogramar_dependentes(cur, user_id, m["id"])
-                    _registrar_reprogramacoes(cur, user_id, ajustados)
-                    recorrente = R.gerar_proxima(cur, user_id, atualizada, N)
-                    calculada = C.recalcular_cascata(cur, user_id, m["id"])
-                    if recorrente:
-                        C.recalcular_cascata(cur, user_id, recorrente["id"])
-                        NF.sincronizar_lembretes(cur, user_id, recorrente)
-                        P.enfileirar_linha(cur, user_id, recorrente["id"])
-                    P.enfileirar_linha(cur, user_id, m["id"])
-                    feitos.append({**atualizada, **(calculada or {}), "recorrencia": recorrente,
-                                   "dependentes_ajustados": ajustados})
+                with con.transaction():
+                    for m in lote:
+                        if "valores_base" in m and not isinstance(m["valores_base"], dict):
+                            raise ErroDeBanco("valores de origem precisam ser um objeto")
+                        D.validar_conclusao(cur, user_id, m["id"], m.get("mudancas") or {})
+                    feitos = [None] * len(lote)
+                    # Stable lock order avoids inverted batches deadlocking. The
+                    # transaction rolls back every row and hook on any conflict.
+                    for index, m in sorted(enumerate(lote), key=lambda pair: str(pair[1]["id"])):
+                        atualizada = N.atualizar_linha(cur, user_id, m["id"], m.get("mudancas") or {}, m.get("valores_base"))
+                        NF.sincronizar_lembretes(cur, user_id, atualizada)
+                        ajustados = D.reprogramar_dependentes(cur, user_id, m["id"])
+                        _registrar_reprogramacoes(cur, user_id, ajustados)
+                        recorrente = R.gerar_proxima(cur, user_id, atualizada, N)
+                        calculada = C.recalcular_cascata(cur, user_id, m["id"])
+                        if recorrente:
+                            C.recalcular_cascata(cur, user_id, recorrente["id"])
+                            NF.sincronizar_lembretes(cur, user_id, recorrente)
+                            P.enfileirar_linha(cur, user_id, recorrente["id"])
+                        P.enfileirar_linha(cur, user_id, m["id"])
+                        feitos[index] = {**atualizada, **(calculada or {}), "recorrencia": recorrente,
+                                         "dependentes_ajustados": ajustados}
                 return _ok(feitos)
 
             if acao == "documento.salvar":
