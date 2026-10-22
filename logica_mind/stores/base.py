@@ -241,6 +241,11 @@ class Store(ABC):
     def namespaces(self) -> List[str]:
         """All namespaces present in this store (e.g. one per agent/clone)."""
 
+    def demo_count(self, namespace=None) -> int:
+        names = [namespace] if namespace is not None else [ns for ns in self.namespaces() if not ns.startswith("private-cli-")]
+        return sum(1 for ns in names for m in self.all(ns, with_embeddings=False)
+                   if (m.metadata or {}).get("demo") or "demo" in (m.tags or []))
+
     def peer_pairs(self, namespace: Optional[str] = None) -> List[dict]:
         if namespace is None:
             return [p for ns in self.namespaces() if not ns.startswith("private-cli-") for p in self.peer_pairs(ns)]

@@ -385,6 +385,13 @@ class SQLiteStore(Store):
             rows = self._rconn.execute(sql, params).fetchall()
         return [self._row_to_memory(r, with_embeddings) for r in rows]
 
+    def demo_count(self, namespace=None):
+        scope = "namespace=?" if namespace is not None else "namespace NOT LIKE 'private-cli-%' AND COALESCE(json_extract(metadata,'$.memoryScope'),'shared')<>'personal'"
+        with self._rlock:
+            return int(self._rconn.execute(f"SELECT COUNT(*) FROM memories WHERE {scope} "
+                "AND (json_extract(metadata,'$.demo')=1 OR EXISTS (SELECT 1 FROM json_each(tags) WHERE value='demo'))",
+                (namespace,) if namespace is not None else ()).fetchone()[0])
+
     def peer_pairs(self, namespace=None):
         scope = "namespace=?" if namespace is not None else "namespace NOT LIKE 'private-cli-%' AND COALESCE(json_extract(metadata,'$.memoryScope'),'shared')<>'personal'"
         with self._rlock:

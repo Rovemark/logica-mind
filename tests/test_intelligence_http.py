@@ -99,3 +99,19 @@ def test_observation_pruning_matches_exhaustive_top_pairs():
         hubs = [o for o in actual if o['kind'] == 'hub']
         pairs = [(o['count'], tuple(o['entities'])) for o in actual if o['kind'] == 'co_occurrence']
         assert pairs == expected[:max(0,limit-len(hubs))]
+
+
+def test_demo_detection_counts_in_storage_without_enumerating_memories(tmp_path):
+    from logica_mind.stores import SQLiteStore, MultiStore
+    from logica_mind.stores.privacy import PrivacyStore
+    from logica_mind import Memory, MemoryLayer
+    from logica_mind.demo import count
+    store = SQLiteStore(str(tmp_path / 'demo.db'))
+    store.add([Memory(namespace='astro', layer=MemoryLayer.SEMANTIC, content='Real'),
+        Memory(namespace='astro', layer=MemoryLayer.SEMANTIC, content='Fictional metadata', metadata={'demo':True}),
+        Memory(namespace='other', layer=MemoryLayer.SEMANTIC, content='Fictional tag', tags=['demo']),
+        Memory(namespace='private-cli-other', layer=MemoryLayer.SEMANTIC, content='Private', tags=['demo'], metadata={'memoryScope':'personal'})])
+    store.all = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('must not deserialize the archive'))
+    mind = LogicaMind(namespace='astro', store=PrivacyStore(MultiStore([store])))
+    assert count(mind) == 2
+    assert store.demo_count('astro') == 1

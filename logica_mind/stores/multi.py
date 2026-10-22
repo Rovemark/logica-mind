@@ -113,6 +113,11 @@ class MultiStore(Store):
                 seen.setdefault(m.id, m)
         return list(seen.values())
 
+    def demo_count(self, namespace=None):
+        if all(getattr(s, "mirror_only", False) for s in self.stores[1:]):
+            return self.stores[0].demo_count(namespace)
+        return super().demo_count(namespace)
+
     def peer_pairs(self, namespace=None):
         if all(getattr(s, "mirror_only", False) for s in self.stores[1:]):
             return self.stores[0].peer_pairs(namespace)

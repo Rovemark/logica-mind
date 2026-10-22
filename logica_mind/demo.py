@@ -243,12 +243,7 @@ def seed(mind: "LogicaMind", *, rng_seed: int = 7, days: int = 75) -> int:
 
 def count(mind: "LogicaMind") -> int:
     """How many demo-tagged memories exist across all namespaces."""
-    n = 0
-    for ns in mind.store.namespaces():
-        for m in mind.store.all(ns):
-            if (m.metadata or {}).get(DEMO_FLAG) or DEMO_FLAG in (m.tags or []):
-                n += 1
-    return n
+    return mind.store.demo_count()
 
 
 def clear(mind: "LogicaMind") -> int:

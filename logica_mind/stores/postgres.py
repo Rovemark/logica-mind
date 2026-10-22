@@ -431,6 +431,13 @@ class PostgresStore(Store):
         sql += " ORDER BY created_at DESC, seq DESC NULLS LAST"
         return [self._row_to_memory(r, with_embeddings) for r in self._q(sql, params)]
 
+    def demo_count(self, namespace=None):
+        scope = "namespace=%s" if namespace is not None else "namespace NOT LIKE 'private-cli-%%' AND COALESCE(metadata->>'memoryScope','shared')<>'personal'"
+        row = self._q(f"SELECT COUNT(*) FROM {_TABELA} WHERE {scope} "
+                      "AND (COALESCE(metadata->>'demo','') IN ('true','1') OR COALESCE(tags,'[]'::jsonb) ? 'demo')",
+                      (namespace,) if namespace is not None else (), fetch="one")
+        return int(row[0])
+
     def peer_pairs(self, namespace=None):
         scope = "namespace=%s" if namespace is not None else "namespace NOT LIKE 'private-cli-%%' AND COALESCE(metadata->>'memoryScope','shared')<>'personal'"
         rows = self._q(f"SELECT namespace,metadata->>'observer',metadata->>'observed',COUNT(*) FROM {_TABELA} "

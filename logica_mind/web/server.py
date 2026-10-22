@@ -1967,7 +1967,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                 elif path == "/api/demo":
                     # whether the fictional demo dataset is currently loaded
                     from .. import demo as _demo
-                    self._json({"present": _demo.count(mind) > 0, "count": _demo.count(mind)})
+                    demo_count = _demo.count(mind)
+                    self._json({"present": demo_count > 0, "count": demo_count})
 
                 # ---- observability ----
                 elif path == "/api/health":

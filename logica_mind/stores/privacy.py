@@ -76,6 +76,14 @@ class PrivacyStore(Store):
         self._assert(namespace)
         return self._store.all(namespace, layers, with_embeddings=with_embeddings)
 
+    def demo_count(self, namespace=None):
+        if namespace is None:
+            if self._prefix:
+                return sum(self.demo_count(ns) for ns in self.namespaces())
+            return self._store.demo_count()
+        self._assert(namespace)
+        return self._store.demo_count(namespace)
+
     def peer_pairs(self, namespace=None):
         if namespace is None:
             if self._prefix:
