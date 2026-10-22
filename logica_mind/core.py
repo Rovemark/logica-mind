@@ -1774,21 +1774,31 @@ class LogicaMind:
                 })
 
         # co-occurrence: entity pairs that keep landing in the same neighborhood
+        take = max(0, limit - len(hubs))
+        if not take:
+            return hubs[:limit]
         cooc: List[Dict[str, Any]] = []
-        ents = sorted(neighbors, key=lambda e: deg[e], reverse=True)
-        for i in range(len(ents)):
-            for j in range(i + 1, len(ents)):
-                a, b = ents[i], ents[j]
+        # A pair cannot share more neighbors than either endpoint has. Visit the
+        # highest degrees first, then prune when that upper bound is below the
+        # worst retained result. Same top-k, without millions of useless singleton intersections.
+        ents = sorted((e for e in neighbors if len(neighbors[e]) >= 2), key=lambda e: (-len(neighbors[e]), e))
+        cutoff = 2
+        for i, a in enumerate(ents):
+            if len(neighbors[a]) < cutoff:
+                break
+            for b in ents[i + 1:]:
+                if len(neighbors[b]) < cutoff:
+                    break
                 common = (neighbors[a] & neighbors[b]) - {a, b}
-                if len(common) >= 2:
-                    cooc.append({
-                        "kind": "co_occurrence",
-                        "entities": [a, b],
-                        "count": len(common),
+                count = len(common)
+                if count >= cutoff:
+                    cooc.append({"kind": "co_occurrence", "entities": sorted([a, b]), "count": count,
                         "shared": sorted(common)[:4],
-                        "text": f"{a} and {b} recur together — {len(common)} shared connections",
-                    })
-        cooc.sort(key=lambda x: x["count"], reverse=True)
+                        "text": f"{a} and {b} recur together — {count} shared connections"})
+                    cooc.sort(key=lambda x: (-x["count"], tuple(x["entities"])))
+                    del cooc[take:]
+                    if len(cooc) == take:
+                        cutoff = max(2, cooc[-1]["count"])
         return (hubs + cooc)[:limit]
 
     # ---- dimension profile -------------------------------------------------
@@ -2266,9 +2276,7 @@ class LogicaMind:
         return m
 
     def _peer_obs(self, observer: str, observed: str) -> List[Memory]:
-        obs = [m for m in self.store.all(self.namespace, [MemoryLayer.USER])
-               if (m.metadata or {}).get("observer") == observer
-               and (m.metadata or {}).get("observed") == observed]
+        obs = self.store.peer_memories(self.namespace, observer, observed)
         # store.all() ordering is backend-defined; sort so obs[-30:] is really the
         # NEWEST 30 on SQLite/Postgres/Supabase, not an arbitrary slice
         obs.sort(key=lambda m: m.created_at or "")

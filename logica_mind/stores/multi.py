@@ -113,6 +113,16 @@ class MultiStore(Store):
                 seen.setdefault(m.id, m)
         return list(seen.values())
 
+    def peer_pairs(self, namespace=None):
+        if all(getattr(s, "mirror_only", False) for s in self.stores[1:]):
+            return self.stores[0].peer_pairs(namespace)
+        return super().peer_pairs(namespace)
+
+    def peer_memories(self, namespace, observer, observed):
+        if all(getattr(s, "mirror_only", False) for s in self.stores[1:]):
+            return self.stores[0].peer_memories(namespace, observer, observed)
+        return super().peer_memories(namespace, observer, observed)
+
     def namespaces(self) -> List[str]:
         out = set()
         for s in self.stores:

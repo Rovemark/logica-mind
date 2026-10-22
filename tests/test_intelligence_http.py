@@ -52,3 +52,50 @@ def test_all_communities_include_each_namespace_and_typed_relations(service):
     assert {c["namespace"] for c in result["communities"]} == {"astro", "green"}
     assert all(c["relations"][0]["predicate"] == "part_of" for c in result["communities"])
     assert {c["namespace"] for c in call("communities?namespace=green")[1]["communities"]} == {"green"}
+
+
+def test_peer_projections_skip_unrelated_user_records_and_keep_direction(tmp_path):
+    from logica_mind.stores import SQLiteStore, MultiStore
+    from logica_mind.stores.privacy import PrivacyStore
+    from logica_mind import Memory, MemoryLayer
+    store = SQLiteStore(str(tmp_path / 'peers.db'))
+    store.add([Memory(namespace='astro', layer=MemoryLayer.USER, content=f'Unrelated profile {i}', metadata={}) for i in range(60)])
+    mind = LogicaMind(namespace='astro', store=store)
+    mind.observe_peer('astro', 'green', 'Verificou a entrega.')
+    mind.observe_peer('green', 'astro', 'Prefere evidências.')
+    # Optimized SQL reads must not fall back to materializing every user profile.
+    store.all = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('full profile scan'))
+    wrapped = PrivacyStore(MultiStore([store]))
+    store.add([Memory(namespace='private-cli-hidden', layer=MemoryLayer.USER, content='Private', metadata={'observer':'private','observed':'private','memoryScope':'personal'})])
+    assert len(wrapped.peer_pairs()) == 2
+    assert len(wrapped.peer_pairs('astro')) == 2
+    assert [m.content for m in wrapped.peer_memories('astro', 'astro', 'green')] == ['Verificou a entrega.']
+    with pytest.raises(ValueError):
+        wrapped.peer_pairs('private-cli-not-authorized')
+
+
+def test_observation_pruning_matches_exhaustive_top_pairs():
+    import random
+    from collections import Counter, defaultdict
+    rng = random.Random(29)
+    mind = LogicaMind(namespace='fixture', store=InMemoryStore())
+    for i in range(260):
+        a, b = rng.sample(range(65), 2)
+        mind.graph.ingest(f'e{a}', f'relation{i % 3}', f'e{b}')
+    neighbors, degree = defaultdict(set), Counter()
+    for e in mind.graph.edges():
+        neighbors[e.subject].add(e.object); neighbors[e.object].add(e.subject)
+        degree[e.subject] += 1; degree[e.object] += 1
+    entities = sorted(neighbors)
+    expected = []
+    for i, a in enumerate(entities):
+        for b in entities[i+1:]:
+            common = (neighbors[a] & neighbors[b]) - {a, b}
+            if len(common) >= 2:
+                expected.append((len(common), (a,b)))
+    expected.sort(key=lambda v: (-v[0],v[1]))
+    for limit in (1, 6, 12, 30):
+        actual = mind.observations(limit=limit)
+        hubs = [o for o in actual if o['kind'] == 'hub']
+        pairs = [(o['count'], tuple(o['entities'])) for o in actual if o['kind'] == 'co_occurrence']
+        assert pairs == expected[:max(0,limit-len(hubs))]

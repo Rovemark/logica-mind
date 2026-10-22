@@ -431,6 +431,18 @@ class PostgresStore(Store):
         sql += " ORDER BY created_at DESC, seq DESC NULLS LAST"
         return [self._row_to_memory(r, with_embeddings) for r in self._q(sql, params)]
 
+    def peer_pairs(self, namespace=None):
+        scope = "namespace=%s" if namespace is not None else "namespace NOT LIKE 'private-cli-%%' AND COALESCE(metadata->>'memoryScope','shared')<>'personal'"
+        rows = self._q(f"SELECT namespace,metadata->>'observer',metadata->>'observed',COUNT(*) FROM {_TABELA} "
+                       f"WHERE {scope} AND layer='user' AND COALESCE(metadata->>'observer','')<>'' "
+                       "AND COALESCE(metadata->>'observed','')<>'' GROUP BY 1,2,3", (namespace,) if namespace is not None else ())
+        return [{"namespace": ns, "observer": a, "observed": b, "count": n} for ns, a, b, n in rows]
+
+    def peer_memories(self, namespace, observer, observed):
+        return [self._row_to_memory(r, False) for r in self._q(
+            f"SELECT {_COLS_SEM_EMB} FROM {_TABELA} WHERE namespace=%s AND layer='user' "
+            "AND metadata->>'observer'=%s AND metadata->>'observed'=%s", (namespace, observer, observed))]
+
     def namespaces(self) -> List[str]:
         return [r[0] for r in self._q(f"SELECT DISTINCT namespace FROM {_TABELA} ORDER BY namespace")]
 

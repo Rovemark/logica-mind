@@ -1846,17 +1846,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     self._json({"since": since, "until": until, "diff": items[:300]})
 
                 elif path == "/api/peers":
-                    names = mind.store.namespaces() if is_all else [ns]
-                    pairs = {}
-                    for nm in names:
-                        for m in mind.store.all(nm, [MemoryLayer.USER], with_embeddings=False):
-                            md = m.metadata or {}
-                            obr, obd = md.get("observer"), md.get("observed")
-                            if obr and obd:
-                                k = (nm, obr, obd)
-                                pairs.setdefault(k, {"namespace": nm, "observer": obr, "observed": obd, "count": 0})
-                                pairs[k]["count"] += 1
-                    self._json({"peers": sorted(pairs.values(), key=lambda p: (-p["count"], p["namespace"], p["observer"], p["observed"]))})
+                    pairs = mind.store.peer_pairs(None if is_all else ns)
+                    self._json({"peers": sorted(pairs, key=lambda p: (-p["count"], p["namespace"], p["observer"], p["observed"]))})
 
                 elif path == "/api/peer_card":
                     tgt = ns if not is_all else mind.namespace

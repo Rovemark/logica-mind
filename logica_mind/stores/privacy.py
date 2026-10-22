@@ -76,6 +76,18 @@ class PrivacyStore(Store):
         self._assert(namespace)
         return self._store.all(namespace, layers, with_embeddings=with_embeddings)
 
+    def peer_pairs(self, namespace=None):
+        if namespace is None:
+            if self._prefix:
+                return [p for ns in self.namespaces() for p in self.peer_pairs(ns)]
+            return [p for p in self._store.peer_pairs() if self.permits(p["namespace"])]
+        self._assert(namespace)
+        return self._store.peer_pairs(namespace)
+
+    def peer_memories(self, namespace, observer, observed):
+        self._assert(namespace)
+        return self._store.peer_memories(namespace, observer, observed)
+
     def count(self, namespace, layers=None):
         self._assert(namespace)
         return self._store.count(namespace, layers)

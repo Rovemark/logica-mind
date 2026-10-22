@@ -385,6 +385,21 @@ class SQLiteStore(Store):
             rows = self._rconn.execute(sql, params).fetchall()
         return [self._row_to_memory(r, with_embeddings) for r in rows]
 
+    def peer_pairs(self, namespace=None):
+        scope = "namespace=?" if namespace is not None else "namespace NOT LIKE 'private-cli-%' AND COALESCE(json_extract(metadata,'$.memoryScope'),'shared')<>'personal'"
+        with self._rlock:
+            rows = self._rconn.execute("SELECT namespace,json_extract(metadata,'$.observer'),json_extract(metadata,'$.observed'),COUNT(*) "
+                f"FROM memories WHERE {scope} AND layer='user' AND COALESCE(json_extract(metadata,'$.observer'),'')<>'' "
+                "AND COALESCE(json_extract(metadata,'$.observed'),'')<>'' GROUP BY 1,2,3", (namespace,) if namespace is not None else ()).fetchall()
+        return [{"namespace": ns, "observer": a, "observed": b, "count": n} for ns, a, b, n in rows]
+
+    def peer_memories(self, namespace, observer, observed):
+        with self._rlock:
+            rows = self._rconn.execute("SELECT id,namespace,content,layer,NULL AS embedding,metadata,importance,tags,source_ids,created_at,seq,access_count,last_recalled_at,surprise_score "
+                "FROM memories WHERE namespace=? AND layer='user' AND json_extract(metadata,'$.observer')=? "
+                "AND json_extract(metadata,'$.observed')=?", (namespace, observer, observed)).fetchall()
+        return [self._row_to_memory(r, False) for r in rows]
+
     @_locked
     def namespaces(self) -> List[str]:
         cur = self._conn.execute("SELECT DISTINCT namespace FROM memories ORDER BY namespace")
