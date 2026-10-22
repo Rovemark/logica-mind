@@ -133,6 +133,21 @@ class MultiStore(Store):
                 seen.setdefault(m.id, m)
         return list(seen.values())
 
+    def demo_count(self, namespace=None):
+        if all(getattr(s, "mirror_only", False) for s in self.stores[1:]):
+            return self.stores[0].demo_count(namespace)
+        return super().demo_count(namespace)
+
+    def peer_pairs(self, namespace=None):
+        if all(getattr(s, "mirror_only", False) for s in self.stores[1:]):
+            return self.stores[0].peer_pairs(namespace)
+        return super().peer_pairs(namespace)
+
+    def peer_memories(self, namespace, observer, observed):
+        if all(getattr(s, "mirror_only", False) for s in self.stores[1:]):
+            return self.stores[0].peer_memories(namespace, observer, observed)
+        return super().peer_memories(namespace, observer, observed)
+
     def namespaces(self) -> List[str]:
         out = set()
         for s in self.stores:
@@ -240,11 +255,26 @@ class MultiStore(Store):
                                          metadata_filter)
         return []
 
+    def library(self, **options):
+        # Counts and page must come from the SAME canonical primary, never mirrors.
+        primary = self.stores[0]
+        if not callable(getattr(primary, 'library', None)):
+            raise RuntimeError('canonical store does not support the memory library')
+        return primary.library(**options)
+
     def mentions(self, namespace, name, limit=0, with_embeddings=False):
         for s in self.stores:
             if hasattr(s, "mentions"):
                 return s.mentions(namespace, name, limit=limit, with_embeddings=with_embeddings)
         return self.all(namespace, with_embeddings=with_embeddings)   # correct (slow) fallback
+
+    def shared_facet_rows(self):
+        native = getattr(self.stores[0], "shared_facet_rows", None)
+        return native() if callable(native) else None
+
+    def shared_facets(self, key):
+        native = getattr(self.stores[0], "shared_facets", None)
+        return native(key) if callable(native) else None
 
     def tagged(self, namespace=None, key="channel"):
         for s in self.stores:

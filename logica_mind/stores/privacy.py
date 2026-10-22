@@ -80,6 +80,26 @@ class PrivacyStore(Store):
         self._assert(namespace)
         return self._store.all(namespace, layers, with_embeddings=with_embeddings)
 
+    def demo_count(self, namespace=None):
+        if namespace is None:
+            if self._prefix:
+                return sum(self.demo_count(ns) for ns in self.namespaces())
+            return self._store.demo_count()
+        self._assert(namespace)
+        return self._store.demo_count(namespace)
+
+    def peer_pairs(self, namespace=None):
+        if namespace is None:
+            if self._prefix:
+                return [p for ns in self.namespaces() for p in self.peer_pairs(ns)]
+            return [p for p in self._store.peer_pairs() if self.permits(p["namespace"])]
+        self._assert(namespace)
+        return self._store.peer_pairs(namespace)
+
+    def peer_memories(self, namespace, observer, observed):
+        self._assert(namespace)
+        return self._store.peer_memories(namespace, observer, observed)
+
     def count(self, namespace, layers=None):
         self._assert(namespace)
         return self._store.count(namespace, layers)
@@ -114,7 +134,18 @@ class PrivacyStore(Store):
             raise RuntimeError("store does not support re-embedding")
         return native(namespace, pairs)
 
+    def shared_facet_rows(self):
+        if self._prefix:
+            raise ValueError("shared facets are institutional only")
+        native = getattr(self._store, "shared_facet_rows", None)
+        return native() if callable(native) else None
+
     def tagged(self, namespace=None, key="channel"):
+        batch = getattr(self._store, "shared_facets", None)
+        if namespace is None and not self._prefix and callable(batch):
+            rows = batch(key)
+            if rows is not None:
+                return rows
         native = getattr(self._store, "tagged", None)
         rows = []
         for ns in [namespace] if namespace is not None else self.namespaces():
@@ -124,6 +155,11 @@ class PrivacyStore(Store):
         return rows
 
     def dimensioned(self, namespace=None):
+        batch = getattr(self._store, "shared_facets", None)
+        if namespace is None and not self._prefix and callable(batch):
+            rows = batch("dimension")
+            if rows is not None:
+                return rows
         native = getattr(self._store, "dimensioned", None)
         rows = []
         for ns in [namespace] if namespace is not None else self.namespaces():
@@ -246,6 +282,16 @@ class PrivacyStore(Store):
                     rows.append(memory)
         rows.sort(key=lambda m: m.created_at or "", reverse=True)
         return rows[offset:offset + limit]
+
+    def library(self, namespace=None, metadata_filter=None, **options):
+        # This endpoint is institutional. No private mode, discovery or fallback.
+        if self._prefix:
+            raise ValueError('library is only available for shared memory')
+        if namespace is not None:
+            self._assert(namespace)
+        if (metadata_filter or {}).get('memoryScope') == 'personal':
+            raise ValueError('library is only available for shared memory')
+        return self._store.library(namespace=namespace, metadata_filter=metadata_filter, **options)
 
     def day(self, namespace=None, date=None, layers=None, with_embeddings=False):
         names = [namespace] if namespace is not None else self.namespaces()

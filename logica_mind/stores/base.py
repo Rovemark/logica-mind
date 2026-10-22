@@ -257,6 +257,28 @@ class Store(ABC):
     def namespaces(self) -> List[str]:
         """All namespaces present in this store (e.g. one per agent/clone)."""
 
+    def demo_count(self, namespace=None) -> int:
+        names = [namespace] if namespace is not None else [ns for ns in self.namespaces() if not ns.startswith("private-cli-")]
+        return sum(1 for ns in names for m in self.all(ns, with_embeddings=False)
+                   if (m.metadata or {}).get("demo") or "demo" in (m.tags or []))
+
+    def peer_pairs(self, namespace: Optional[str] = None) -> List[dict]:
+        if namespace is None:
+            return [p for ns in self.namespaces() if not ns.startswith("private-cli-") for p in self.peer_pairs(ns)]
+        pairs = {}
+        for m in self.all(namespace, [MemoryLayer.USER], with_embeddings=False):
+            md = m.metadata or {}
+            a, b = md.get("observer"), md.get("observed")
+            if a and b:
+                key = (a, b)
+                pairs.setdefault(key, {"namespace": namespace, "observer": a, "observed": b, "count": 0})
+                pairs[key]["count"] += 1
+        return list(pairs.values())
+
+    def peer_memories(self, namespace: str, observer: str, observed: str) -> List[Memory]:
+        return [m for m in self.all(namespace, [MemoryLayer.USER], with_embeddings=False)
+                if (m.metadata or {}).get("observer") == observer and (m.metadata or {}).get("observed") == observed]
+
     def count(self, namespace: str, layers: Optional[List[MemoryLayer]] = None) -> int:
         return len(self.all(namespace, layers))
 

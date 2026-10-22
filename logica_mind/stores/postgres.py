@@ -445,6 +445,25 @@ class PostgresStore(Store):
         sql += " ORDER BY created_at DESC, seq DESC NULLS LAST"
         return [self._row_to_memory(r, with_embeddings) for r in self._q(sql, params)]
 
+    def demo_count(self, namespace=None):
+        scope = "namespace=%s" if namespace is not None else "namespace NOT LIKE 'private-cli-%%' AND COALESCE(metadata->>'memoryScope','shared')<>'personal'"
+        row = self._q(f"SELECT COUNT(*) FROM {_TABELA} WHERE {scope} "
+                      "AND (COALESCE(metadata->>'demo','') IN ('true','1') OR COALESCE(tags,'[]'::jsonb) ? 'demo')",
+                      (namespace,) if namespace is not None else (), fetch="one")
+        return int(row[0])
+
+    def peer_pairs(self, namespace=None):
+        scope = "namespace=%s" if namespace is not None else "namespace NOT LIKE 'private-cli-%%' AND COALESCE(metadata->>'memoryScope','shared')<>'personal'"
+        rows = self._q(f"SELECT namespace,metadata->>'observer',metadata->>'observed',COUNT(*) FROM {_TABELA} "
+                       f"WHERE {scope} AND layer='user' AND COALESCE(metadata->>'observer','')<>'' "
+                       "AND COALESCE(metadata->>'observed','')<>'' GROUP BY 1,2,3", (namespace,) if namespace is not None else ())
+        return [{"namespace": ns, "observer": a, "observed": b, "count": n} for ns, a, b, n in rows]
+
+    def peer_memories(self, namespace, observer, observed):
+        return [self._row_to_memory(r, False) for r in self._q(
+            f"SELECT {_COLS_SEM_EMB} FROM {_TABELA} WHERE namespace=%s AND layer='user' "
+            "AND metadata->>'observer'=%s AND metadata->>'observed'=%s", (namespace, observer, observed))]
+
     def namespaces(self) -> List[str]:
         return [r[0] for r in self._q(f"SELECT DISTINCT namespace FROM {_TABELA} ORDER BY namespace")]
 
@@ -618,6 +637,14 @@ class PostgresStore(Store):
         params += [int(limit), int(offset)]
         return [self._row_to_memory(r, with_embeddings) for r in self._q(sql, params)]
 
+    def library(self, **options):
+        from ..library import library_queries, COLLECTIONS
+        counts_sql, page_sql = library_queries(_TABELA, _COLS_SEM_EMB, pg=True, **options)
+        counts = dict.fromkeys(COLLECTIONS, 0)
+        counts.update(dict(self._q(*counts_sql)))
+        rows = [self._row_to_memory(r, False) for r in self._q(*page_sql)]
+        return counts, rows
+
     def mentions(self, namespace, name, limit=0, with_embeddings=False):
         """Pré-filtro rápido de menções a `name`, para o caminho de entidade não
         carregar e tokenizar o namespace inteiro a cada passagem do mouse. Devolve um
@@ -641,6 +668,22 @@ class PostgresStore(Store):
             sql += " LIMIT %s"
             params.append(int(limit))
         return [self._row_to_memory(r, with_embeddings) for r in self._q(sql, params)]
+
+    def shared_facet_rows(self):
+        from ..library import shared_prose_where
+        return self._q(f"SELECT content,metadata FROM {_TABELA} WHERE " + shared_prose_where(pg=True) +
+                       " AND metadata ?| ARRAY['channel','source','project','squad'] "
+                       "AND NOT (COALESCE(tags,'[]'::jsonb) ?| ARRAY['alias','edge'])")
+
+    def shared_facets(self, key):
+        if key not in ("channel", "source", "project", "squad", "dimension"):
+            return []
+        return [(c, v) for c, v in self._q(
+            f"SELECT content,metadata->>'{key}' FROM {_TABELA} "
+            "WHERE namespace NOT LIKE 'private-cli-%%' "
+            "AND COALESCE(metadata->>'memoryScope','shared') <> 'personal' "
+            f"AND metadata->>'{key}' IS NOT NULL "
+            "AND NOT (COALESCE(tags,'[]'::jsonb) ?| ARRAY['alias','edge'])") if c and v]
 
     def tagged(self, namespace=None, key="channel"):
         """(conteúdo, valor) das memórias que carregam metadata[chave] — combustível

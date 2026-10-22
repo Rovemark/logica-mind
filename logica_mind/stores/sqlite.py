@@ -425,6 +425,28 @@ class SQLiteStore(Store):
             rows = self._rconn.execute(sql, params).fetchall()
         return [self._row_to_memory(r, with_embeddings) for r in rows]
 
+    def demo_count(self, namespace=None):
+        scope = "namespace=?" if namespace is not None else "namespace NOT LIKE 'private-cli-%' AND COALESCE(json_extract(metadata,'$.memoryScope'),'shared')<>'personal'"
+        with self._rlock:
+            return int(self._rconn.execute(f"SELECT COUNT(*) FROM memories WHERE {scope} "
+                "AND (json_extract(metadata,'$.demo')=1 OR EXISTS (SELECT 1 FROM json_each(tags) WHERE value='demo'))",
+                (namespace,) if namespace is not None else ()).fetchone()[0])
+
+    def peer_pairs(self, namespace=None):
+        scope = "namespace=?" if namespace is not None else "namespace NOT LIKE 'private-cli-%' AND COALESCE(json_extract(metadata,'$.memoryScope'),'shared')<>'personal'"
+        with self._rlock:
+            rows = self._rconn.execute("SELECT namespace,json_extract(metadata,'$.observer'),json_extract(metadata,'$.observed'),COUNT(*) "
+                f"FROM memories WHERE {scope} AND layer='user' AND COALESCE(json_extract(metadata,'$.observer'),'')<>'' "
+                "AND COALESCE(json_extract(metadata,'$.observed'),'')<>'' GROUP BY 1,2,3", (namespace,) if namespace is not None else ()).fetchall()
+        return [{"namespace": ns, "observer": a, "observed": b, "count": n} for ns, a, b, n in rows]
+
+    def peer_memories(self, namespace, observer, observed):
+        with self._rlock:
+            rows = self._rconn.execute("SELECT id,namespace,content,layer,NULL AS embedding,metadata,importance,tags,source_ids,created_at,seq,access_count,last_recalled_at,surprise_score "
+                "FROM memories WHERE namespace=? AND layer='user' AND json_extract(metadata,'$.observer')=? "
+                "AND json_extract(metadata,'$.observed')=?", (namespace, observer, observed)).fetchall()
+        return [self._row_to_memory(r, False) for r in rows]
+
     @_locked
     def namespaces(self) -> List[str]:
         cur = self._conn.execute("SELECT DISTINCT namespace FROM memories ORDER BY namespace")
@@ -724,6 +746,37 @@ class SQLiteStore(Store):
         params += [limit, offset]
         cur = self._conn.execute(sql, params)
         return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
+
+    @_locked
+    def library(self, **options):
+        from ..library import library_queries, COLLECTIONS
+        counts_sql, page_sql = library_queries('memories', '*', **options)
+        counts = dict.fromkeys(COLLECTIONS, 0)
+        counts.update(dict(self._conn.execute(*counts_sql).fetchall()))
+        rows = [self._row_to_memory(r, False) for r in self._conn.execute(*page_sql).fetchall()]
+        return counts, rows
+
+    def shared_facet_rows(self):
+        from ..library import shared_prose_where
+        with self._rlock:
+            rows = self._rconn.execute(
+                "SELECT content,metadata FROM memories WHERE " + shared_prose_where() +
+                " AND (json_extract(metadata,'$.channel') IS NOT NULL OR json_extract(metadata,'$.source') IS NOT NULL"
+                " OR json_extract(metadata,'$.project') IS NOT NULL OR json_extract(metadata,'$.squad') IS NOT NULL)"
+                " AND NOT EXISTS (SELECT 1 FROM json_each(tags) WHERE value IN ('alias','edge'))").fetchall()
+        return [(r[0], json.loads(r[1] or '{}')) for r in rows]
+
+    def shared_facets(self, key):
+        if key not in ("channel", "source", "project", "squad", "dimension"):
+            return []
+        with self._rlock:
+            rows = self._rconn.execute(
+                f"SELECT content,json_extract(metadata,'$.{key}') FROM memories "
+                "WHERE namespace NOT LIKE 'private-cli-%' "
+                "AND COALESCE(json_extract(metadata,'$.memoryScope'),'shared') <> 'personal' "
+                f"AND json_extract(metadata,'$.{key}') IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM json_each(tags) WHERE value IN ('alias','edge'))").fetchall()
+        return [(r[0], r[1]) for r in rows if r[0] and r[1]]
 
     @_locked
     def mentions(self, namespace, name, limit=0, with_embeddings=False):

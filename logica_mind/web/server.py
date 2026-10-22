@@ -379,7 +379,8 @@ def _safe_static(url_path: str):
 def _strip(mem_dict: dict) -> dict:
     mem_dict = dict(mem_dict)
     mem_dict.pop("embedding", None)
-    return mem_dict
+    from ..library import present
+    return present(mem_dict)
 
 
 def _is_internal(m) -> bool:
@@ -450,6 +451,39 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
         view.store = PrivacyStore(raw_mind.store, prefix)
         default_ns = prefix + raw_mind.namespace if prefix else raw_mind.namespace
         mind = view.for_namespace(default_ns)
+
+    # Bounded per-handler cache: owner/project/namespace never share a result.
+    # Single-flight also prevents navigation/remounts from spawning duplicate calls.
+    reflection_cache = {}
+    reflection_lock = threading.Lock()
+
+    def _reflection(target, scope):
+        key = (target.namespace, tuple(sorted(scope.items())))
+        with reflection_lock:
+            cached = reflection_cache.get(key)
+            if cached and cached[0] > _time.monotonic():
+                return {**cached[1], "cached": True}
+            effective = target
+            discovery_error = False
+            if not getattr(target.llm, "available", False):
+                try:
+                    from ..providers import auto_llm
+                    llm = auto_llm()
+                    if llm is not None and getattr(llm, "available", False):
+                        if getattr(llm, "name", "") == "logica-router":
+                            llm.source = "mind-reflection"
+                        effective = target.with_llm(llm)
+                except Exception:
+                    discovery_error = True
+            result = effective.reflect_result(window=12, metadata_filter=scope)
+            if discovery_error and result["mode"] == "digest":
+                result["reason"] = "model_error"
+            result.update(namespace=target.namespace, generatedAt=_time.time(), cached=False)
+            if len(reflection_cache) >= 64:
+                reflection_cache.pop(next(iter(reflection_cache)))
+            ttl = 300 if result["mode"] in ("synthesis", "empty") else 30
+            reflection_cache[key] = (_time.monotonic() + ttl, result)
+            return result
 
     def _namespace(value):
         ns = str(value or raw_mind.namespace)
@@ -535,7 +569,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
     }
     _MULTIUSER_SAFE_GET = {
         "/api/health", "/api/namespaces", "/api/recall", "/api/context",
-        "/api/memories", "/api/predict", "/api/graph",
+        "/api/memories", "/api/library", "/api/predict", "/api/graph",
     }
 
     def _names(ns, is_all):
@@ -980,8 +1014,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     mem = target.observe_user(str(body.get("text", "")))
                     self._json({"ok": bool(mem), "id": mem.id if mem else None})
                 elif path == "/api/observe_peer":
-                    mem = target.observe_peer(str(body.get("observer", "")), str(body.get("observed", "")),
-                                              str(body.get("text", "")))
+                    observer, observed, text = (str(body.get(k) or "").strip() for k in ("observer", "observed", "text"))
+                    if not observer or not observed or not text or len(observer) > 120 or len(observed) > 120 or len(text) > 6000:
+                        return self._json({"error": "observer, observed and text are required within size limits"}, 400)
+                    mem = target.observe_peer(observer, observed, text, metadata=_write_metadata(body))
                     self._json({"ok": bool(mem), "id": mem.id if mem else None})
                 elif path == "/api/ingest":
                     scope = _write_scope(body)
@@ -1475,6 +1511,40 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     d = dict(DREAM_DEFAULTS); d.update(st.get("dream") or {})
                     self._json({"dream": d, "defaults": DREAM_DEFAULTS})
 
+                elif path == '/api/dream/status':
+                    from ..dreaming import _journal_path
+                    journal = _journal_path(mind.store)
+                    status = {'state': 'unknown'}
+                    if journal:
+                        try:
+                            with open(journal.replace('_dream_journal.json', '_scheduler.json')) as f:
+                                status = json.load(f)
+                        except (OSError, ValueError):
+                            pass
+                    self._json({'scheduler': status})
+
+                elif path == "/api/library":
+                    from ..library import COLLECTIONS, present
+                    collection = first(qs, 'collection', 'knowledge')
+                    if collection not in (*COLLECTIONS, 'all'):
+                        raise _Http400('invalid memory collection')
+                    limit = max(1, min(100, _int(qs, 'limit', 20)))
+                    offset = max(0, _int(qs, 'offset', 0))
+                    query = first(qs, 'q') or ''
+                    if len(query) > 300:
+                        raise _Http400('library query is too long')
+                    layer = first(qs, 'layer') or None
+                    if layer and layer not in ('semantic', 'episodic', 'graph', 'user'):
+                        raise _Http400('invalid memory layer')
+                    counts, rows = mind.store.library(namespace=None if is_all else ns,
+                        metadata_filter=_read_scope(qs), collection=collection, query=query,
+                        dimension=first(qs, 'dimension'), category=first(qs, 'category'),
+                        layer=layer, memory_id=first(qs, 'id'), limit=limit, offset=offset)
+                    total = sum(counts.values()) if collection == 'all' else counts[collection]
+                    self._json({'memories': [present(m) for m in rows], 'counts': counts,
+                                'total': total, 'limit': limit, 'offset': offset,
+                                'hasMore': offset + len(rows) < total})
+
                 elif path == "/api/memories":
                     layers = layers_of(qs)
                     session = first(qs, "session")     # optional: scope to one session
@@ -1600,7 +1670,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     self._json(mind.graph_viz(namespace=None if is_all else ns,
                                               include_history=hist, at=at,
                                               layers=layers, focus=foc, depth=dep, limit=lim,
-                                              orphans=orph))
+                                              orphans=orph, summary=first(qs, "summary") == "1"))
 
                 elif path == "/api/predict":
                     # MODELO CAUSAL: o salto "lembra fatos" → "prevê e age". Lê as arestas causais do
@@ -1643,12 +1713,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     self._json({"min": lo, "max": hi})
 
                 elif path == "/api/communities":
-                    tgt = ns if not is_all else (
-                        (mind.list_namespaces()[0]["namespace"]) if mind.list_namespaces() else mind.namespace)
-                    comms = mind.for_namespace(tgt).graph_communities(include_history=False)
-                    self._json({"namespace": tgt, "communities": [
-                        {"nodes": c["nodes"], "size": len(c["nodes"]),
-                         "facts": [e.label() for e in c["edges"]][:12]} for c in comms]})
+                    # Aggregate every authorized namespace, never silently pick the first agent.
+                    # Typed relations let clients localize system predicates without rewriting facts.
+                    communities = []
+                    for nm in _names(ns, is_all):
+                        for c in mind.for_namespace(nm).graph_communities(include_history=False):
+                            communities.append({
+                                "namespace": nm, "nodes": c["nodes"], "size": len(c["nodes"]),
+                                "facts": [e.label() for e in c["edges"][:12]],
+                                "relations": [{"subject": e.subject, "predicate": e.predicate, "object": e.object}
+                                              for e in c["edges"][:12]],
+                            })
+                    communities.sort(key=lambda c: (-c["size"], c["namespace"], tuple(c["nodes"])))
+                    self._json({"namespace": "__all__" if is_all else ns, "communities": communities})
 
                 elif path == "/api/entity":
                     name = first(qs, "name")
@@ -1664,10 +1741,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     })
 
                 elif path == "/api/reflect":
-                    tgt = ns if not is_all else (
-                        (mind.list_namespaces()[0]["namespace"]) if mind.list_namespaces() else mind.namespace)
-                    self._json({"namespace": tgt,
-                                "insight": mind.for_namespace(tgt).reflect(window=12, store_result=False)})
+                    tgt = ns if not is_all else "__all__"
+                    self._json(_reflection(mind.for_namespace(tgt), _read_scope(qs)))
 
                 elif path == "/api/user":
                     target = _user_ns(ns, is_all)
@@ -1800,17 +1875,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     self._json({"since": since, "until": until, "diff": items[:300]})
 
                 elif path == "/api/peers":
-                    names = mind.store.namespaces() if is_all else [ns]
-                    pairs = {}
-                    for nm in names:
-                        for m in mind.store.all(nm, [MemoryLayer.USER]):
-                            md = m.metadata or {}
-                            obr, obd = md.get("observer"), md.get("observed")
-                            if obr and obd:
-                                k = (nm, obr, obd)
-                                pairs.setdefault(k, {"namespace": nm, "observer": obr, "observed": obd, "count": 0})
-                                pairs[k]["count"] += 1
-                    self._json({"peers": list(pairs.values())})
+                    pairs = mind.store.peer_pairs(None if is_all else ns)
+                    self._json({"peers": sorted(pairs, key=lambda p: (-p["count"], p["namespace"], p["observer"], p["observed"]))})
 
                 elif path == "/api/peer_card":
                     tgt = ns if not is_all else mind.namespace
@@ -1930,7 +1996,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                 elif path == "/api/demo":
                     # whether the fictional demo dataset is currently loaded
                     from .. import demo as _demo
-                    self._json({"present": _demo.count(mind) > 0, "count": _demo.count(mind)})
+                    demo_count = _demo.count(mind)
+                    self._json({"present": demo_count > 0, "count": demo_count})
 
                 # ---- observability ----
                 elif path == "/api/health":
