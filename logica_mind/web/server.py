@@ -423,6 +423,39 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
         default_ns = prefix + raw_mind.namespace if prefix else raw_mind.namespace
         mind = view.for_namespace(default_ns)
 
+    # Bounded per-handler cache: owner/project/namespace never share a result.
+    # Single-flight also prevents navigation/remounts from spawning duplicate calls.
+    reflection_cache = {}
+    reflection_lock = threading.Lock()
+
+    def _reflection(target, scope):
+        key = (target.namespace, tuple(sorted(scope.items())))
+        with reflection_lock:
+            cached = reflection_cache.get(key)
+            if cached and cached[0] > _time.monotonic():
+                return {**cached[1], "cached": True}
+            effective = target
+            discovery_error = False
+            if not getattr(target.llm, "available", False):
+                try:
+                    from ..providers import auto_llm
+                    llm = auto_llm()
+                    if llm is not None and getattr(llm, "available", False):
+                        if getattr(llm, "name", "") == "logica-router":
+                            llm.source = "mind-reflection"
+                        effective = target.with_llm(llm)
+                except Exception:
+                    discovery_error = True
+            result = effective.reflect_result(window=12, metadata_filter=scope)
+            if discovery_error and result["mode"] == "digest":
+                result["reason"] = "model_error"
+            result.update(namespace=target.namespace, generatedAt=_time.time(), cached=False)
+            if len(reflection_cache) >= 64:
+                reflection_cache.pop(next(iter(reflection_cache)))
+            ttl = 300 if result["mode"] in ("synthesis", "empty") else 30
+            reflection_cache[key] = (_time.monotonic() + ttl, result)
+            return result
+
     def _namespace(value):
         ns = str(value or raw_mind.namespace)
         if ns.startswith(PRIVATE_PREFIX):
@@ -1670,10 +1703,8 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     })
 
                 elif path == "/api/reflect":
-                    tgt = ns if not is_all else (
-                        (mind.list_namespaces()[0]["namespace"]) if mind.list_namespaces() else mind.namespace)
-                    self._json({"namespace": tgt,
-                                "insight": mind.for_namespace(tgt).reflect(window=12, store_result=False)})
+                    tgt = ns if not is_all else "__all__"
+                    self._json(_reflection(mind.for_namespace(tgt), _read_scope(qs)))
 
                 elif path == "/api/user":
                     target = _user_ns(ns, is_all)
