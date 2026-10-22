@@ -58,6 +58,19 @@ def test_sql_and_presenter_agree_for_legacy_and_typed_records(archive):
     assert consolidation_evidence(originals[6]) is None
 
 
+def test_shared_agent_claims_are_not_promoted_to_verified_knowledge_by_confidence(tmp_path):
+    store = SQLiteStore(str(tmp_path / 'claims.db'))
+    claim = record('O próximo deploy falhará sem novos arquivos.', continuity='world-insights', confidence=0.99, agent='qa')
+    fact = record('Andre escolheu Expo para o aplicativo.')
+    store.add([claim, fact])
+    scope = {'ownerId':'company-a', 'project':'alpha'}
+    counts, knowledge = store.library(collection='knowledge', metadata_filter=scope)
+    assert counts['review'] == 1 and [m.id for m in knowledge] == [fact.id]
+    assert present(claim)['presentation']['collection'] == 'review'
+    assert consolidation_evidence(claim) is None
+    assert store.get(claim.namespace, claim.id).content == claim.content
+
+
 def test_pagination_filters_before_limit_and_reaches_older_records(archive):
     store, _ = archive
     scope = {'ownerId':'company-a','project':'alpha'}

@@ -46,6 +46,7 @@ def collection_sql(pg=False):
         OR {source} LIKE 'cli:%auto-capture' OR {source} = 'cli-conversation'
         OR content LIKE '%"kind": "cli_conversation_turn"%' THEN 'conversations'
       WHEN id LIKE 'hyp::%' OR {kind} IN ('hypothesis','hypotheses')
+        OR {meta('continuity')} = 'world-insights'
         OR ltrim(content) LIKE '{{%' OR ltrim(content) LIKE '[%'
         OR content LIKE '%```%' OR content LIKE '%<tool_call>%' OR content LIKE '%DSML%' THEN 'review'
       WHEN {kind} IN ('decision','decisao','recorded_decision') OR {meta('memoryKind')} = 'decision' THEN 'decisions'
@@ -138,9 +139,9 @@ def present(memory):
         if isinstance(data, dict) and isinstance(data.get("messages"), list):
             body = "\n\n".join(f"**{'Você' if msg.get('role') == 'user' else 'Agente'}**\n{_text(msg.get('content'))}" for msg in data["messages"] if isinstance(msg, dict))
             status = data.get("status")
-    elif str(m.get("id", "")).startswith("hyp::") or kind in ("hypothesis", "hypotheses") or content.lstrip().startswith(("{", "[")) or re.search(r"```|<tool_call>|DSML", content):
+    elif str(m.get("id", "")).startswith("hyp::") or kind in ("hypothesis", "hypotheses") or md.get('continuity') == 'world-insights' or content.lstrip().startswith(("{", "[")) or re.search(r"```|<tool_call>|DSML", content):
         collection = "review"
-        title = "Hipótese a revisar" if str(m.get("id", "")).startswith("hyp::") or kind in ("hypothesis", "hypotheses") else "Conteúdo a revisar"
+        title = "Observação compartilhada a revisar" if md.get('continuity') == 'world-insights' else "Hipótese a revisar" if str(m.get("id", "")).startswith("hyp::") or kind in ("hypothesis", "hypotheses") else "Conteúdo a revisar"
         if isinstance(data, (dict, list)):
             body = "Conteúdo estruturado preservado no registro original. Revise sua origem antes de tratá-lo como conhecimento."
     elif kind in ("decision", "decisao", "recorded_decision") or md.get('memoryKind') == 'decision':

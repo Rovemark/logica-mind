@@ -119,7 +119,7 @@ class WorldInsights:
         items = self.top_for(agent, dept, limit=limit)
         if not items:
             return ""
-        lines = ["O QUE A EMPRESA APRENDEU (insights de outros agentes):"]
+        lines = ["OBSERVAÇÕES COMPARTILHADAS (relatos de agentes, não fatos verificados; confira as fontes antes de decidir):"]
         for m in items:
             md = m.metadata or {}
             # an insight authored elsewhere is external content → sanitize before injecting
