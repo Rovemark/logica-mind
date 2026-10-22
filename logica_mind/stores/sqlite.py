@@ -694,6 +694,28 @@ class SQLiteStore(Store):
         rows = [self._row_to_memory(r, False) for r in self._conn.execute(*page_sql).fetchall()]
         return counts, rows
 
+    def shared_facet_rows(self):
+        from ..library import shared_prose_where
+        with self._rlock:
+            rows = self._rconn.execute(
+                "SELECT content,metadata FROM memories WHERE " + shared_prose_where() +
+                " AND (json_extract(metadata,'$.channel') IS NOT NULL OR json_extract(metadata,'$.source') IS NOT NULL"
+                " OR json_extract(metadata,'$.project') IS NOT NULL OR json_extract(metadata,'$.squad') IS NOT NULL)"
+                " AND NOT EXISTS (SELECT 1 FROM json_each(tags) WHERE value IN ('alias','edge'))").fetchall()
+        return [(r[0], json.loads(r[1] or '{}')) for r in rows]
+
+    def shared_facets(self, key):
+        if key not in ("channel", "source", "project", "squad", "dimension"):
+            return []
+        with self._rlock:
+            rows = self._rconn.execute(
+                f"SELECT content,json_extract(metadata,'$.{key}') FROM memories "
+                "WHERE namespace NOT LIKE 'private-cli-%' "
+                "AND COALESCE(json_extract(metadata,'$.memoryScope'),'shared') <> 'personal' "
+                f"AND json_extract(metadata,'$.{key}') IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM json_each(tags) WHERE value IN ('alias','edge'))").fetchall()
+        return [(r[0], r[1]) for r in rows if r[0] and r[1]]
+
     @_locked
     def mentions(self, namespace, name, limit=0, with_embeddings=False):
         """Candidate memories that may mention `name` — a fast SQL LIKE pre-filter so

@@ -156,3 +156,43 @@ def test_postgres_query_escapes_patterns_and_binds_user_values():
     assert '100%' not in counts[0] and 'private-cli-%%' in counts[0]
     assert '%100!%!_ done%' in counts[1]
     assert 'company-a' not in counts[0] and 'company-a' in counts[1]
+
+
+def test_shared_facet_projection_batches_namespaces_and_excludes_private(archive):
+    from unittest.mock import patch
+    store, _ = archive
+    store.add([
+        record('Visible public facet.', project='alpha', channel='deck', dimension='work'),
+        record('Personal facet.', memoryScope='personal', channel='deck', dimension='work'),
+        Memory(namespace='private-cli-actor-astro',content='Private partition facet.',metadata={'channel':'deck','dimension':'work'}),
+    ])
+    view=PrivacyStore(store)
+    with patch.object(view, 'namespaces', side_effect=AssertionError('No N+1 namespace sweep')):
+        tagged=view.tagged(None,'channel')
+        dimensions=view.dimensioned(None)
+    assert tagged == [('Visible public facet.','deck')]
+    batched=view.shared_facet_rows()
+    assert any(text=='Visible public facet.' for text,_ in batched)
+    assert not any('Personal facet' in text or 'Private partition' in text or text.startswith('Organism signals') for text,_ in batched)
+    assert dimensions == [('Visible public facet.','work')]
+    assert store.shared_facets("source' OR 1=1 --") == []
+
+
+def test_mention_index_matches_boundaries_and_short_phrases():
+    from logica_mind.entity_index import MentionIndex
+    index=MentionIndex(['Deck','LogicaOS','Tailwind config js','Ana'])
+    assert set(index.matches('Deck and LogicaOS; Deck again.')) == {'Deck','LogicaOS'}
+    assert index.matches('banana and decking') == []
+    assert index.matches('tailwind config js') == ['Tailwind config js']
+    assert len(index.matches('Deck and LogicaOS',limit=1)) == 1
+
+
+def test_quick_graph_does_not_scan_prose_or_compute_facets():
+    from unittest.mock import patch
+    store=InMemoryStore()
+    mind=LogicaMind(namespace='astro',store=store)
+    with patch.object(mind, '_entity_facets',side_effect=AssertionError('heavy facet')), \
+         patch.object(mind, '_entity_dimensions',side_effect=AssertionError('heavy dimensions')), \
+         patch.object(mind, '_co_mention_links',side_effect=AssertionError('heavy co-mentions')):
+        result=mind.graph_viz(summary=True,limit=600)
+    assert result['nodes'] == []

@@ -156,3 +156,9 @@ def present(memory):
                          "body": clean, "status": status, "technical": collection in ("executions", "system", "review"),
                          "source": md.get("source") or kind or ns}
     return m
+
+
+def shared_prose_where(pg=False):
+    meta = "COALESCE(metadata->>'memoryScope','shared')" if pg else "COALESCE(json_extract(metadata,'$.memoryScope'),'shared')"
+    private = "private-cli-%%" if pg else "private-cli-%"
+    return f"namespace NOT LIKE '{private}' AND {meta} <> 'personal' AND ({collection_sql(pg)}) IN ('knowledge','decisions','conversations')"

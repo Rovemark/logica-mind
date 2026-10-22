@@ -233,6 +233,14 @@ class MultiStore(Store):
                 return s.mentions(namespace, name, limit=limit, with_embeddings=with_embeddings)
         return self.all(namespace, with_embeddings=with_embeddings)   # correct (slow) fallback
 
+    def shared_facet_rows(self):
+        native = getattr(self.stores[0], "shared_facet_rows", None)
+        return native() if callable(native) else None
+
+    def shared_facets(self, key):
+        native = getattr(self.stores[0], "shared_facets", None)
+        return native(key) if callable(native) else None
+
     def tagged(self, namespace=None, key="channel"):
         for s in self.stores:
             if hasattr(s, "tagged"):

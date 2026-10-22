@@ -636,6 +636,22 @@ class PostgresStore(Store):
             params.append(int(limit))
         return [self._row_to_memory(r, with_embeddings) for r in self._q(sql, params)]
 
+    def shared_facet_rows(self):
+        from ..library import shared_prose_where
+        return self._q(f"SELECT content,metadata FROM {_TABELA} WHERE " + shared_prose_where(pg=True) +
+                       " AND metadata ?| ARRAY['channel','source','project','squad'] "
+                       "AND NOT (COALESCE(tags,'[]'::jsonb) ?| ARRAY['alias','edge'])")
+
+    def shared_facets(self, key):
+        if key not in ("channel", "source", "project", "squad", "dimension"):
+            return []
+        return [(c, v) for c, v in self._q(
+            f"SELECT content,metadata->>'{key}' FROM {_TABELA} "
+            "WHERE namespace NOT LIKE 'private-cli-%%' "
+            "AND COALESCE(metadata->>'memoryScope','shared') <> 'personal' "
+            f"AND metadata->>'{key}' IS NOT NULL "
+            "AND NOT (COALESCE(tags,'[]'::jsonb) ?| ARRAY['alias','edge'])") if c and v]
+
     def tagged(self, namespace=None, key="channel"):
         """(conteúdo, valor) das memórias que carregam metadata[chave] — combustível
         do voto de faceta por entidade. Só chaves da lista branca, porque a chave é

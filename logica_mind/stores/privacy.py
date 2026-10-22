@@ -110,7 +110,18 @@ class PrivacyStore(Store):
             raise RuntimeError("store does not support re-embedding")
         return native(namespace, pairs)
 
+    def shared_facet_rows(self):
+        if self._prefix:
+            raise ValueError("shared facets are institutional only")
+        native = getattr(self._store, "shared_facet_rows", None)
+        return native() if callable(native) else None
+
     def tagged(self, namespace=None, key="channel"):
+        batch = getattr(self._store, "shared_facets", None)
+        if namespace is None and not self._prefix and callable(batch):
+            rows = batch(key)
+            if rows is not None:
+                return rows
         native = getattr(self._store, "tagged", None)
         rows = []
         for ns in [namespace] if namespace is not None else self.namespaces():
@@ -120,6 +131,11 @@ class PrivacyStore(Store):
         return rows
 
     def dimensioned(self, namespace=None):
+        batch = getattr(self._store, "shared_facets", None)
+        if namespace is None and not self._prefix and callable(batch):
+            rows = batch("dimension")
+            if rows is not None:
+                return rows
         native = getattr(self._store, "dimensioned", None)
         rows = []
         for ns in [namespace] if namespace is not None else self.namespaces():

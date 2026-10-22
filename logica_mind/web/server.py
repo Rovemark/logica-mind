@@ -1639,7 +1639,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     self._json(mind.graph_viz(namespace=None if is_all else ns,
                                               include_history=hist, at=at,
                                               layers=layers, focus=foc, depth=dep, limit=lim,
-                                              orphans=orph))
+                                              orphans=orph, summary=first(qs, "summary") == "1"))
 
                 elif path == "/api/predict":
                     # MODELO CAUSAL: o salto "lembra fatos" → "prevê e age". Lê as arestas causais do
