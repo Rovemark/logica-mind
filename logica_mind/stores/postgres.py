@@ -604,6 +604,14 @@ class PostgresStore(Store):
         params += [int(limit), int(offset)]
         return [self._row_to_memory(r, with_embeddings) for r in self._q(sql, params)]
 
+    def library(self, **options):
+        from ..library import library_queries, COLLECTIONS
+        counts_sql, page_sql = library_queries(_TABELA, _COLS_SEM_EMB, pg=True, **options)
+        counts = dict.fromkeys(COLLECTIONS, 0)
+        counts.update(dict(self._q(*counts_sql)))
+        rows = [self._row_to_memory(r, False) for r in self._q(*page_sql)]
+        return counts, rows
+
     def mentions(self, namespace, name, limit=0, with_embeddings=False):
         """Pré-filtro rápido de menções a `name`, para o caminho de entidade não
         carregar e tokenizar o namespace inteiro a cada passagem do mouse. Devolve um

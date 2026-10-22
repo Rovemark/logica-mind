@@ -243,6 +243,16 @@ class PrivacyStore(Store):
         rows.sort(key=lambda m: m.created_at or "", reverse=True)
         return rows[offset:offset + limit]
 
+    def library(self, namespace=None, metadata_filter=None, **options):
+        # This endpoint is institutional. No private mode, discovery or fallback.
+        if self._prefix:
+            raise ValueError('library is only available for shared memory')
+        if namespace is not None:
+            self._assert(namespace)
+        if (metadata_filter or {}).get('memoryScope') == 'personal':
+            raise ValueError('library is only available for shared memory')
+        return self._store.library(namespace=namespace, metadata_filter=metadata_filter, **options)
+
     def day(self, namespace=None, date=None, layers=None, with_embeddings=False):
         names = [namespace] if namespace is not None else self.namespaces()
         rows = []

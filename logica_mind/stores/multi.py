@@ -220,6 +220,13 @@ class MultiStore(Store):
                                          metadata_filter)
         return []
 
+    def library(self, **options):
+        # Counts and page must come from the SAME canonical primary, never mirrors.
+        primary = self.stores[0]
+        if not callable(getattr(primary, 'library', None)):
+            raise RuntimeError('canonical store does not support the memory library')
+        return primary.library(**options)
+
     def mentions(self, namespace, name, limit=0, with_embeddings=False):
         for s in self.stores:
             if hasattr(s, "mentions"):

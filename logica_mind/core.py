@@ -363,6 +363,8 @@ class LogicaMind:
                     continue  # already known
 
             meta = dict(base_meta)
+            if getattr(fact, 'kind', 'fact') in ('decision', 'preference'):
+                meta['memoryKind'] = fact.kind
             # carry the extractor's life-dimension categorization onto every row,
             # so categories/dimensions are queryable system-wide (search, Profile)
             if getattr(fact, "category", None) and "category" not in meta:

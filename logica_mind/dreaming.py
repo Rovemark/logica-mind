@@ -64,6 +64,11 @@ class DreamReport:
     user_synthesized: bool = False
     timestamp: str = field(default_factory=now_iso)
     namespace: str = ""
+    consolidation_state: str = 'idle'
+    eligible_pending: int = 0
+    skipped_technical: int = 0
+    failed_batches: int = 0
+    routing: list = field(default_factory=list)
 
     def to_dict(self):
         return asdict(self)
@@ -225,6 +230,7 @@ class Dreamer:
             self._evolve(report)
         if self.do_user:
             report.user_synthesized = bool(self.mind.user.synthesize())
+        report.routing = list(getattr(self.mind.llm, 'routing_receipts', []))[-20:]
         save_dream(report, self.mind.store)
         return report
 
@@ -236,60 +242,85 @@ class Dreamer:
         # marking it consolidated here would permanently exclude these raw turns
         # from a future LLM-enabled dream, making offline capture write-only.
         if not llm_ready:
+            report.consolidation_state = 'disabled'
             return
-        episodic = [
-            e for e in m.store.all(m.namespace, [MemoryLayer.EPISODIC])
-            if not (e.metadata or {}).get("consolidated")
-        ]
-        # distill the most RECENT unconsolidated turns first: fresh content yields
-        # new facts, instead of re-chewing the oldest turns whose facts the store
-        # already holds (which read as distilled=0 on a mature store).
-        episodic.sort(key=lambda e: e.created_at or "", reverse=True)
-        batch = episodic[: self.episodic_batch]
-        if not batch:
-            return
-        report.episodic_processed = len(batch)
-
-        joined = "\n".join(f"- {e.content}" for e in batch)
-        existing = [r.memory for r in m.store.search(m.namespace, m._embed(joined), joined, [MemoryLayer.SEMANTIC], 12)]
-        facts = m.extractor.extract(joined, existing)
-        source_ids = [e.id for e in batch]
-        for fact in facts:
-            emb = m._embed(fact.content)
-            if m._find_duplicate(fact.content, emb, MemoryLayer.SEMANTIC):
+        from .library import consolidation_evidence, is_atomic_prose
+        from .extract.llm import LLMExtractor
+        from .extract.base import ExtractOp
+        # Group before extraction AND dedup: another company/project must never
+        # influence what is learned or receive the resulting memory.
+        groups = {}
+        episodic = []
+        for event in m.store.all(m.namespace, [MemoryLayer.EPISODIC]):
+            if (event.metadata or {}).get("consolidated"):
                 continue
-            # carry the extractor's life-area categorization onto sleep-distilled
-            # facts too, so a belief born in a dream is as queryable as one the
-            # user stated directly (Profile, search, graph colouring, connections).
-            meta = {}
-            if getattr(fact, "category", None):
-                meta["category"] = fact.category
-            if getattr(fact, "dimension", None):
-                meta["dimension"] = fact.dimension
-            m.store.add([Memory(
-                content=fact.content,
-                namespace=m.namespace,
-                layer=MemoryLayer.SEMANTIC,
-                importance=max(0.5, fact.importance),
-                embedding=emb,
-                source_ids=source_ids,
-                metadata=meta or None,
-                tags=["distilled"],
-            )])
-            report.distilled += 1
-
-        # optionally grow the temporal graph from the same episodic batch
-        if self.extract_graph and m.graph_extractor.available:
-            try:
-                report.graph_edges += len(m.graph.ingest_text(joined, m.graph_extractor))
-            except Exception as e:
-                print(f"[logica-mind] dream graph extraction failed ({e})", file=sys.stderr)
-
-        # mark the batch consolidated so we don't reprocess it next cycle
-        for e in batch:
-            e.metadata = dict(e.metadata or {})
-            e.metadata["consolidated"] = True
-        m.store.add(batch)
+            evidence = consolidation_evidence(event)
+            if evidence:
+                episodic.append((event, evidence))
+            else:
+                report.skipped_technical += 1
+        report.eligible_pending = len(episodic)
+        episodic.sort(key=lambda item: item[0].created_at or "", reverse=True)
+        for event, evidence in episodic[:self.episodic_batch]:
+            md = event.metadata or {}
+            key = (md.get('ownerId'), md.get('project'), md.get('actorId') if md.get('memoryScope') == 'personal' else None)
+            groups.setdefault(key, []).append((event, evidence))
+        for (owner, project, actor), records in groups.items():
+            scope = {'ownerId': owner, 'project': project}
+            if actor:
+                scope['actorId'] = actor
+                scope['memoryScope'] = 'personal'
+            joined = "\n\n".join(text for _, text in records)
+            existing = [r.memory for r in m.store.search(m.namespace, m._embed(joined), joined,
+                        [MemoryLayer.SEMANTIC], 12, scope or None)]
+            # A failed/invalid model reply cannot fall back to the full transcript
+            # as a semantic fact, nor mark the evidence as processed.
+            extractor = LLMExtractor(m.llm, max_existing=m.extractor.max_existing,
+                        system=m.extractor.system, strict=True) if isinstance(m.extractor, LLMExtractor) else m.extractor
+            facts = extractor.extract(joined, existing)
+            if getattr(extractor, 'failed', False):
+                report.failed_batches += 1
+                continue
+            valid = [f for f in facts if f.op not in (ExtractOp.DELETE, ExtractOp.NOOP) and is_atomic_prose(f.content)]
+            # Nonempty unusable output is not a successful consolidation.
+            if facts and not valid:
+                report.failed_batches += 1
+                continue
+            source_ids = [event.id for event, _ in records]
+            for fact in valid:
+                emb = m._embed(fact.content)
+                if m._find_duplicate(fact.content, emb, MemoryLayer.SEMANTIC, scope or None):
+                    continue
+                meta = {**scope, 'source': 'dream-consolidation', 'evidenceKind': 'extracted',
+                        'collection': 'knowledge'}
+                if getattr(fact, 'kind', 'fact') in ('decision', 'preference'):
+                    meta['memoryKind'] = fact.kind
+                    meta['type'] = fact.kind
+                if getattr(fact, "category", None):
+                    meta["category"] = fact.category
+                if getattr(fact, "dimension", None):
+                    meta["dimension"] = fact.dimension
+                m.store.add([Memory(content=fact.content, namespace=m.namespace,
+                    layer=MemoryLayer.SEMANTIC, importance=max(0.5, fact.importance),
+                    embedding=emb, source_ids=source_ids, metadata=meta, tags=["distilled"])])
+                report.distilled += 1
+            if self.extract_graph and m.graph_extractor.available and valid:
+                try:
+                    from .graph.temporal import TemporalGraph
+                    from .stores.evidence import EvidenceStore
+                    graph = TemporalGraph(EvidenceStore(m.store, scope), m.namespace, m.embedder)
+                    report.graph_edges += len(graph.ingest_text(
+                        '\n'.join(f.content for f in valid), m.graph_extractor, source_ids=source_ids))
+                except Exception as e:
+                    print(f'[logica-mind] scoped dream graph extraction failed ({type(e).__name__})', file=sys.stderr)
+            # Source text survives, with provenance. No raw data is deleted.
+            for event, _ in records:
+                event.metadata = dict(event.metadata or {})
+                event.metadata["consolidated"] = True
+            m.store.add([event for event, _ in records])
+            report.episodic_processed += len(records)
+        report.consolidation_state = ('degraded' if report.episodic_processed else 'failed') if report.failed_batches else ('completed' if report.episodic_processed else 'idle')
+        report.routing = list(getattr(m.llm, 'routing_receipts', []))[-20:]
 
     # ---- 2. reinforce ------------------------------------------------------
     def _reinforce(self, report: DreamReport) -> None:

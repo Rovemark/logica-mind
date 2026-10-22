@@ -686,6 +686,15 @@ class SQLiteStore(Store):
         return [self._row_to_memory(r, with_embeddings) for r in cur.fetchall()]
 
     @_locked
+    def library(self, **options):
+        from ..library import library_queries, COLLECTIONS
+        counts_sql, page_sql = library_queries('memories', '*', **options)
+        counts = dict.fromkeys(COLLECTIONS, 0)
+        counts.update(dict(self._conn.execute(*counts_sql).fetchall()))
+        rows = [self._row_to_memory(r, False) for r in self._conn.execute(*page_sql).fetchall()]
+        return counts, rows
+
+    @_locked
     def mentions(self, namespace, name, limit=0, with_embeddings=False):
         """Candidate memories that may mention `name` — a fast SQL LIKE pre-filter so
         the entity-detail/hover path (/api/node) doesn't load+tokenise the WHOLE

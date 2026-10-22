@@ -379,7 +379,8 @@ def _safe_static(url_path: str):
 def _strip(mem_dict: dict) -> dict:
     mem_dict = dict(mem_dict)
     mem_dict.pop("embedding", None)
-    return mem_dict
+    from ..library import present
+    return present(mem_dict)
 
 
 def _is_internal(m) -> bool:
@@ -506,7 +507,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
     }
     _MULTIUSER_SAFE_GET = {
         "/api/health", "/api/namespaces", "/api/recall", "/api/context",
-        "/api/memories", "/api/predict", "/api/graph",
+        "/api/memories", "/api/library", "/api/predict", "/api/graph",
     }
 
     def _names(ns, is_all):
@@ -1445,6 +1446,40 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     st = _load_settings(mind.store)
                     d = dict(DREAM_DEFAULTS); d.update(st.get("dream") or {})
                     self._json({"dream": d, "defaults": DREAM_DEFAULTS})
+
+                elif path == '/api/dream/status':
+                    from ..dreaming import _journal_path
+                    journal = _journal_path(mind.store)
+                    status = {'state': 'unknown'}
+                    if journal:
+                        try:
+                            with open(journal.replace('_dream_journal.json', '_scheduler.json')) as f:
+                                status = json.load(f)
+                        except (OSError, ValueError):
+                            pass
+                    self._json({'scheduler': status})
+
+                elif path == "/api/library":
+                    from ..library import COLLECTIONS, present
+                    collection = first(qs, 'collection', 'knowledge')
+                    if collection not in (*COLLECTIONS, 'all'):
+                        raise _Http400('invalid memory collection')
+                    limit = max(1, min(100, _int(qs, 'limit', 20)))
+                    offset = max(0, _int(qs, 'offset', 0))
+                    query = first(qs, 'q') or ''
+                    if len(query) > 300:
+                        raise _Http400('library query is too long')
+                    layer = first(qs, 'layer') or None
+                    if layer and layer not in ('semantic', 'episodic', 'graph', 'user'):
+                        raise _Http400('invalid memory layer')
+                    counts, rows = mind.store.library(namespace=None if is_all else ns,
+                        metadata_filter=_read_scope(qs), collection=collection, query=query,
+                        dimension=first(qs, 'dimension'), category=first(qs, 'category'),
+                        layer=layer, memory_id=first(qs, 'id'), limit=limit, offset=offset)
+                    total = sum(counts.values()) if collection == 'all' else counts[collection]
+                    self._json({'memories': [present(m) for m in rows], 'counts': counts,
+                                'total': total, 'limit': limit, 'offset': offset,
+                                'hasMore': offset + len(rows) < total})
 
                 elif path == "/api/memories":
                     layers = layers_of(qs)

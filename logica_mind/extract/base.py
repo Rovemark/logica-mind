@@ -30,6 +30,7 @@ class Fact:
     tags: List[str] = field(default_factory=list)
     category: Optional[str] = None    # open label, e.g. "Coffee preference"
     dimension: Optional[str] = None   # a life dimension id (see extract.taxonomy)
+    kind: str = "fact"               # fact | preference | decision
 
 
 class Extractor(ABC):
