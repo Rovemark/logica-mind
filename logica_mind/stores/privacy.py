@@ -68,6 +68,10 @@ class PrivacyStore(Store):
         self._assert(namespace)
         return self._store.get(namespace, memory_id)
 
+    def literal_matches(self, namespace, query, limit=20, metadata_filter=None):
+        self._assert(namespace)
+        return self._store.literal_matches(namespace, query, limit, metadata_filter)
+
     def delete(self, namespace, memory_id):
         self._assert(namespace)
         return self._store.delete(namespace, memory_id)

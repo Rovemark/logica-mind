@@ -228,6 +228,22 @@ class Store(ABC):
     def get(self, namespace: str, memory_id: str) -> Optional[Memory]:
         ...
 
+    def literal_matches(self, namespace, query, limit=20, metadata_filter=None):
+        """Bounded literal UI lookup, independent of semantic candidate windows.
+
+        SQL stores override this to filter before LIMIT without loading vectors.
+        The fallback is for small/non-SQL stores. Bookkeeping aliases are not UI
+        memories. Literal %, _ and ! have no wildcard meaning.
+        """
+        query = str(query or "").strip().lower()
+        if not query:
+            return []
+        rows = [m for m in self.all(namespace, with_embeddings=False)
+                if query in m.content.lower() and "alias" not in (m.tags or [])
+                and matches_filter(m, metadata_filter)]
+        rows.sort(key=lambda m: (m.created_at or "", m.id), reverse=True)
+        return rows[:max(1, min(50, int(limit)))]
+
     @abstractmethod
     def delete(self, namespace: str, memory_id: str) -> bool:
         ...

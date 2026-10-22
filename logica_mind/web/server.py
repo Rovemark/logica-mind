@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from ..types import MemoryLayer
+from ..types import MemoryLayer, SearchResult
 from ..stores.base import _tokset
 
 
@@ -386,6 +386,35 @@ def _is_internal(m) -> bool:
     """Internal bookkeeping rows (entity aliases) — kept in the GRAPH layer but
     never shown as real memories in listings/changelog/calendar."""
     return "alias" in (m.tags or [])
+
+
+def _spotlight_memories(mind, query, limit, scope=None):
+    """UI lookup: literal identifiers first, semantic suggestions afterwards.
+
+    Never change recall's semantic scoring, load the entire SQL corpus or
+    borrow namespaces outside the caller's authorized Store view.
+    """
+    from ..continuity.self_model import hide_self_model
+    limit = max(1, min(50, int(limit)))
+    filters = hide_self_model(scope)
+    exact = {}
+    for namespace in mind.store.namespaces():
+        for memory in mind.store.literal_matches(namespace, query, limit, filters):
+            if not _is_internal(memory):
+                exact[(memory.namespace, memory.id)] = memory
+    literals = sorted(exact.values(), key=lambda m: (m.created_at or "", m.id), reverse=True)
+    result = [SearchResult(m, 1.0, {"literal": 1.0}) for m in literals[:limit]]
+    seen = {(m.namespace, m.id) for m in literals}
+    # Keep semantic discovery when the query has fewer literal matches.
+    if len(result) < limit:
+        for hit in mind.recall_across(query, limit=limit, metadata_filter=filters):
+            key = (hit.memory.namespace, hit.memory.id)
+            if key not in seen and not _is_internal(hit.memory):
+                seen.add(key)
+                result.append(hit)
+                if len(result) >= limit:
+                    break
+    return result
 
 
 # in-process API metrics for the Analytics view — the dashboard's server
@@ -1284,12 +1313,12 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     # global Spotlight: memories (recall across all), entities
                     # (graph node names) and namespaces — for the ⌘K palette.
                     q = (first(qs, "q") or "").strip()
-                    limit = max(1, _int(qs, "limit", 6))
+                    limit = max(1, min(50, _int(qs, "limit", 6)))
                     if not q:
                         self._json({"memories": [], "entities": [], "namespaces": [], "categories": []})
                     else:
                         ql = q.lower()
-                        mems = mind.recall_across(q, limit=limit)
+                        mems = _spotlight_memories(mind, q, limit, _read_scope(qs))
                         ents, seen = [], set()
                         for nm in mind.store.namespaces():
                             try:

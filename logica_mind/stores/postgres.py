@@ -408,6 +408,20 @@ class PostgresStore(Store):
         saida.sort(key=lambda r: r.score, reverse=True)
         return saida[:limit]
 
+    def literal_matches(self, namespace, query, limit=20, metadata_filter=None):
+        query = str(query or "").strip()
+        if not query:
+            return []
+        pattern = "%" + query.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
+        params = [namespace, pattern]
+        sql = (f"SELECT {_COLS_SEM_EMB} FROM {_TABELA} WHERE namespace=%s "
+               "AND content ILIKE %s ESCAPE '!' "
+               "AND NOT COALESCE(tags @> '[\"alias\"]'::jsonb, FALSE)")
+        sql += self._where_meta(metadata_filter, params)
+        sql += " ORDER BY created_at DESC, seq DESC NULLS LAST, id DESC LIMIT %s"
+        params.append(max(1, min(50, int(limit))))
+        return [self._row_to_memory(row, False) for row in self._q(sql, params)]
+
     def get(self, namespace, memory_id) -> Optional[Memory]:
         r = self._q(f"SELECT {_COLS} FROM {_TABELA} WHERE namespace=%s AND id=%s",
                     (namespace, memory_id), fetch="one")

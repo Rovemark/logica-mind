@@ -80,6 +80,26 @@ class MultiStore(Store):
                 r.memory.embedding = emb
         return results
 
+    def literal_matches(self, namespace, query, limit=20, metadata_filter=None):
+        # Use bounded native queries, not all() on every SQL-backed replica.
+        rows = {}
+        successes = 0
+        for index, store in enumerate(self.stores):
+            try:
+                found = store.literal_matches(namespace, query, limit, metadata_filter)
+                successes += 1
+                for memory in found:
+                    rows.setdefault((memory.namespace, memory.id), memory)
+            except Exception as error:
+                if index == 0 and self.require_primary:
+                    raise RuntimeError("Canonical memory store unavailable") from error
+                # A replica failure must not hide a successful canonical lookup.
+                # Driver messages may contain DSNs: do not log their payload.
+        if not successes:
+            raise RuntimeError("No memory store completed literal lookup")
+        return sorted(rows.values(), key=lambda m: (m.created_at or "", m.id),
+                      reverse=True)[:max(1, min(50, int(limit)))]
+
     def get(self, namespace: str, memory_id: str) -> Optional[Memory]:
         for s in self.stores:
             m = s.get(namespace, memory_id)

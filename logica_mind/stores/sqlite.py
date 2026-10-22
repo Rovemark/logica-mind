@@ -24,7 +24,7 @@ import threading
 from typing import List, Optional
 
 from ..types import Memory, MemoryLayer, SearchResult
-from .base import Store, rank, apply_filter, _tokset
+from .base import Store, rank, apply_filter, _tokset, NOT, not_filters
 
 
 # ── Embedding storage: BLOB float32 (stdlib array.array) ──────────────────────
@@ -210,6 +210,11 @@ class SQLiteStore(Store):
         else:
             self._rlock = self._lock
             self._rconn = self._conn
+        # SQLite's built-in LIKE/LOWER only fold ASCII; identifiers and phrases
+        # in the Portuguese UI need the same Unicode lower() as the fallback.
+        self._rconn.create_function("logica_literal_match", 2,
+            lambda content, query: int(str(query).lower() in str(content or "").lower()),
+            deterministic=True)
 
     # ---- (de)serialization -------------------------------------------------
     @staticmethod
@@ -313,6 +318,40 @@ class SQLiteStore(Store):
         with self._rlock:
             cands = apply_filter(self._candidates(namespace, layers, metadata_filter, query_text=query_text), metadata_filter)
         return rank(cands, query_embedding, query_text, limit)
+
+    def literal_matches(self, namespace, query, limit=20, metadata_filter=None):
+        query = str(query or "").strip()
+        if not query:
+            return []
+        params = [namespace, query]
+        def clause(filters):
+            parts = []
+            for key, value in (filters or {}).items():
+                if key == NOT:
+                    parts.extend("NOT (" + clause(f) + ")" for f in not_filters(value))
+                    continue
+                values = list(value) if isinstance(value, (list, tuple, set)) else [value]
+                if not values:
+                    parts.append("0")
+                    continue
+                choices = []
+                for item in values:
+                    if not isinstance(item, (str, int, float, bool, type(None))):
+                        raise ValueError("literal lookup metadata must be scalar")
+                    choices.append("json_extract(metadata, '$.' || ?) IS ?")
+                    params.extend([key, item])
+                parts.append("(" + " OR ".join(choices) + ")")
+            return " AND ".join(parts) or "1"
+        where = clause(metadata_filter)
+        cols = ("id, namespace, content, layer, NULL AS embedding, metadata, importance, "
+                "tags, source_ids, created_at, seq, access_count, last_recalled_at, surprise_score")
+        sql = (f"SELECT {cols} FROM memories WHERE namespace=? AND logica_literal_match(content, ?) "
+               "AND NOT EXISTS (SELECT 1 FROM json_each(tags) WHERE value='alias') "
+               f"AND ({where}) ORDER BY created_at DESC, seq DESC, rowid DESC LIMIT ?")
+        params.append(max(1, min(50, int(limit))))
+        with self._rlock:
+            return [self._row_to_memory(row, False)
+                    for row in self._rconn.execute(sql, params).fetchall()]
 
     @_locked
     def get(self, namespace: str, memory_id: str) -> Optional[Memory]:
