@@ -154,7 +154,7 @@ def present(memory):
         title = re.sub(r"^[#*\s]+", "", preview).split(". ")[0][:100] or "Memória"
     m["presentation"] = {"collection": collection, "title": title[:160], "preview": preview[:360],
                          "body": clean, "status": status, "technical": collection in ("executions", "system", "review"),
-                         "source": md.get("source") or kind or ns}
+                         "source": md.get("source") or (md.get("agent") if ns == "__world__" else None) or kind or ns}
     return m
 
 

@@ -985,8 +985,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     mem = target.observe_user(str(body.get("text", "")))
                     self._json({"ok": bool(mem), "id": mem.id if mem else None})
                 elif path == "/api/observe_peer":
-                    mem = target.observe_peer(str(body.get("observer", "")), str(body.get("observed", "")),
-                                              str(body.get("text", "")))
+                    observer, observed, text = (str(body.get(k) or "").strip() for k in ("observer", "observed", "text"))
+                    if not observer or not observed or not text or len(observer) > 120 or len(observed) > 120 or len(text) > 6000:
+                        return self._json({"error": "observer, observed and text are required within size limits"}, 400)
+                    mem = target.observe_peer(observer, observed, text, metadata=_write_metadata(body))
                     self._json({"ok": bool(mem), "id": mem.id if mem else None})
                 elif path == "/api/ingest":
                     scope = _write_scope(body)
@@ -1682,12 +1684,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     self._json({"min": lo, "max": hi})
 
                 elif path == "/api/communities":
-                    tgt = ns if not is_all else (
-                        (mind.list_namespaces()[0]["namespace"]) if mind.list_namespaces() else mind.namespace)
-                    comms = mind.for_namespace(tgt).graph_communities(include_history=False)
-                    self._json({"namespace": tgt, "communities": [
-                        {"nodes": c["nodes"], "size": len(c["nodes"]),
-                         "facts": [e.label() for e in c["edges"]][:12]} for c in comms]})
+                    # Aggregate every authorized namespace, never silently pick the first agent.
+                    # Typed relations let clients localize system predicates without rewriting facts.
+                    communities = []
+                    for nm in _names(ns, is_all):
+                        for c in mind.for_namespace(nm).graph_communities(include_history=False):
+                            communities.append({
+                                "namespace": nm, "nodes": c["nodes"], "size": len(c["nodes"]),
+                                "facts": [e.label() for e in c["edges"][:12]],
+                                "relations": [{"subject": e.subject, "predicate": e.predicate, "object": e.object}
+                                              for e in c["edges"][:12]],
+                            })
+                    communities.sort(key=lambda c: (-c["size"], c["namespace"], tuple(c["nodes"])))
+                    self._json({"namespace": "__all__" if is_all else ns, "communities": communities})
 
                 elif path == "/api/entity":
                     name = first(qs, "name")
@@ -1840,14 +1849,14 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     names = mind.store.namespaces() if is_all else [ns]
                     pairs = {}
                     for nm in names:
-                        for m in mind.store.all(nm, [MemoryLayer.USER]):
+                        for m in mind.store.all(nm, [MemoryLayer.USER], with_embeddings=False):
                             md = m.metadata or {}
                             obr, obd = md.get("observer"), md.get("observed")
                             if obr and obd:
                                 k = (nm, obr, obd)
                                 pairs.setdefault(k, {"namespace": nm, "observer": obr, "observed": obd, "count": 0})
                                 pairs[k]["count"] += 1
-                    self._json({"peers": list(pairs.values())})
+                    self._json({"peers": sorted(pairs.values(), key=lambda p: (-p["count"], p["namespace"], p["observer"], p["observed"]))})
 
                 elif path == "/api/peer_card":
                     tgt = ns if not is_all else mind.namespace

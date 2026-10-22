@@ -2250,7 +2250,7 @@ class LogicaMind:
         return len(mems)
 
     # ---- peers / multi-perspective --------------------------
-    def observe_peer(self, observer: str, observed: str, text: str, importance: float = 0.6) -> Optional[Memory]:
+    def observe_peer(self, observer: str, observed: str, text: str, importance: float = 0.6, metadata: Optional[Dict[str, Any]] = None) -> Optional[Memory]:
         """Record what `observer` learned about `observed` — a directional
         (observer→observed) observation, so each peer builds its own theory of
         another (not just the system's view of 'the user')."""
@@ -2259,7 +2259,7 @@ class LogicaMind:
             return None
         m = Memory(
             content=text, namespace=self.namespace, layer=MemoryLayer.USER, importance=importance,
-            tags=["peer-observation"], metadata={"observer": observer, "observed": observed},
+            tags=["peer-observation"], metadata={**(metadata or {}), "observer": observer, "observed": observed},
             embedding=self._embed(text),
         )
         self.store.add([m])
