@@ -73,7 +73,7 @@ class SupabaseStore(Store):
             while len(rows) < limit:
                 size = min(self._PAGE_SIZE, limit - len(rows))
                 page_path = base + "?" + urllib.parse.urlencode(params + [("limit", str(size)), ("offset", str(offset + len(rows)))])
-                page = self._request_once(method, page_path, body, extra_headers) or []
+                page = self._request_once(method, page_path, body, extra_headers)
                 if not isinstance(page, list) or len(page) > size:
                     raise RuntimeError("Supabase GET returned an invalid page")
                 if not page:

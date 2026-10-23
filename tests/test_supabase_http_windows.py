@@ -81,3 +81,38 @@ def test_zero_window_and_invalid_windows_do_not_send_http(rest):
         with pytest.raises(ValueError):
             store._request("GET", store.table + "?namespace=eq.qa&" + query)
     assert calls == []
+
+
+@pytest.mark.parametrize('invalid', [None, {}, False, 0, '', 'invalid', 1])
+@pytest.mark.parametrize('prefix', [[], [{'id': 'first', 'namespace': 'qa'}]])
+def test_malformed_http_page_never_proves_exhaustion(invalid, prefix):
+    calls = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            query = parse_qs(urlsplit(self.path).query)
+            assert query['namespace'] == ['eq.qa']
+            calls.append(query)
+            page = prefix if prefix and len(calls) == 1 else invalid
+            body = json.dumps(page).encode()
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        store = SupabaseStore(url=f'http://127.0.0.1:{server.server_port}', key='isolated-test')
+        with pytest.raises(RuntimeError, match='invalid page'):
+            store._request('GET', store.table + '?namespace=eq.qa&limit=10&offset=5')
+        assert len(calls) == (2 if prefix else 1)
+        assert int(calls[-1]['offset'][0]) == 5 + len(prefix)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
