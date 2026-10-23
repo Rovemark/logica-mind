@@ -50,7 +50,41 @@ class SupabaseStore(Store):
             )
 
     # ---- low-level REST ----------------------------------------------------
+    _PAGE_SIZE = 1000
+
     def _request(self, method: str, path: str, body=None, extra_headers=None):
+        if method == "GET":
+            base, _, query = path.partition("?")
+            pairs = urllib.parse.parse_qsl(query, keep_blank_values=True)
+            windows = {key: value for key, value in pairs if key in ("limit", "offset")}
+            if sum(key == "limit" for key, _ in pairs) > 1 or sum(key == "offset" for key, _ in pairs) > 1:
+                raise ValueError("Supabase GET has duplicate window parameters")
+            try:
+                limit = int(windows.get("limit", self._PAGE_SIZE))
+                offset = int(windows.get("offset", 0))
+            except (TypeError, ValueError) as error:
+                raise ValueError("Supabase GET window must contain integers") from error
+            if limit < 0 or offset < 0:
+                raise ValueError("Supabase GET window must be nonnegative")
+            params = [(key, value) for key, value in pairs if key not in ("limit", "offset")]
+            if not any(key == "order" for key, _ in params):
+                params.append(("order", "id.asc"))
+            rows = []
+            while len(rows) < limit:
+                size = min(self._PAGE_SIZE, limit - len(rows))
+                page_path = base + "?" + urllib.parse.urlencode(params + [("limit", str(size)), ("offset", str(offset + len(rows)))])
+                page = self._request_once(method, page_path, body, extra_headers) or []
+                if not isinstance(page, list) or len(page) > size:
+                    raise RuntimeError("Supabase GET returned an invalid page")
+                if not page:
+                    break
+                rows.extend(page)
+                # A server may configure a smaller row cap. Continue even after
+                # a short page; only an empty page proves exhaustion.
+            return rows
+        return self._request_once(method, path, body, extra_headers)
+
+    def _request_once(self, method: str, path: str, body=None, extra_headers=None):
         endpoint = f"{self.url}/rest/v1/{path}"
         data = json.dumps(body).encode("utf-8") if body is not None else None
         headers = {
@@ -119,7 +153,7 @@ class SupabaseStore(Store):
                     metadata_filter: Optional[dict] = None) -> List[Memory]:
         params = {
             "namespace": f"eq.{namespace}",
-            "order": "created_at.desc",
+            "order": "created_at.desc,id.asc",
             "limit": str(self.max_candidates),
             "select": "*",
         }
@@ -196,7 +230,7 @@ class SupabaseStore(Store):
         return out
 
     def get(self, namespace: str, memory_id: str) -> Optional[Memory]:
-        params = {"namespace": f"eq.{namespace}", "id": f"eq.{memory_id}", "select": "*"}
+        params = {"namespace": f"eq.{namespace}", "id": f"eq.{memory_id}", "select": "*", "limit": "1"}
         rows = self._request("GET", f"{self.table}?{urllib.parse.urlencode(params)}") or []
         return self._to_memory(rows[0]) if rows else None
 
@@ -245,11 +279,22 @@ class SupabaseStore(Store):
             return
         import datetime as _dt
         now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        quoted = ",".join(self._pgrst_quote(i) for i in ids)
-        params = {"namespace": f"eq.{namespace}", "id": f"in.({quoted})",
-                  "select": "id,access_count"}
         try:
-            rows = self._request("GET", f"{self.table}?{urllib.parse.urlencode(params)}") or []
+            rows = []
+            # Bound ID queries by encoded byte size, not a silent row clamp.
+            # Namespace remains in every batch and in every subsequent write.
+            batch = []
+            for memory_id in dict.fromkeys(ids):
+                trial = batch + [memory_id]
+                params = {"namespace": f"eq.{namespace}", "id": "in.(" + ",".join(self._pgrst_quote(i) for i in trial) + ")",
+                          "select": "id,access_count", "limit": str(len(trial))}
+                if batch and len(urllib.parse.urlencode(params).encode("ascii")) > 3000:
+                    rows.extend(self._touch_rows(namespace, batch))
+                    batch = [memory_id]
+                else:
+                    batch = trial
+            if batch:
+                rows.extend(self._touch_rows(namespace, batch))
             for r in rows:
                 p = {"namespace": f"eq.{namespace}", "id": f"eq.{r['id']}"}
                 self._request(
@@ -261,6 +306,11 @@ class SupabaseStore(Store):
         except Exception as e:
             print(f"[logica-mind] supabase touch failed, skipping ({e})", file=sys.stderr)
 
+    def _touch_rows(self, namespace, ids):
+        params = {"namespace": f"eq.{namespace}", "id": "in.(" + ",".join(self._pgrst_quote(i) for i in ids) + ")",
+                  "select": "id,access_count", "limit": str(len(ids))}
+        return self._request("GET", f"{self.table}?{urllib.parse.urlencode(params)}") or []
+
     def all(self, namespace, layers=None, with_embeddings=True) -> List[Memory]:
         return self._candidates(namespace, layers)
 
@@ -271,7 +321,7 @@ class SupabaseStore(Store):
         seen: set = set()
         page, offset = 1000, 0
         while True:
-            params = {"select": "namespace", "order": "namespace.asc",
+            params = {"select": "namespace", "order": "namespace.asc,id.asc",
                       "limit": str(page), "offset": str(offset)}
             rows = self._request("GET", f"{self.table}?{urllib.parse.urlencode(params)}") or []
             for r in rows:
