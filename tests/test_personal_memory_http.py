@@ -50,7 +50,7 @@ def test_private_memory_http_boundary_and_shared_views(tmp_path, monkeypatch):
             replays = list(pool.map(lambda _: call("POST", "/api/personal/log", body), range(8)))
         assert all(code == 200 and replay["id"] == saved["id"] for code, replay in replays)
         assert len(read()[1]["results"]) == 1
-        assert call("POST", "/api/personal/log", {**body, "text": "conflicting content"})[0] == 500
+        assert call("POST", "/api/personal/log", {**body, "text": "conflicting content"})[0] == 409
         # A new session retrieves the same confirmed memory via owner + actor.
         code, recent = read("memories", session="")
         assert code == 200 and recent["memories"][0]["id"] == saved["id"]

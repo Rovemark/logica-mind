@@ -971,9 +971,19 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     _md = _write_metadata(body)
                     if body.get("channel"):
                         _md["channel"] = body.get("channel")
-                    m = target.log(str(body.get("text", "")), role=body.get("role"),
-                                   session=body.get("session"), metadata=_md or None,
-                                   idempotency_key=body.get("idempotencyKey"))
+                    from ..core import InvalidLogIdempotencyKey, LogIdempotencyConflict
+                    try:
+                        m = target.log(str(body.get("text", "")), role=body.get("role"),
+                                       session=body.get("session"), metadata=_md or None,
+                                       idempotency_key=body.get("idempotencyKey"))
+                    except LogIdempotencyConflict:
+                        # Contrato do cliente, não falha do serviço: a chave já guarda
+                        # outro conteúdo e nada foi gravado. Sem eco de id, chave ou texto.
+                        return self._json({"ok": False, "code": "MEMORY_IDEMPOTENCY_CONFLICT",
+                                           "error": "idempotency key already used with different content"}, 409)
+                    except InvalidLogIdempotencyKey:
+                        return self._json({"ok": False, "code": "MEMORY_IDEMPOTENCY_KEY_INVALID",
+                                           "error": "invalid idempotency key"}, 400)
                     self._json({"ok": bool(m), "id": m.id if m else None})
                 elif path == "/api/forget":
                     scope = _write_scope(body)

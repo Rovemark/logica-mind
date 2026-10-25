@@ -50,6 +50,17 @@ def _mutable_in_scope(memory, metadata_filter, *, protect_internal=False) -> boo
 _LOG_LOCKS = [threading.Lock() for _ in range(64)]
 
 
+class InvalidLogIdempotencyKey(ValueError):
+    """log() got an idempotency key that is empty, too long or has control chars."""
+
+
+class LogIdempotencyConflict(ValueError):
+    """log() got a key already bound to DIFFERENT content. Nothing was written.
+
+    Both subclass ValueError so existing callers that catch ValueError keep working;
+    the HTTP layer maps exactly these two types to 409/400 instead of a 500."""
+
+
 def _new_session_suffix() -> str:
     """A short, collision-resistant suffix for an auto-generated session id —
     no wall-clock dependency (uuid is fine and keeps record_session pure)."""
@@ -422,7 +433,7 @@ class LogicaMind:
             import json
             key = str(idempotency_key)
             if not key or len(key) > 300 or any(ord(ch) < 32 for ch in key):
-                raise ValueError("invalid log idempotency key")
+                raise InvalidLogIdempotencyKey("invalid log idempotency key")
             partition = {k: meta.get(k) for k in ("ownerId", "actorId", "project", "memoryScope", "session")}
             memory_id = hashlib.sha256(json.dumps([self.namespace, partition, key], sort_keys=True).encode()).hexdigest()
             lock = _LOG_LOCKS[int(memory_id[:8], 16) % len(_LOG_LOCKS)]
@@ -434,7 +445,7 @@ class LogicaMind:
                 previous = self.store.get(self.namespace, memory_id)
                 if previous:
                     if previous.content != text:
-                        raise ValueError("log idempotency key reused with different content")
+                        raise LogIdempotencyConflict("log idempotency key reused with different content")
                     return previous
             mem = Memory(
                 content=text,
