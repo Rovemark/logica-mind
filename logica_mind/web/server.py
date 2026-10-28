@@ -262,14 +262,104 @@ def _index_claude_titles(ttl: float = _CLAUDE_TITLE_TTL) -> dict:
         return titles
 
 
-def _try_import_claude_sessions(session_names: dict, known_sids=None, ttl: float = _CLAUDE_TITLE_TTL) -> int:
+_CLAUDE_FALLBACK_IDS = 500
+_CLAUDE_FALLBACK_BYTES = 262144
+_CLAUDE_FALLBACK_DIRS = 256
+_CLAUDE_FALLBACK_ENTRIES = 8192
+_CLAUDE_SESSION_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _fallback_claude_titles(known_sids) -> dict:
+    """Read only explicitly selected transcript files, bounded per capture."""
+    import stat
+    from itertools import islice
+    allowed = set(sorted(s for s in (known_sids or ())
+                         if isinstance(s, str) and _CLAUDE_SESSION_ID.fullmatch(s))[:_CLAUDE_FALLBACK_IDS])
+    if not allowed:
+        return {}
+    base = os.path.expanduser("~/.claude/projects")
+    titles = {}
+    budget = _CLAUDE_FALLBACK_BYTES
+    pending = [base]
+    directories = entries = 0
+    while pending and budget > 0 and directories < _CLAUDE_FALLBACK_DIRS and entries < _CLAUDE_FALLBACK_ENTRIES:
+        root = pending.pop()
+        directories += 1
+        try:
+            iterator = os.scandir(root)
+        except OSError:
+            continue
+        with iterator:
+            for entry in islice(iterator, _CLAUDE_FALLBACK_ENTRIES - entries):
+                entries += 1
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        if directories + len(pending) < _CLAUDE_FALLBACK_DIRS:
+                            pending.append(entry.path)
+                        continue
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                except OSError:
+                    continue
+                filename = entry.name
+                if not filename.endswith('.jsonl') or filename[:-6] not in allowed:
+                    continue
+                sid = filename[:-6]
+                if sid in titles or budget <= 0:
+                    continue
+                fd = None
+                try:
+                    # Never follow transcript symlinks into unrelated local files.
+                    file = os.path.join(root, filename)
+                    if os.path.islink(file):
+                        continue
+                    fd = os.open(file, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        continue
+                    with os.fdopen(fd, 'rb') as stream:
+                        fd = None
+                        while budget > 0:
+                            line = stream.readline(min(budget, 16384) + 1)
+                            if not line:
+                                break
+                            budget -= len(line)
+                            if len(line) > 16384 or not line.endswith(b'\n'):
+                                break
+                            try:
+                                obj = json.loads(line)
+                                msg = obj.get('message') or obj
+                                if msg.get('role') != 'user':
+                                    continue
+                                content = msg.get('content', '')
+                                if isinstance(content, list):
+                                    content = ' '.join(b.get('text', '') for b in content
+                                                       if isinstance(b, dict) and b.get('type') == 'text' and isinstance(b.get('text'), str))
+                                if isinstance(content, str) and content.strip():
+                                    text = content.strip()
+                                    titles[sid] = {'name': text[:80] + ('…' if len(text) > 80 else ''), 'kind': 'first-message'}
+                                    break
+                            except (ValueError, TypeError, AttributeError):
+                                continue
+                except OSError:
+                    continue
+                finally:
+                    if fd is not None:
+                        os.close(fd)
+        if budget <= 0 or len(titles) == len(allowed):
+            break
+    return titles
+
+
+def _try_import_claude_sessions(session_names: dict, known_sids=None, ttl: float = _CLAUDE_TITLE_TTL, fallback=None) -> int:
     """Capture each Claude Code session's REAL title (custom > ai) into session_names,
     for every session that HAS one. `known_sids` (when given) scopes the capture to the
     sessions that actually exist in this store — otherwise we'd persist a name for every
     Claude session on the machine, bloating the file. Never clobbers a manual rename
     (auto=False); refreshes auto entries and upgrades ai→custom. Returns how many changed."""
     changed = 0
-    for sid, info in _index_claude_titles(ttl=ttl).items():
+    titles = dict(fallback or {})
+    titles.update(_index_claude_titles(ttl=ttl))  # explicit titles outrank a first message
+    for sid, info in titles.items():
         if known_sids is not None and sid not in known_sids:
             continue                            # not a session in this store — skip
         cur = session_names.get(sid)
@@ -305,10 +395,14 @@ def _kick_claude_capture(store, known_sids) -> None:
 
     def _work():
         try:
-            _index_claude_titles(ttl=0)          # the heavy scan — NO file lock held here
+            titles = _index_claude_titles(ttl=0)  # no file lock held during disk reads
+            with _SNAMES_LOCK:
+                existing = _load_session_names(store)
+            missing = sids.difference(titles).difference(existing)
+            fallback = _fallback_claude_titles(missing)
             with _SNAMES_LOCK:
                 names = _load_session_names(store)
-                if _try_import_claude_sessions(names, sids):   # cached now → fast
+                if _try_import_claude_sessions(names, sids, fallback=fallback):
                     _save_session_names(store, names)
         except Exception:
             pass
