@@ -270,83 +270,101 @@ _CLAUDE_SESSION_ID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-
 
 
 def _fallback_claude_titles(known_sids) -> dict:
-    """Read only explicitly selected transcript files, bounded per capture."""
+    """Read selected transcript files using non-following, anchored descriptors."""
     import stat
     from itertools import islice
     allowed = set(sorted(s for s in (known_sids or ())
                          if isinstance(s, str) and _CLAUDE_SESSION_ID.fullmatch(s))[:_CLAUDE_FALLBACK_IDS])
-    if not allowed:
+    if not allowed or not getattr(os, 'O_NOFOLLOW', 0) or not getattr(os, 'O_DIRECTORY', 0):
         return {}
-    base = os.path.expanduser("~/.claude/projects")
+    if os.open not in os.supports_dir_fd or os.scandir not in os.supports_fd:
+        return {}
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY
+    pending = []
     titles = {}
     budget = _CLAUDE_FALLBACK_BYTES
-    pending = [base]
     directories = entries = 0
-    while pending and budget > 0 and directories < _CLAUDE_FALLBACK_DIRS and entries < _CLAUDE_FALLBACK_ENTRIES:
-        root = pending.pop()
-        directories += 1
-        try:
-            iterator = os.scandir(root)
-        except OSError:
-            continue
-        with iterator:
-            for entry in islice(iterator, _CLAUDE_FALLBACK_ENTRIES - entries):
-                entries += 1
-                try:
-                    if entry.is_dir(follow_symlinks=False):
-                        if directories + len(pending) < _CLAUDE_FALLBACK_DIRS:
-                            pending.append(entry.path)
-                        continue
-                    if not entry.is_file(follow_symlinks=False):
-                        continue
-                except OSError:
-                    continue
-                filename = entry.name
-                if not filename.endswith('.jsonl') or filename[:-6] not in allowed:
-                    continue
-                sid = filename[:-6]
-                if sid in titles or budget <= 0:
-                    continue
-                fd = None
-                try:
-                    # Never follow transcript symlinks into unrelated local files.
-                    file = os.path.join(root, filename)
-                    if os.path.islink(file):
-                        continue
-                    fd = os.open(file, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-                    if not stat.S_ISREG(os.fstat(fd).st_mode):
-                        continue
-                    with os.fdopen(fd, 'rb') as stream:
-                        fd = None
-                        while budget > 0:
-                            line = stream.readline(min(budget, 16384) + 1)
-                            if not line:
-                                break
-                            budget -= len(line)
-                            if len(line) > 16384 or not line.endswith(b'\n'):
-                                break
-                            try:
-                                obj = json.loads(line)
-                                msg = obj.get('message') or obj
-                                if msg.get('role') != 'user':
-                                    continue
-                                content = msg.get('content', '')
-                                if isinstance(content, list):
-                                    content = ' '.join(b.get('text', '') for b in content
-                                                       if isinstance(b, dict) and b.get('type') == 'text' and isinstance(b.get('text'), str))
-                                if isinstance(content, str) and content.strip():
-                                    text = content.strip()
-                                    titles[sid] = {'name': text[:80] + ('…' if len(text) > 80 else ''), 'kind': 'first-message'}
-                                    break
-                            except (ValueError, TypeError, AttributeError):
+    home_fd = claude_fd = None
+    try:
+        # HOME is the trusted configured anchor. Refuse symlinks for both
+        # .claude and projects, and use dirfd for every subsequent child.
+        home_fd = os.open(os.path.expanduser('~'), flags)
+        claude_fd = os.open('.claude', flags, dir_fd=home_fd)
+        pending.append(os.open('projects', flags, dir_fd=claude_fd))
+        os.close(claude_fd); claude_fd = None
+        os.close(home_fd); home_fd = None
+        while pending and budget > 0 and directories < _CLAUDE_FALLBACK_DIRS and entries < _CLAUDE_FALLBACK_ENTRIES:
+            root_fd = pending.pop()
+            directories += 1
+            try:
+                with os.scandir(root_fd) as iterator:
+                    for entry in islice(iterator, _CLAUDE_FALLBACK_ENTRIES - entries):
+                        entries += 1
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                if directories + len(pending) < _CLAUDE_FALLBACK_DIRS:
+                                    try:
+                                        pending.append(os.open(entry.name, flags, dir_fd=root_fd))
+                                    except OSError:
+                                        pass
                                 continue
-                except OSError:
-                    continue
-                finally:
-                    if fd is not None:
-                        os.close(fd)
-        if budget <= 0 or len(titles) == len(allowed):
-            break
+                            if not entry.is_file(follow_symlinks=False):
+                                continue
+                        except OSError:
+                            continue
+                        filename = entry.name
+                        if not filename.endswith('.jsonl') or filename[:-6] not in allowed:
+                            continue
+                        sid = filename[:-6]
+                        if sid in titles or budget <= 0:
+                            continue
+                        fd = None
+                        try:
+                            fd = os.open(filename, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, 'O_NONBLOCK', 0), dir_fd=root_fd)
+                            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                                continue
+                            with os.fdopen(fd, 'rb') as stream:
+                                fd = None
+                                while budget > 0:
+                                    line = stream.readline(min(budget, 16384) + 1)
+                                    if not line:
+                                        break
+                                    budget -= len(line)
+                                    if len(line) > 16384 or not line.endswith(b'\n'):
+                                        break
+                                    try:
+                                        obj = json.loads(line)
+                                        msg = obj.get('message') or obj
+                                        if msg.get('role') != 'user':
+                                            continue
+                                        content = msg.get('content', '')
+                                        if isinstance(content, list):
+                                            content = ' '.join(b.get('text', '') for b in content
+                                                if isinstance(b, dict) and b.get('type') == 'text' and isinstance(b.get('text'), str))
+                                        if isinstance(content, str) and content.strip():
+                                            text = content.strip()
+                                            titles[sid] = {'name': text[:80] + ('…' if len(text) > 80 else ''), 'kind': 'first-message'}
+                                            break
+                                    except (ValueError, TypeError, AttributeError):
+                                        continue
+                        except OSError:
+                            continue
+                        finally:
+                            if fd is not None:
+                                os.close(fd)
+            finally:
+                os.close(root_fd)
+            if budget <= 0 or len(titles) == len(allowed):
+                break
+    except (OSError, TypeError, NotImplementedError):
+        pass
+    finally:
+        for fd in pending:
+            os.close(fd)
+        if claude_fd is not None:
+            os.close(claude_fd)
+        if home_fd is not None:
+            os.close(home_fd)
     return titles
 
 
