@@ -522,7 +522,7 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
         return [MemoryLayer(layer)]
 
     def _multiuser():
-        return os.environ.get("LOGICAOS_MULTIUSER", "").lower() in ("1", "true", "yes")
+        return os.environ.get("LOGICAOS_MULTIUSER", "1").strip().lower() not in ("0", "false", "no")
 
     def _scope_values(owner=None, project=None, *, required=False):
         owner = str(owner or "").strip()
