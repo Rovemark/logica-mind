@@ -292,20 +292,23 @@ def _kick_claude_capture(store, known_sids) -> None:
     blocking the request on it is exactly what made /sessions "hang then die". Names are
     already persisted in _session_names.json, so the request renders instantly from disk;
     this refresh (throttled, single-flight) just picks up new/changed titles for next time."""
+    sids = set(known_sids or ())
+    # An empty page grants no session IDs and must not consume the throttle.
+    if not sids:
+        return
     now = _time.monotonic()
     with _SNAMES_LOCK:
         if _CAPTURE_STATE["running"] or (now - _CAPTURE_STATE["at"]) < _CLAUDE_TITLE_TTL:
             return
         _CAPTURE_STATE["running"] = True
         _CAPTURE_STATE["at"] = now
-    sids = set(known_sids or ())
 
     def _work():
         try:
             _index_claude_titles(ttl=0)          # the heavy scan — NO file lock held here
             with _SNAMES_LOCK:
                 names = _load_session_names(store)
-                if _try_import_claude_sessions(names, sids or None):   # cached now → fast
+                if _try_import_claude_sessions(names, sids):   # cached now → fast
                     _save_session_names(store, names)
         except Exception:
             pass
@@ -1661,6 +1664,10 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     # compartilhado pela empresa; actor/session servem à auditoria,
                     # não criam grafos paralelos para cada pessoa.
                     _read_scope(qs)
+                    # graph_viz does not yet enforce owner/project filtering in edges,
+                    # facets, aliases or its cache. Never expose it as a scoped read.
+                    if _multiuser() and not self._company_gateway():
+                        return self._json({"error": "grafo indisponível para acesso com escopo de usuário ou projeto"}, 403)
                     hist = first(qs, "history", "1") == "1"
                     at = first(qs, "at") or None     # point-in-time view
                     lyr = first(qs, "layers")        # csv: relation,co_mention,semantic
@@ -1690,6 +1697,9 @@ def make_handler(mind, allow_writes: bool = True, token: str = None, *, _persona
                     # Read-only, aditivo, reusa o TemporalGraph (anti-redundância).
                     from ..causal import CausalModel
                     _read_scope(qs)  # multiuser: owner explícito é obrigatório também neste read
+                    # CausalModel reads the same unscoped graph as graph_viz.
+                    if _multiuser() and not self._company_gateway():
+                        return self._json({"error": "previsões indisponíveis para acesso com escopo de usuário ou projeto"}, 403)
                     cm = CausalModel(mind.for_namespace(ns).graph)
                     _ent = (first(qs, "entity") or first(qs, "cause") or "").strip()
                     _at = first(qs, "at") or None

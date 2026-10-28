@@ -166,9 +166,9 @@ def test_http_multiuser_requires_and_materializes_owner_scope(monkeypatch):
         assert "bob" not in payload["result"][0]["content"]  # conteúdo igual; isolamento vem da contagem
 
         assert call("GET", "/api/predict?namespace=ceo")[0] == 400
-        assert call("GET", "/api/predict?namespace=ceo&owner=alice&project=alpha")[0] == 200
+        assert call("GET", "/api/predict?namespace=ceo&owner=alice&project=alpha")[0] == 403
         assert call("GET", "/api/graph?namespace=ceo")[0] == 400
-        assert call("GET", "/api/graph?namespace=ceo&owner=alice")[0] == 200
+        assert call("GET", "/api/graph?namespace=ceo&owner=alice")[0] == 403
 
         for session in ("cli-codex-1", "cli-codex-2"):
             status, payload = call("POST", "/api/remember", {

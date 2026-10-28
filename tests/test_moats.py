@@ -456,6 +456,7 @@ class TestWebWriteEndpoints:
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read().decode() or "{}")
 
+    @pytest.mark.usefixtures("standalone_mind")
     def test_forget_about_http(self):
         root, srv, port = self._server()
         try:
@@ -467,6 +468,7 @@ class TestWebWriteEndpoints:
         finally:
             _close_server(srv)
 
+    @pytest.mark.usefixtures("standalone_mind")
     def test_clear_endpoint_http(self):
         root, srv, port = self._server()
         try:
@@ -485,6 +487,7 @@ class TestWebWriteEndpoints:
         finally:
             _close_server(srv)
 
+    @pytest.mark.usefixtures("standalone_mind")
     def test_sessions_rename_http(self):
         root, srv, port = self._server()
         try:
@@ -495,6 +498,7 @@ class TestWebWriteEndpoints:
         finally:
             _close_server(srv)
 
+    @pytest.mark.usefixtures("standalone_mind")
     def test_import_bundle_http_roundtrip(self):
         root, srv, port = self._server()
         try:
@@ -507,6 +511,7 @@ class TestWebWriteEndpoints:
         finally:
             _close_server(srv)
 
+    @pytest.mark.usefixtures("standalone_mind")
     def test_bad_query_param_returns_400_not_500(self):
         root, srv, port = self._server()
         try:
@@ -521,6 +526,7 @@ class TestWebWriteEndpoints:
 # ── M1: moat read endpoints aggregate across namespaces in __all__ mode ────────
 
 class TestAllNamespaceAggregation:
+    @pytest.mark.usefixtures("standalone_mind")
     def test_stale_aggregates_in_all_mode(self):
         import urllib.request
         root = LogicaMind(namespace="a", store=SQLiteStore(":memory:"))
@@ -689,6 +695,7 @@ class TestSessionRecords:
         from logica_mind.mcp_server import TOOLS
         assert any(t["name"] == "lm_record_session" for t in TOOLS)
 
+    @pytest.mark.usefixtures("standalone_mind")
     def test_web_record_endpoint_and_session_getter(self):
         import urllib.request, json as _json
         root = LogicaMind(namespace="proj", store=SQLiteStore(":memory:"))

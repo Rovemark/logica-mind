@@ -4,6 +4,7 @@ All offline: InMemoryStore + HashingEmbedder, no API keys.
 """
 import asyncio
 import json
+import pytest
 
 from logica_mind import LogicaMind, Memory, MemoryLayer
 from logica_mind.stores import InMemoryStore, SQLiteStore, MultiStore
@@ -1152,6 +1153,7 @@ def test_llamaindex_memory_adapter():
     assert any("Friday" in g["content"] for g in got)
 
 
+@pytest.mark.usefixtures("standalone_mind")
 def test_web_post_remember_and_recall():
     import threading, time, urllib.request, urllib.parse
     from http.server import ThreadingHTTPServer
@@ -1214,6 +1216,7 @@ def test_node_distance_reranker_drops_short_entity():
     assert all("graph_distance" not in (h.components or {}) for h in hits)
 
 
+@pytest.mark.usefixtures("standalone_mind")
 def test_web_post_namespace_create_vs_malformed():
     import threading, time, urllib.request, urllib.error
     from http.server import ThreadingHTTPServer
@@ -1709,6 +1712,7 @@ def test_mcp_ingest_validates_messages_type():
     assert call({"messages": []})["isError"] is False       # empty list is valid
 
 
+@pytest.mark.usefixtures("standalone_mind")
 def test_web_contradictions_aggregates_across_namespaces():
     import threading, time, urllib.request
     from http.server import ThreadingHTTPServer
@@ -1728,6 +1732,7 @@ def test_web_contradictions_aggregates_across_namespaces():
         srv.server_close()   # release the listening socket now (shutdown() alone races into EADDRINUSE)
 
 
+@pytest.mark.usefixtures("standalone_mind")
 def test_web_get_requires_auth_on_non_loopback():
     import io
     from logica_mind.web import server as S
@@ -1756,6 +1761,7 @@ def test_web_get_requires_auth_on_non_loopback():
     assert hit("/api/memories", "10.0.0.9", {"Authorization": "Bearer tok"}) == 200
 
 
+@pytest.mark.usefixtures("standalone_mind")
 def test_web_writes_are_per_request_not_per_bind():
     """Regression: a 0.0.0.0 bind used to 403 EVERY write (allow_writes gated on the
     bind host), silently killing the local memory pipeline behind a reverse proxy.
@@ -1795,6 +1801,7 @@ def test_web_writes_are_per_request_not_per_bind():
     assert post(ro_h, "/api/remember", "127.0.0.1") == 403        # even loopback
 
 
+@pytest.mark.usefixtures("standalone_mind")
 def test_mcp_remote_dispatch_forwards_to_brain_server():
     """Cluster mode: an MCP with LOGICA_MIND_URL forwards memory tools to the
     brain server's /api/mcp/dispatch (same dispatch, real store/embedder) while
@@ -2025,6 +2032,7 @@ if __name__ == "__main__":
     raise SystemExit(0 if passed == len(fns) else 1)
 
 
+@pytest.mark.usefixtures("standalone_mind")
 def test_web_public_mode_is_read_only_even_over_loopback(monkeypatch):
     """LOGICA_MIND_PUBLIC opens reads but writes must carry an explicit token —
     loopback is NOT trusted, because a reverse proxy (HF Spaces, nginx) forwards

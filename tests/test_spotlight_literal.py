@@ -2,6 +2,8 @@
 import tempfile
 import unittest
 import json
+import os
+from unittest.mock import patch
 import threading
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -137,6 +139,7 @@ class SpotlightLiteralTests(unittest.TestCase):
         self.assertEqual(params[1], "%x!!!%!_' OR TRUE%")
         self.assertEqual(params[-1], 50)
 
+    @patch.dict(os.environ, {"LOGICAOS_MULTIUSER": "1"})
     def test_real_http_search_returns_literal_without_private_or_other_owner(self):
         store = InMemoryStore()
         good = self.memory(metadata={"ownerId": "qa"})
@@ -149,8 +152,13 @@ class SpotlightLiteralTests(unittest.TestCase):
         thread.start()
         conn = HTTPConnection("127.0.0.1", server.server_port, timeout=3)
         try:
-            conn.request("GET", "/api/search?ownerId=qa&q=" + self.marker,
-                         headers={"Authorization": "Bearer isolated-test-token"})
+            path = "/api/search?ownerId=qa&q=" + self.marker
+            auth = {"Authorization": "Bearer isolated-test-token"}
+            conn.request("GET", path, headers=auth)
+            denied = conn.getresponse()
+            self.assertEqual(denied.status, 403)
+            denied.read()
+            conn.request("GET", path, headers={**auth, "X-LogicaOS-Company-Mind": "1"})
             response = conn.getresponse()
             body = json.loads(response.read())
             self.assertEqual(response.status, 200)
